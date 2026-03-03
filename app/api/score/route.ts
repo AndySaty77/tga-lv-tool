@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { analyzeLvText } from "@/lib/analyzeLvText";
-import { computeScore } from "@/lib/scoring";
+import { analyzeLvText } from "../../../lib/analyzeLvText";
+import { computeScore } from "../../../lib/scoring";
 
 export async function GET() {
   return NextResponse.json({ ok: true, route: "/api/score" });
