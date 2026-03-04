@@ -1,12 +1,12 @@
 import { PRESET_FINDINGS } from "./findingsPresets";
-import { Finding, Severity } from "./scoring";
+import { Finding, Severity, ScoreCategory } from "./scoring";
 
 // ===== DB Trigger Typ (entspricht deiner Supabase-Tabelle) =====
 export type DbTrigger = {
   id: string;
   name: string;
   description: string | null;
-  category: string;
+  category: string; // z.B. "Technische Vollständigkeit"
   trigger_type: string | null;
   keywords: string[] | null; // text[]
   regex: string | null;
@@ -35,6 +35,35 @@ const countOccurrences = (haystackLower: string, needleLower: string) => {
   return haystackLower.split(needleLower).length - 1;
 };
 
+// ===== Mapping: Supabase Kategorie -> Scoring Kategorie =====
+const mapSupabaseCategoryToScore = (catRaw: string): ScoreCategory => {
+  const c = (catRaw ?? "").trim().toLowerCase();
+
+  // deine geplanten Kategorien:
+  // - Technische Vollständigkeit
+  // - Vertrags-/LV-Risiko
+  // - Kalkulationsunsicherheit
+  // - Mengen & Massenermittlung
+  // - Schnittstellen & Nebenleistungen
+
+  if (c.includes("technische") && c.includes("voll")) return "vollstaendigkeit";
+
+  if (c.includes("mengen")) return "mengen_schnittstellen";
+  if (c.includes("massenermittlung") || c.includes("massenermittle")) return "mengen_schnittstellen";
+
+  if (c.includes("schnittstellen") || c.includes("nebenleistungen")) return "mengen_schnittstellen";
+
+  if (c.includes("vertrag") || c.includes("lv-risiko") || c.includes("lv risiko")) return "vortext";
+
+  if (c.includes("kalkulation") || c.includes("unsicherheit")) return "nachtrag";
+
+  // optional, falls du später "Normen & Regelwerke" etc. einführst
+  if (c.includes("norm")) return "normen";
+
+  // Fallback: lieber irgendwo landen als crashen
+  return "ausfuehrung";
+};
+
 function applyDbTriggers(textRaw: string, triggers: DbTrigger[]): Finding[] {
   const findings: Finding[] = [];
   const textLower = (textRaw ?? "").toLowerCase();
@@ -50,7 +79,6 @@ function applyDbTriggers(textRaw: string, triggers: DbTrigger[]): Finding[] {
         const re = new RegExp(t.regex, "gi");
         hits = (textRaw.match(re) ?? []).length;
       } catch {
-        // kaputtes regex -> ignorieren
         hits = 0;
       }
     }
@@ -74,7 +102,7 @@ function applyDbTriggers(textRaw: string, triggers: DbTrigger[]): Finding[] {
 
       findings.push({
         id: t.id,
-        category: t.category as any, // muss zu deinen Score-Kategorien passen
+        category: mapSupabaseCategoryToScore(t.category),
         title: t.name,
         severity: severityFromWeight(t.weight),
         penalty: t.weight,
@@ -96,7 +124,7 @@ export function analyzeLvText(lvTextRaw: string, dbTriggers: DbTrigger[] = []): 
     findings.push(...applyDbTriggers(text, dbTriggers));
   }
 
-  // 1) Deine Baseline-Checks (bleiben!)
+  // 1) Baseline-Checks (bleiben!)
   // Normen-Checks (MVP: simple)
   const hasDIN1988 = hasAny(text, ["din 1988", "din1988"]);
   const hasEN806 = hasAny(text, ["din en 806", "en 806"]);
