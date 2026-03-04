@@ -1,0 +1,7 @@
+{
+  "name": "mixed_xxl_placeholder",
+  "lvText": "Wohnungsbau XXL Placeholder. Heizung, Sanitär, Schnittstellen, bauseits, Vorleistungen, Termine, Bauzeit, Vertragsstrafe, Dokumentation, Aufmaß, Pauschal. (Ersetze später durch echtes LV).",
+  "expect": {
+    "totalRange": [10, 95]
+  }
+}
