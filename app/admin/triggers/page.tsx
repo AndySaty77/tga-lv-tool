@@ -43,6 +43,12 @@ function stripPrefix(id: string) {
   return id.replace(/^DB_/, "").replace(/^SYS_/, "");
 }
 
+function severityDot(sev: string) {
+  if (sev === "high") return "🔴";
+  if (sev === "medium") return "🟠";
+  if (sev === "low") return "🟡";
+  return "⚪️";
+}
 function validateRegex(re: string | null | undefined) {
   if (!re || !re.trim()) return { ok: true, msg: "" };
   try {
