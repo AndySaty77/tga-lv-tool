@@ -1,0 +1,10 @@
+{
+  "name": "sanitaer_small",
+  "lvText": "Sanitär: Trinkwasser, Warmwasser, Zirkulation, DIN EN 1717, DIN 1988, Entwässerung DIN EN 12056.",
+  "expect": {
+    "totalRange": [0, 70],
+    "perCategoryRanges": {
+      "vertrags_lv_risiken": [0, 90]
+    }
+  }
+}
