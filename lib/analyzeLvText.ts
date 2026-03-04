@@ -39,13 +39,6 @@ const countOccurrences = (haystackLower: string, needleLower: string) => {
 const mapSupabaseCategoryToScore = (catRaw: string): ScoreCategory => {
   const c = (catRaw ?? "").trim().toLowerCase();
 
-  // deine geplanten Kategorien:
-  // - Technische Vollständigkeit
-  // - Vertrags-/LV-Risiko
-  // - Kalkulationsunsicherheit
-  // - Mengen & Massenermittlung
-  // - Schnittstellen & Nebenleistungen
-
   if (c.includes("technische") && c.includes("voll")) return "vollstaendigkeit";
 
   if (c.includes("mengen")) return "mengen_schnittstellen";
@@ -57,10 +50,8 @@ const mapSupabaseCategoryToScore = (catRaw: string): ScoreCategory => {
 
   if (c.includes("kalkulation") || c.includes("unsicherheit")) return "nachtrag";
 
-  // optional, falls du später "Normen & Regelwerke" etc. einführst
   if (c.includes("norm")) return "normen";
 
-  // Fallback: lieber irgendwo landen als crashen
   return "ausfuehrung";
 };
 
@@ -101,7 +92,8 @@ function applyDbTriggers(textRaw: string, triggers: DbTrigger[]): Finding[] {
       if (t.norms && t.norms.length) detailParts.push(`Normen: ${t.norms.join(", ")}`);
 
       findings.push({
-        id: t.id,
+        // DB Prefix, damit UI trennen kann
+        id: `DB_${t.id}`,
         category: mapSupabaseCategoryToScore(t.category),
         title: t.name,
         severity: severityFromWeight(t.weight),
@@ -124,16 +116,21 @@ export function analyzeLvText(lvTextRaw: string, dbTriggers: DbTrigger[] = []): 
     findings.push(...applyDbTriggers(text, dbTriggers));
   }
 
-  // 1) Baseline-Checks (bleiben!)
+  // 1) System/Baseline Checks (Prefix SYS_)
   // Normen-Checks (MVP: simple)
   const hasDIN1988 = hasAny(text, ["din 1988", "din1988"]);
   const hasEN806 = hasAny(text, ["din en 806", "en 806"]);
   const hasEN1717 = hasAny(text, ["din en 1717", "en 1717"]);
 
-  if (!hasDIN1988) findings.push(PRESET_FINDINGS.DIN_1988_FEHLT());
+  if (!hasDIN1988)
+    findings.push({
+      ...PRESET_FINDINGS.DIN_1988_FEHLT(),
+      id: "SYS_DIN_1988_FEHLT",
+    });
+
   if (!hasEN1717)
     findings.push({
-      id: "DIN_EN_1717_FEHLT",
+      id: "SYS_DIN_EN_1717_FEHLT",
       category: "normen",
       title: "DIN EN 1717 nicht genannt (Trinkwasserschutz)",
       severity: "high",
@@ -144,10 +141,15 @@ export function analyzeLvText(lvTextRaw: string, dbTriggers: DbTrigger[] = []): 
   const hasDruckpruefung = hasAny(text, ["druckprüfung", "druckprobe", /druck\s*prüf/i]);
   const hasSpuelung = hasAny(text, ["spül", "spuel", "spülprotokoll", "spuelprotokoll"]);
 
-  if (!hasDruckpruefung) findings.push(PRESET_FINDINGS.DRUCKPRUEFUNG_UNKLAR());
+  if (!hasDruckpruefung)
+    findings.push({
+      ...PRESET_FINDINGS.DRUCKPRUEFUNG_UNKLAR(),
+      id: "SYS_DRUCKPRUEFUNG_UNKLAR",
+    });
+
   if (!hasSpuelung)
     findings.push({
-      id: "SPUELUNG_FEHLT",
+      id: "SYS_SPUELUNG_FEHLT",
       category: "vollstaendigkeit",
       title: "Spülung/Spülprotokoll nicht eindeutig beschrieben",
       severity: "high",
@@ -163,7 +165,7 @@ export function analyzeLvText(lvTextRaw: string, dbTriggers: DbTrigger[] = []): 
 
   if (countNachtrag >= 6) {
     findings.push({
-      id: "VIELE_WEICHE_FORMULIERUNGEN",
+      id: "SYS_VIELE_WEICHE_FORMULIERUNGEN",
       category: "nachtrag",
       title: "Viele weiche Formulierungen (bauseits/optional/nach Aufwand) → hohes Nachtragspotenzial",
       detail: `Trefferanzahl: ${countNachtrag}`,
@@ -172,7 +174,7 @@ export function analyzeLvText(lvTextRaw: string, dbTriggers: DbTrigger[] = []): 
     });
   } else if (countNachtrag >= 3) {
     findings.push({
-      id: "EINIGE_WEICHE_FORMULIERUNGEN",
+      id: "SYS_EINIGE_WEICHE_FORMULIERUNGEN",
       category: "nachtrag",
       title: "Mehrere weiche Formulierungen → Nachtragspotenzial",
       detail: `Trefferanzahl: ${countNachtrag}`,
