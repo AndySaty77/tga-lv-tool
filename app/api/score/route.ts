@@ -29,7 +29,6 @@ function mapCategoryTo5(cat: string, title?: string, detail?: string): CategoryK
   const c = String(cat ?? "").trim();
   const text = `${title ?? ""} ${detail ?? ""}`.toLowerCase();
 
-  // Wenn schon neue Keys: durchlassen
   if (isCategoryKey(c)) return c;
 
   if (c === "normen") return "vertrags_lv_risiken";
@@ -64,7 +63,6 @@ function supabaseServer() {
 /**
  * A) NORMALISIERUNG: pro Kategorie definierst du ein "Max", gegen das die Penalty-Summe skaliert wird.
  * Sonst knallt jedes XXL-LV sofort auf 100/Rot.
- * -> Werte kannst du später feinjustieren, aber das bringt sofort sinnvolle Ampeln.
  */
 const CAT_MAX: Record<CategoryKey, number> = {
   vertrags_lv_risiken: 40,
@@ -143,7 +141,7 @@ export async function POST(req: Request) {
     perCategorySum[k] += pen;
   }
 
-  // 5) A) NORMALISIERTE perCategory (0..100), damit XXL nicht alles rot macht
+  // 5) NORMALISIERTE perCategory (0..100)
   const perCategory: Record<CategoryKey, number> = {
     vertrags_lv_risiken: 0,
     mengen_massenermittlung: 0,
@@ -158,14 +156,26 @@ export async function POST(req: Request) {
     perCategory[k] = clamp0_100((sum / max) * 100);
   }
 
-  // OPTIONAL: wenn du später im UI auch die Rohsummen anzeigen willst, sind sie schon da:
-  // perCategorySum
+  /**
+   * A2) TOTAL FIX:
+   * computeScore() kann bei vielen Treffern trotzdem 100 liefern.
+   * Daher überschreiben wir total durch den Durchschnitt der normalisierten Kategorien.
+   */
+  const totalNormalized = clamp0_100(
+    Math.round(
+      (perCategory.vertrags_lv_risiken +
+        perCategory.mengen_massenermittlung +
+        perCategory.technische_vollstaendigkeit +
+        perCategory.schnittstellen_nebenleistungen +
+        perCategory.kalkulationsunsicherheit) / 5
+    )
+  );
 
-  // 6) Response: alte Kategorien eliminiert, perCategory ist jetzt sinnvoll skaliert
   return NextResponse.json({
     ...result,
+    total: totalNormalized,
     perCategory,
-    // optional debug/insights:
+    // optional debug:
     // perCategorySum,
     findingsSorted: findingsMapped,
   });
