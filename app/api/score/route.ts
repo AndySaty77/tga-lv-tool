@@ -61,15 +61,17 @@ function supabaseServer() {
 }
 
 /**
- * A) NORMALISIERUNG: pro Kategorie definierst du ein "Max", gegen das die Penalty-Summe skaliert wird.
- * Sonst knallt jedes XXL-LV sofort auf 100/Rot.
+ * A) NORMALISIERUNG:
+ * - pro Kategorie ein "Max", gegen das die Risiko-Last skaliert wird
+ * - XXL-LVs kriegen zusätzlich einen Size-Faktor (mehr Text = mehr potentielle Treffer)
+ * - weiche Kurve (sqrt), damit wenige Treffer nicht sofort rot werden
  */
 const CAT_MAX: Record<CategoryKey, number> = {
-  vertrags_lv_risiken: 40,
-  mengen_massenermittlung: 20,
-  technische_vollstaendigkeit: 25,
-  schnittstellen_nebenleistungen: 25,
-  kalkulationsunsicherheit: 20,
+  vertrags_lv_risiken: 70,
+  mengen_massenermittlung: 60,
+  technische_vollstaendigkeit: 80,
+  schnittstellen_nebenleistungen: 70,
+  kalkulationsunsicherheit: 60,
 };
 
 function clamp0_100(n: any) {
@@ -78,10 +80,24 @@ function clamp0_100(n: any) {
   return Math.max(0, Math.min(100, Math.round(x)));
 }
 
+function clamp01(x: number) {
+  return Math.max(0, Math.min(1, x));
+}
+
 /**
- * ✅ A3) GEWERK-ERKENNUNG (MVP)
+ * LV-Größe: skaliert das "Max" (Aufnahmefähigkeit) nach Textlänge.
+ * Ziel: Wohnungsbau XXL knallt nicht sofort auf 100.
+ */
+function lvSizeFactor(lvText: string) {
+  const len = (lvText || "").length;
+  // 1.0 .. ~1.6 (max +60%) je nach Textmenge
+  const f = 1 + Math.min(0.6, Math.log10(1 + len / 2000));
+  return f;
+}
+
+/**
+ * ✅ GEWERK-ERKENNUNG (MVP)
  * Liefert Keys passend zu triggers.disciplines (text[]) in Supabase.
- * Du kannst die Regex später schärfer machen.
  */
 type DisciplineKey = "heizung" | "sanitaer" | "lueftung" | "msr" | "elektro" | "kaelte";
 
@@ -128,7 +144,6 @@ function detectDisciplines(lvText: string): DisciplineKey[] {
     found.push("kaelte");
   }
 
-  // Duplikate raus
   return Array.from(new Set(found));
 }
 
@@ -142,7 +157,6 @@ export async function POST(req: Request) {
 
   const supabase = supabaseServer();
 
-  // ✅ IMPORTANT: disciplines mitladen!
   const { data, error } = await supabase.from("triggers").select(`
       id,
       name,
@@ -165,21 +179,19 @@ export async function POST(req: Request) {
     console.error("Supabase Trigger Fehler:", error);
   }
 
-  // ✅ 1) Gewerke erkennen
+  // 1) Gewerke erkennen
   const detected = detectDisciplines(lvText);
-
-  // Debug (Vercel Logs)
   console.log("Detected disciplines:", detected);
 
-  // ✅ 2) Trigger filtern: nur passende disciplines
+  // 2) Trigger filtern: nur passende disciplines
   const dbTriggers: DbTrigger[] = (data ?? [])
     .filter((t: any) => (typeof t.is_active === "boolean" ? t.is_active : true))
     .filter((t: any) => {
       const td: string[] = Array.isArray(t.disciplines) ? t.disciplines : [];
-      // Wenn Trigger keine Disziplin hat, lassen wir ihn drin (Legacy/Global)
+      // Trigger ohne Disziplin bleibt drin (Legacy/Global)
       if (!td.length) return true;
 
-      // Wenn LV nichts erkennt: defensiv -> alles zulassen (sonst 0 Trigger)
+      // Wenn LV nichts erkennt: defensiv -> alles zulassen
       if (!detected.length) return true;
 
       return td.some((d) => detected.includes(d as DisciplineKey));
@@ -188,16 +200,16 @@ export async function POST(req: Request) {
   // 3) Findings erzeugen (DB + SYS kommt aus analyzeLvText)
   const findings = analyzeLvText(lvText, dbTriggers);
 
-  // 4) Kategorien auf 5 Keys mappen (alte Bezeichnungen raus)
+  // 4) Kategorien auf 5 Keys mappen
   const findingsMapped = (findings ?? []).map((f: any) => ({
     ...f,
     category: mapCategoryTo5(f.category, f.title, f.detail),
   }));
 
-  // 5) Score rechnen (bestehende Logik bleibt)
+  // 5) Bestehende Score-Logik (Detail/Findings etc.) behalten
   const result = computeScore({ findings: findingsMapped });
 
-  // 6) Penalty-Summen je Kategorie (roh)
+  // 6) Risiko-Last je Kategorie (ABS!), damit Vorzeichen nicht verwirrt
   const perCategorySum: Record<CategoryKey, number> = {
     vertrags_lv_risiken: 0,
     mengen_massenermittlung: 0,
@@ -208,12 +220,16 @@ export async function POST(req: Request) {
 
   for (const f of findingsMapped as any[]) {
     const k = mapCategoryTo5(f.category, f.title, f.detail);
-    const pen = Number(f.penalty ?? 0);
+    const pen = Math.abs(Number(f.penalty ?? 0));
     if (!Number.isFinite(pen)) continue;
     perCategorySum[k] += pen;
   }
 
-  // 7) NORMALISIERTE perCategory (0..100)
+  // Debug: hilft beim Kalibrieren
+  const sizeF = lvSizeFactor(lvText);
+  console.log("perCategorySum (abs):", perCategorySum, "sizeF:", sizeF);
+
+  // 7) NORMALISIERTE perCategory (0..100) mit Size-Faktor + weicher Kurve
   const perCategory: Record<CategoryKey, number> = {
     vertrags_lv_risiken: 0,
     mengen_massenermittlung: 0,
@@ -224,14 +240,18 @@ export async function POST(req: Request) {
 
   for (const k of CATEGORY_KEYS) {
     const sum = perCategorySum[k];
-    const max = CAT_MAX[k] || 20;
-    perCategory[k] = clamp0_100((sum / max) * 100);
+    const baseMax = CAT_MAX[k] || 60;
+    const scaledMax = baseMax * sizeF;
+
+    const ratio = clamp01(sum / scaledMax);
+    const eased = Math.sqrt(ratio); // erste Treffer weniger brutal
+
+    perCategory[k] = clamp0_100(eased * 100);
   }
 
   /**
-   * A2) TOTAL FIX:
-   * computeScore() kann bei vielen Treffern trotzdem 100 liefern.
-   * Daher überschreiben wir total durch den Durchschnitt der normalisierten Kategorien.
+   * TOTAL:
+   * Durchschnitt der normalisierten Kategorien (Ampel konsistent)
    */
   const totalNormalized = clamp0_100(
     Math.round(
@@ -249,7 +269,7 @@ export async function POST(req: Request) {
     perCategory,
     findingsSorted: findingsMapped,
 
-    // ✅ optional debug für UI/Logs:
+    // optional debug fürs UI:
     // detectedDisciplines: detected,
     // triggersUsed: dbTriggers.length,
   });
