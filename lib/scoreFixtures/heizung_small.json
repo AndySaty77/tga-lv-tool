@@ -1,0 +1,10 @@
+{
+  "name": "heizung_small",
+  "lvText": "Heizung: Wärmepumpe, Heizkreis, Vorlauf Rücklauf, Puffer, DIN EN 12831. Ausführung nach VOB/B.",
+  "expect": {
+    "totalRange": [0, 70],
+    "perCategoryRanges": {
+      "technische_vollstaendigkeit": [0, 80]
+    }
+  }
+}
