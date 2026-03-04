@@ -6,18 +6,50 @@ export type DbTrigger = {
   id: string;
   name: string;
   description: string | null;
-  category: string; // z.B. "Technische Vollständigkeit"
+  category: string;
   trigger_type: string | null;
-  keywords: string[] | null; // text[]
+  keywords: string[] | null;
   regex: string | null;
-  norms: string[] | null; // text[]
-  weight: number; // int4 -> penalty (Basis)
+  norms: string[] | null;
+  weight: number;
   claim_level: string | null;
   risk_interpretation: string | null;
   question_template: string | null;
   offer_text_template: string | null;
   is_active: boolean;
 };
+
+// ===================== Text Preprocessing =====================
+
+/**
+ * Entfernt XML/GAEB-Ballast, damit Trigger nicht auf Tags/Metadaten feuern.
+ * MVP, aber wirkt sofort.
+ */
+function preprocessLvText(input: string): string {
+  let t = input ?? "";
+
+  // Kommentare raus
+  t = t.replace(/<!--[\s\S]*?-->/g, " ");
+
+  // XML Tags raus
+  t = t.replace(/<[^>]+>/g, " ");
+
+  // Entities grob normalisieren
+  t = t.replace(/&nbsp;|&#160;/gi, " ");
+  t = t.replace(/&amp;/gi, "&");
+  t = t.replace(/&lt;/gi, "<");
+  t = t.replace(/&gt;/gi, ">");
+  t = t.replace(/&quot;/gi, '"');
+  t = t.replace(/&apos;/gi, "'");
+
+  // typische GAEB Header Tokens entschärfen (sonst feuern generische Keywords)
+  t = t.replace(/\b(gaeb|gaebinfo|version|versdate|progsystem|progname|date|time|xmlns)\b/gi, " ");
+
+  // whitespace glätten
+  t = t.replace(/\s+/g, " ").trim();
+
+  return t;
+}
 
 // ===================== Helpers =====================
 
@@ -32,22 +64,12 @@ const severityFromWeight = (weight: number): Severity => {
   return "low";
 };
 
-const countOccurrences = (haystackLower: string, needleLower: string) => {
-  if (!needleLower) return 0;
-  return haystackLower.split(needleLower).length - 1;
-};
-
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
 /**
  * Frequency Scaling:
- * - verhindert Score-Explosion bei 100+ Positionstreffern
- * - 1 Treffer -> 100% weight
- * - 2 Treffer -> 120%
- * - 3 Treffer -> 140%
- * - 5 Treffer -> ~160%
- * - 10 Treffer -> ~180%
- * - Cap bei 200%
+ * - verhindert Score-Explosion bei vielen Treffern
+ * - cap bei 2.0 (= max 200% vom Basisgewicht)
  */
 function frequencyMultiplier(hits: number) {
   if (hits <= 1) return 1;
@@ -55,86 +77,116 @@ function frequencyMultiplier(hits: number) {
   return clamp(mult, 1, 2.0);
 }
 
+function escapeRegex(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
- * Dedupe:
- * - einige Trigger feuern pro Position, sollen aber pro LV "Thema" nur einmal wirken
- * - default: pro Trigger-ID einmal (mit Frequency Scaling auf penalty)
+ * Keywords härten:
+ * - ignoriert zu kurze/zu generische Tokens
+ * - ignoriert reine Zahlen
  */
-type DedupeMode = "per_trigger" | "none";
-const DEFAULT_DEDUPE_MODE: DedupeMode = "per_trigger";
+function isUsableKeyword(raw: string) {
+  const kw = (raw ?? "").trim();
+  if (!kw) return false;
+
+  const lower = kw.toLowerCase();
+
+  // zu kurz -> praktisch immer false positives in XML/LV
+  if (lower.length < 4) return false;
+
+  // reine Zahl
+  if (/^\d+([.,]\d+)?$/.test(lower)) return false;
+
+  // harte Stopwords (erweiterbar)
+  if (
+    ["pos", "position", "stück", "stk", "m2", "m3", "m", "dn", "en", "din", "iso", "mm", "cm"].includes(lower)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Treffer zählen:
+ * - Regex (Trigger-regex) hat Priorität
+ * - Keywords: Wortgrenzen für Einzelwörter, Phrase-Match für Mehrwort
+ */
+function computeHits(text: string, trigger: DbTrigger): number {
+  let hits = 0;
+
+  // 1) Trigger-Regex (präzise)
+  if (trigger.regex && trigger.regex.trim().length > 0) {
+    try {
+      const re = new RegExp(trigger.regex, "gi");
+      hits = (text.match(re) ?? []).length;
+      return hits;
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2) Keywords (gehärtet)
+  const kws = Array.isArray(trigger.keywords) ? trigger.keywords : [];
+  if (!kws.length) return 0;
+
+  const lower = text.toLowerCase();
+
+  for (const raw of kws) {
+    if (!isUsableKeyword(raw)) continue;
+
+    const kw = raw.trim().toLowerCase();
+
+    // Mehrwort-Phrase: simple substring
+    if (kw.includes(" ")) {
+      const parts = lower.split(kw);
+      hits += Math.max(0, parts.length - 1);
+      continue;
+    }
+
+    // Einzelwort: Wortgrenze (damit "an" nicht in "dangl" matched)
+    const re = new RegExp(`\\b${escapeRegex(kw)}\\b`, "g");
+    hits += (lower.match(re) ?? []).length;
+  }
+
+  // Cap: selbst wenn es noch ausrastet, nicht ins Unendliche
+  return clamp(hits, 0, 50);
+}
 
 // ===== Mapping: Supabase Kategorie -> Scoring Kategorie =====
 const mapSupabaseCategoryToScore = (catRaw: string): ScoreCategory => {
   const c = (catRaw ?? "").trim().toLowerCase();
 
   if (c.includes("technische") && c.includes("voll")) return "vollstaendigkeit";
-
   if (c.includes("mengen")) return "mengen_schnittstellen";
   if (c.includes("massenermittlung") || c.includes("massenermittle")) return "mengen_schnittstellen";
-
   if (c.includes("schnittstellen") || c.includes("nebenleistungen")) return "mengen_schnittstellen";
-
   if (c.includes("vertrag") || c.includes("lv-risiko") || c.includes("lv risiko")) return "vortext";
-
   if (c.includes("kalkulation") || c.includes("unsicherheit")) return "nachtrag";
-
   if (c.includes("norm")) return "normen";
 
   return "ausfuehrung";
 };
 
-/**
- * Treffer zählen (Regex priorisiert, dann Keywords additiv)
- */
-function computeHits(textRaw: string, textLower: string, t: DbTrigger): number {
-  let hits = 0;
+type DedupeMode = "per_trigger" | "none";
+const DEFAULT_DEDUPE_MODE: DedupeMode = "per_trigger";
 
-  // 1) Regex (prioritär)
-  if (t.regex && t.regex.trim().length > 0) {
-    try {
-      const re = new RegExp(t.regex, "gi");
-      hits = (textRaw.match(re) ?? []).length;
-    } catch {
-      hits = 0;
-    }
-  }
-
-  // 2) Keywords (additiv)
-  if (t.keywords && t.keywords.length > 0) {
-    for (const k of t.keywords) {
-      const kw = (k ?? "").trim().toLowerCase();
-      if (!kw) continue;
-      hits += countOccurrences(textLower, kw);
-    }
-  }
-
-  return hits;
-}
-
-/**
- * DB Trigger anwenden:
- * - Dedupe per Trigger-ID
- * - Frequency Scaling auf Penalty
- * - Detail zeigt Basispunkte + Hits + Multiplier + Final
- */
-function applyDbTriggers(textRaw: string, triggers: DbTrigger[], dedupeMode: DedupeMode): Finding[] {
+function applyDbTriggers(cleanText: string, triggers: DbTrigger[], dedupeMode: DedupeMode): Finding[] {
   const findings: Finding[] = [];
-  const textLower = (textRaw ?? "").toLowerCase();
-
-  // Dedupe-Sets
-  const seenTrigger = new Set<string>();
+  const seen = new Set<string>();
 
   for (const t of triggers) {
     if (!t.is_active) continue;
 
-    const hits = computeHits(textRaw, textLower, t);
+    const hits = computeHits(cleanText, t);
     if (hits <= 0) continue;
 
-    // Dedupe: pro Trigger nur einmal zählen (aber penalty skaliert über hits)
+    const id = `DB_${t.id}`;
+
     if (dedupeMode === "per_trigger") {
-      const key = `DB_${t.id}`;
-      if (seenTrigger.has(key)) continue;
-      seenTrigger.add(key);
+      if (seen.has(id)) continue;
+      seen.add(id);
     }
 
     const base = Number(t.weight ?? 0);
@@ -150,7 +202,7 @@ function applyDbTriggers(textRaw: string, triggers: DbTrigger[], dedupeMode: Ded
     if (t.norms && t.norms.length) detailParts.push(`Normen: ${t.norms.join(", ")}`);
 
     findings.push({
-      id: `DB_${t.id}`,
+      id,
       category: mapSupabaseCategoryToScore(t.category),
       title: t.name,
       severity: severityFromWeight(finalPenalty),
@@ -165,18 +217,17 @@ function applyDbTriggers(textRaw: string, triggers: DbTrigger[], dedupeMode: Ded
 // ===================== Hauptfunktion =====================
 
 export function analyzeLvText(lvTextRaw: string, dbTriggers: DbTrigger[] = []): Finding[] {
-  const text = lvTextRaw ?? "";
+  const raw = lvTextRaw ?? "";
+  const text = preprocessLvText(raw); // <-- DAS ist der Gamechanger
   const findings: Finding[] = [];
 
-  // 0) DB Trigger (Supabase) - dedupe + frequency scaling aktiv
+  // 0) DB Trigger
   if (dbTriggers.length) {
     findings.push(...applyDbTriggers(text, dbTriggers, DEFAULT_DEDUPE_MODE));
   }
 
-  // 1) System/Baseline Checks (Prefix SYS_)
-  // Normen-Checks (MVP: simple)
+  // 1) System/Baseline Checks (auf bereinigtem Text!)
   const hasDIN1988 = hasAny(text, ["din 1988", "din1988"]);
-  const hasEN806 = hasAny(text, ["din en 806", "en 806"]);
   const hasEN1717 = hasAny(text, ["din en 1717", "en 1717"]);
 
   if (!hasDIN1988)
@@ -194,10 +245,6 @@ export function analyzeLvText(lvTextRaw: string, dbTriggers: DbTrigger[] = []): 
       penalty: 5,
     });
 
-  // (EN 806 ist aktuell nur „erkannt“, aber nicht bewertet – wenn du willst, bauen wir das als SYS finding ein)
-  void hasEN806;
-
-  // Vollständigkeit: Druckprüfung / Spülung
   const hasDruckpruefung = hasAny(text, ["druckprüfung", "druckprobe", /druck\s*prüf/i]);
   const hasSpuelung = hasAny(text, ["spül", "spuel", "spülprotokoll", "spuelprotokoll"]);
 
@@ -216,33 +263,25 @@ export function analyzeLvText(lvTextRaw: string, dbTriggers: DbTrigger[] = []): 
       penalty: 6,
     });
 
-  // Vortext: “bauseits/nach Aufwand/optional” als Nachtrags-Booster
-  // WICHTIG: hier ebenfalls keine lineare Explosion, sondern skaliert + cap.
+  // Nachtrag-/Weichwörter (auch hier capped)
   const nachtragWorte = ["bauseits", "nach aufwand", "optional", "bedarfsweise", "pauschal"];
-  const textLower = text.toLowerCase();
-  const countNachtrag = nachtragWorte.reduce((acc, w) => acc + countOccurrences(textLower, w), 0);
+  const lower = text.toLowerCase();
+  const countNachtrag = nachtragWorte.reduce((acc, w) => acc + (lower.split(w).length - 1), 0);
 
-  const nachtragMult = frequencyMultiplier(Math.max(1, countNachtrag));
-  // Basispenalty bleibt wie gehabt, aber wir capen final (sonst zerschießt „bauseits“ alles)
-  const nachtragPenalty = clamp(Math.round(6 * nachtragMult), 0, 12);
+  if (countNachtrag >= 3) {
+    const mult = frequencyMultiplier(countNachtrag);
+    const penalty = clamp(Math.round(6 * mult), 0, 12);
 
-  if (countNachtrag >= 6) {
     findings.push({
-      id: "SYS_VIELE_WEICHE_FORMULIERUNGEN",
+      id: countNachtrag >= 6 ? "SYS_VIELE_WEICHE_FORMULIERUNGEN" : "SYS_EINIGE_WEICHE_FORMULIERUNGEN",
       category: "nachtrag",
-      title: "Viele weiche Formulierungen (bauseits/optional/nach Aufwand) → hohes Nachtragspotenzial",
-      detail: `Trefferanzahl: ${countNachtrag} | Faktor: ${nachtragMult.toFixed(2)} | Penalty: ${nachtragPenalty}`,
-      severity: "high",
-      penalty: nachtragPenalty,
-    });
-  } else if (countNachtrag >= 3) {
-    findings.push({
-      id: "SYS_EINIGE_WEICHE_FORMULIERUNGEN",
-      category: "nachtrag",
-      title: "Mehrere weiche Formulierungen → Nachtragspotenzial",
-      detail: `Trefferanzahl: ${countNachtrag} | Faktor: ${nachtragMult.toFixed(2)} | Penalty: ${nachtragPenalty}`,
-      severity: "medium",
-      penalty: clamp(nachtragPenalty, 0, 10),
+      title:
+        countNachtrag >= 6
+          ? "Viele weiche Formulierungen (bauseits/optional/nach Aufwand) → hohes Nachtragspotenzial"
+          : "Mehrere weiche Formulierungen → Nachtragspotenzial",
+      detail: `Trefferanzahl: ${countNachtrag} | Faktor: ${mult.toFixed(2)} | Penalty: ${penalty}`,
+      severity: countNachtrag >= 6 ? "high" : "medium",
+      penalty,
     });
   }
 
