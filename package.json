@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:score": "node scripts/regressionScore.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0",
@@ -26,9 +27,7 @@
     "tailwindcss": "^4",
     "typescript": "^5"
   },
-  {
-  "scripts": {
-    "test:score": "node scripts/regressionScore.mjs"
-  },
+  "engines": {
+    "node": "20.x"
+  }
 }
-
