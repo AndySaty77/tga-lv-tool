@@ -4,17 +4,20 @@ import { analyzeLvText, DbTrigger } from "../../../lib/analyzeLvText";
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
 
-  const lvText = String(body?.lvText ?? "");
-  const trigger = body?.trigger as DbTrigger | undefined;
+  const lvText = String((body as any)?.lvText ?? "");
+  const trigger = (body as any)?.trigger as DbTrigger | undefined;
 
   if (!trigger) {
-    return NextResponse.json({ error: "No trigger provided" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "No trigger provided" }, { status: 400 });
   }
 
-  const findings = analyzeLvText(lvText, [trigger]);
+  // nur diesen einen Trigger testen (keine System-Checks)
+  const findings = analyzeLvText(lvText, [trigger]).filter((f) => String(f.id).startsWith("DB_"));
 
   return NextResponse.json({
-    findings,
+    ok: true,
     hit: findings.length > 0,
+    count: findings.length,
+    findings,
   });
 }
