@@ -60,19 +60,63 @@ function supabaseServer() {
   return createClient(url, key);
 }
 
-/**
- * A) NORMALISIERUNG:
- * - pro Kategorie ein "Max", gegen das die Risiko-Last skaliert wird
- * - XXL-LVs kriegen zusätzlich einen Size-Faktor (mehr Text = mehr potentielle Treffer)
- * - weiche Kurve (sqrt), damit wenige Treffer nicht sofort rot werden
- */
-const CAT_MAX: Record<CategoryKey, number> = {
-  vertrags_lv_risiken: 70,
-  mengen_massenermittlung: 60,
-  technische_vollstaendigkeit: 80,
-  schnittstellen_nebenleistungen: 70,
-  kalkulationsunsicherheit: 60,
+/** ---------- Scoring Config (DB) ---------- */
+
+type ScoringConfig = {
+  version: number;
+  catMax: Record<CategoryKey, number>;
+  lvSize: { baseDivisor: number; maxBoost: number };
+  easing: { type: "sqrt" | "linear" };
+  total: { method: "mean" };
 };
+
+const FALLBACK_CONFIG: ScoringConfig = {
+  version: 1,
+  catMax: {
+    vertrags_lv_risiken: 70,
+    mengen_massenermittlung: 60,
+    technische_vollstaendigkeit: 80,
+    schnittstellen_nebenleistungen: 70,
+    kalkulationsunsicherheit: 60,
+  },
+  lvSize: { baseDivisor: 2000, maxBoost: 0.6 },
+  easing: { type: "sqrt" },
+  total: { method: "mean" },
+};
+
+async function getScoringConfig(supabase: ReturnType<typeof supabaseServer>): Promise<ScoringConfig> {
+  const { data, error } = await supabase
+    .from("scoring_config")
+    .select("value")
+    .eq("key", "default")
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !data?.value) return FALLBACK_CONFIG;
+
+  const v = data.value as any;
+
+  const cfg: ScoringConfig = {
+    version: Number(v?.version ?? FALLBACK_CONFIG.version),
+    catMax: (v?.catMax ?? FALLBACK_CONFIG.catMax) as Record<CategoryKey, number>,
+    lvSize: (v?.lvSize ?? FALLBACK_CONFIG.lvSize) as { baseDivisor: number; maxBoost: number },
+    easing: (v?.easing ?? FALLBACK_CONFIG.easing) as { type: "sqrt" | "linear" },
+    total: (v?.total ?? FALLBACK_CONFIG.total) as { method: "mean" },
+  };
+
+  // Defensive: fehlende Keys ergänzen
+  for (const k of CATEGORY_KEYS) {
+    if (!Number.isFinite(Number(cfg.catMax?.[k]))) cfg.catMax[k] = FALLBACK_CONFIG.catMax[k];
+  }
+  if (!Number.isFinite(Number(cfg.lvSize?.baseDivisor))) cfg.lvSize.baseDivisor = FALLBACK_CONFIG.lvSize.baseDivisor;
+  if (!Number.isFinite(Number(cfg.lvSize?.maxBoost))) cfg.lvSize.maxBoost = FALLBACK_CONFIG.lvSize.maxBoost;
+  if (cfg.easing?.type !== "sqrt" && cfg.easing?.type !== "linear") cfg.easing = FALLBACK_CONFIG.easing;
+  if (cfg.total?.method !== "mean") cfg.total = FALLBACK_CONFIG.total;
+
+  return cfg;
+}
+
+/** ---------- Utils ---------- */
 
 function clamp0_100(n: any) {
   const x = Number(n);
@@ -84,15 +128,11 @@ function clamp01(x: number) {
   return Math.max(0, Math.min(1, x));
 }
 
-/**
- * LV-Größe: skaliert das "Max" (Aufnahmefähigkeit) nach Textlänge.
- * Ziel: Wohnungsbau XXL knallt nicht sofort auf 100.
- */
-function lvSizeFactor(lvText: string) {
+function lvSizeFactor(lvText: string, cfg: ScoringConfig) {
   const len = (lvText || "").length;
-  // 1.0 .. ~1.6 (max +60%) je nach Textmenge
-  const f = 1 + Math.min(0.6, Math.log10(1 + len / 2000));
-  return f;
+  const baseDivisor = cfg.lvSize.baseDivisor || 2000;
+  const maxBoost = cfg.lvSize.maxBoost ?? 0.6;
+  return 1 + Math.min(maxBoost, Math.log10(1 + len / baseDivisor));
 }
 
 /**
@@ -103,10 +143,8 @@ type DisciplineKey = "heizung" | "sanitaer" | "lueftung" | "msr" | "elektro" | "
 
 function detectDisciplines(lvText: string): DisciplineKey[] {
   const t = (lvText || "").toLowerCase();
-
   const found: DisciplineKey[] = [];
 
-  // Heizung
   if (
     /heizung|heizkreis|heizkörper|fussbodenheizung|fbh|wärmepumpe|waermepumpe|kessel|brennwert|puffer|speicher|hydraulik|mischer|weiche|vorlauf|ruecklauf|rücklauf|heizlast|din\s*en\s*12831/.test(
       t
@@ -115,7 +153,6 @@ function detectDisciplines(lvText: string): DisciplineKey[] {
     found.push("heizung");
   }
 
-  // Sanitär
   if (
     /sanitär|sanitaer|trinkwasser|warmwasser|kaltwasser|zirkulation|zirkulationsleitung|armatur|wc|urinal|waschtisch|dusche|badewanne|abwass|entwässer|entwaesser|fallleitung|din\s*1988|din\s*1986|din\s*en\s*1717|din\s*en\s*806|din\s*en\s*12056/.test(
       t
@@ -124,22 +161,18 @@ function detectDisciplines(lvText: string): DisciplineKey[] {
     found.push("sanitaer");
   }
 
-  // Lüftung
   if (/lüftung|lueftung|rlt|volumenstrom|kanal|luftkanal|luftmenge|brandschutzklappe|vav/.test(t)) {
     found.push("lueftung");
   }
 
-  // MSR / GA
   if (/msr|ga\b|gebäudeautomation|gebaeudeautomation|regelung|ddc|bacnet|modbus|knx|bus/.test(t)) {
     found.push("msr");
   }
 
-  // Elektro
   if (/elektro|elt\b|strom|verteiler|kabel|leitung|schutzschalter|fi\b|rccb|ls\b|potentialausgleich/.test(t)) {
     found.push("elektro");
   }
 
-  // Kälte
   if (/kälte|kaelte|kältemittel|kaeltemittel|chiller|kuehlung|kühlung|verdampfer|verflüssiger|verfluessiger/.test(t)) {
     found.push("kaelte");
   }
@@ -152,10 +185,14 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const url = new URL(req.url);
+  const debug = url.searchParams.get("debug") === "1";
+
   const body = await req.json().catch(() => ({}));
   const lvText = String((body as any)?.lvText ?? "");
 
   const supabase = supabaseServer();
+  const cfg = await getScoringConfig(supabase);
 
   const { data, error } = await supabase.from("triggers").select(`
       id,
@@ -181,35 +218,30 @@ export async function POST(req: Request) {
 
   // 1) Gewerke erkennen
   const detected = detectDisciplines(lvText);
-  console.log("Detected disciplines:", detected);
 
   // 2) Trigger filtern: nur passende disciplines
   const dbTriggers: DbTrigger[] = (data ?? [])
     .filter((t: any) => (typeof t.is_active === "boolean" ? t.is_active : true))
     .filter((t: any) => {
       const td: string[] = Array.isArray(t.disciplines) ? t.disciplines : [];
-      // Trigger ohne Disziplin bleibt drin (Legacy/Global)
-      if (!td.length) return true;
-
-      // Wenn LV nichts erkennt: defensiv -> alles zulassen
-      if (!detected.length) return true;
-
+      if (!td.length) return true; // Legacy/Global
+      if (!detected.length) return true; // defensiv
       return td.some((d) => detected.includes(d as DisciplineKey));
     });
 
-  // 3) Findings erzeugen (DB + SYS kommt aus analyzeLvText)
+  // 3) Findings erzeugen
   const findings = analyzeLvText(lvText, dbTriggers);
 
-  // 4) Kategorien auf 5 Keys mappen
+  // 4) Kategorien mappen
   const findingsMapped = (findings ?? []).map((f: any) => ({
     ...f,
     category: mapCategoryTo5(f.category, f.title, f.detail),
   }));
 
-  // 5) Bestehende Score-Logik (Detail/Findings etc.) behalten
+  // 5) computeScore behalten (Detailausgaben)
   const result = computeScore({ findings: findingsMapped });
 
-  // 6) Risiko-Last je Kategorie (ABS!), damit Vorzeichen nicht verwirrt
+  // 6) Risiko-Last pro Kategorie (ABS)
   const perCategorySum: Record<CategoryKey, number> = {
     vertrags_lv_risiken: 0,
     mengen_massenermittlung: 0,
@@ -225,11 +257,9 @@ export async function POST(req: Request) {
     perCategorySum[k] += pen;
   }
 
-  // Debug: hilft beim Kalibrieren
-  const sizeF = lvSizeFactor(lvText);
-  console.log("perCategorySum (abs):", perCategorySum, "sizeF:", sizeF);
+  const sizeF = lvSizeFactor(lvText, cfg);
 
-  // 7) NORMALISIERTE perCategory (0..100) mit Size-Faktor + weicher Kurve
+  // 7) NORMALISIERTE perCategory (0..100)
   const perCategory: Record<CategoryKey, number> = {
     vertrags_lv_risiken: 0,
     mengen_massenermittlung: 0,
@@ -240,19 +270,16 @@ export async function POST(req: Request) {
 
   for (const k of CATEGORY_KEYS) {
     const sum = perCategorySum[k];
-    const baseMax = CAT_MAX[k] || 60;
+    const baseMax = cfg.catMax[k] || FALLBACK_CONFIG.catMax[k] || 60;
     const scaledMax = baseMax * sizeF;
 
     const ratio = clamp01(sum / scaledMax);
-    const eased = Math.sqrt(ratio); // erste Treffer weniger brutal
+    const eased = cfg.easing.type === "linear" ? ratio : Math.sqrt(ratio);
 
     perCategory[k] = clamp0_100(eased * 100);
   }
 
-  /**
-   * TOTAL:
-   * Durchschnitt der normalisierten Kategorien (Ampel konsistent)
-   */
+  // TOTAL = mean (Ampel konsistent)
   const totalNormalized = clamp0_100(
     Math.round(
       (perCategory.vertrags_lv_risiken +
@@ -263,14 +290,28 @@ export async function POST(req: Request) {
     )
   );
 
+  if (debug) {
+    console.log("Detected disciplines:", detected);
+    console.log("Triggers used:", dbTriggers.length);
+    console.log("perCategorySum(abs):", perCategorySum, "sizeF:", sizeF, "cfg.version:", cfg.version);
+  }
+
   return NextResponse.json({
     ...result,
     total: totalNormalized,
     perCategory,
     findingsSorted: findingsMapped,
-
-    // optional debug fürs UI:
-    // detectedDisciplines: detected,
-    // triggersUsed: dbTriggers.length,
+    ...(debug
+      ? {
+          debug: {
+            detectedDisciplines: detected,
+            triggersUsed: dbTriggers.length,
+            perCategorySum,
+            sizeF,
+            scoringConfigVersion: cfg.version,
+            easing: cfg.easing.type,
+          },
+        }
+      : {}),
   });
 }
