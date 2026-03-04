@@ -136,48 +136,89 @@ function lvSizeFactor(lvText: string, cfg: ScoringConfig) {
 }
 
 /**
- * ✅ GEWERK-ERKENNUNG (MVP)
- * Liefert Keys passend zu triggers.disciplines (text[]) in Supabase.
+ * ✅ GEWERK-ERKENNUNG (primary + secondary)
+ * Wir zählen Treffer je Gewerk, wählen primary (höchster Score),
+ * und sekundäre nur, wenn sie nah genug dran sind.
  */
-type DisciplineKey = "heizung" | "sanitaer" | "lueftung" | "msr" | "elektro" | "kaelte";
+type DisciplineKey = "heizung" | "sanitaer" | "lueftung" | "msr" | "elektro" | "kaelte" | "global";
 
-function detectDisciplines(lvText: string): DisciplineKey[] {
+type DisciplineDetect = {
+  primary: DisciplineKey | null;
+  secondary: DisciplineKey[];
+  all: DisciplineKey[];
+  scores: Record<Exclude<DisciplineKey, "global">, number>;
+};
+
+function countHits(t: string, re: RegExp) {
+  const m = t.match(re);
+  return m ? m.length : 0;
+}
+
+function detectDisciplines(lvText: string): DisciplineDetect {
   const t = (lvText || "").toLowerCase();
-  const found: DisciplineKey[] = [];
 
-  if (
-    /heizung|heizkreis|heizkörper|fussbodenheizung|fbh|wärmepumpe|waermepumpe|kessel|brennwert|puffer|speicher|hydraulik|mischer|weiche|vorlauf|ruecklauf|rücklauf|heizlast|din\s*en\s*12831/.test(
-      t
-    )
-  ) {
-    found.push("heizung");
-  }
+  const scores: Record<Exclude<DisciplineKey, "global">, number> = {
+    heizung: 0,
+    sanitaer: 0,
+    lueftung: 0,
+    msr: 0,
+    elektro: 0,
+    kaelte: 0,
+  };
 
-  if (
-    /sanitär|sanitaer|trinkwasser|warmwasser|kaltwasser|zirkulation|zirkulationsleitung|armatur|wc|urinal|waschtisch|dusche|badewanne|abwass|entwässer|entwaesser|fallleitung|din\s*1988|din\s*1986|din\s*en\s*1717|din\s*en\s*806|din\s*en\s*12056/.test(
-      t
-    )
-  ) {
-    found.push("sanitaer");
-  }
+  scores.heizung += countHits(
+    t,
+    /\bheizung\b|\bheizkreis\b|\bheizkörper\b|\bfussbodenheizung\b|\bfbh\b|\bwärmepumpe\b|\bwaermepumpe\b|\bkessel\b|\bbrennwert\b|\bpuffer\b|\bspeicher\b|\bhydraulik\b|\bmischer\b|\bweiche\b|\bvorlauf\b|\br(ü|ue)cklauf\b|\bheizlast\b|\bdin\s*en\s*12831\b/g
+  );
 
-  if (/lüftung|lueftung|rlt|volumenstrom|kanal|luftkanal|luftmenge|brandschutzklappe|vav/.test(t)) {
-    found.push("lueftung");
-  }
+  scores.sanitaer += countHits(
+    t,
+    /\bsanit(ä|ae)r\b|\btrinkwasser\b|\bwarmwasser\b|\bkaltwasser\b|\bzirkulation\b|\bzirkulationsleitung\b|\barmatur\b|\bwc\b|\burinal\b|\bwaschtisch\b|\bdusche\b|\bbadewanne\b|\babwass/g
+  );
+  scores.sanitaer += countHits(
+    t,
+    /\bentw(ä|ae)sser\b|\bfallleitung\b|\bdin\s*1988\b|\bdin\s*1986\b|\bdin\s*en\s*1717\b|\bdin\s*en\s*806\b|\bdin\s*en\s*12056\b/g
+  );
 
-  if (/msr|ga\b|gebäudeautomation|gebaeudeautomation|regelung|ddc|bacnet|modbus|knx|bus/.test(t)) {
-    found.push("msr");
-  }
+  scores.lueftung += countHits(
+    t,
+    /\bl(ü|ue)ftung\b|\brlt\b|\bvolumenstrom\b|\bkanal\b|\bluftkanal\b|\bluftmenge\b|\bbrandschutzklappe\b|\bvav\b/g
+  );
 
-  if (/elektro|elt\b|strom|verteiler|kabel|leitung|schutzschalter|fi\b|rccb|ls\b|potentialausgleich/.test(t)) {
-    found.push("elektro");
-  }
+  scores.msr += countHits(
+    t,
+    /\bmsr\b|\bga\b|\bgeb(ä|ae)udeautomation\b|\bregelung\b|\bddc\b|\bbacnet\b|\bmodbus\b|\bknx\b|\bbus\b/g
+  );
 
-  if (/kälte|kaelte|kältemittel|kaeltemittel|chiller|kuehlung|kühlung|verdampfer|verflüssiger|verfluessiger/.test(t)) {
-    found.push("kaelte");
-  }
+  scores.elektro += countHits(
+    t,
+    /\belektro\b|\belt\b|\bstrom\b|\bverteiler\b|\bkabel\b|\bleitung\b|\bschutzschalter\b|\bfi\b|\brccb\b|\bls\b|\bpotentialausgleich\b/g
+  );
 
-  return Array.from(new Set(found));
+  scores.kaelte += countHits(
+    t,
+    /\bk(ä|ae)lte\b|\bk(ä|ae)ltemittel\b|\bchiller\b|\bk(ü|ue)hlung\b|\bverdampfer\b|\bverfl(ü|ue)ssiger\b/g
+  );
+
+  // Substanziell erst ab MIN_HITS
+  const MIN_HITS = 3;
+
+  const ordered = (Object.keys(scores) as Array<Exclude<DisciplineKey, "global">>)
+    .filter((k) => scores[k] >= MIN_HITS)
+    .sort((a, b) => scores[b] - scores[a]);
+
+  const primary = ordered.length ? (ordered[0] as DisciplineKey) : null;
+
+  const secondary =
+    primary
+      ? (ordered
+          .filter((k) => k !== primary && scores[k] >= Math.ceil(scores[primary as Exclude<DisciplineKey, "global">] * 0.6))
+          .map((k) => k as DisciplineKey) as DisciplineKey[])
+      : [];
+
+  const all = primary ? [primary, ...secondary] : [];
+
+  return { primary, secondary, all, scores };
 }
 
 export async function GET() {
@@ -216,17 +257,27 @@ export async function POST(req: Request) {
     console.error("Supabase Trigger Fehler:", error);
   }
 
-  // 1) Gewerke erkennen
-  const detected = detectDisciplines(lvText);
+  // 1) Gewerke erkennen (primary + secondary)
+  const det = detectDisciplines(lvText);
+  const allowDisciplines = det.all; // nur primary + secondary
 
-  // 2) Trigger filtern: nur passende disciplines
+  // 2) Trigger filtern: NUR primary+secondary + global
   const dbTriggers: DbTrigger[] = (data ?? [])
     .filter((t: any) => (typeof t.is_active === "boolean" ? t.is_active : true))
     .filter((t: any) => {
       const td: string[] = Array.isArray(t.disciplines) ? t.disciplines : [];
-      if (!td.length) return true; // Legacy/Global
-      if (!detected.length) return true; // defensiv
-      return td.some((d) => detected.includes(d as DisciplineKey));
+
+      // Wenn wir etwas erkannt haben: nur passende + global
+      if (allowDisciplines.length) {
+        // Legacy ohne disciplines NICHT mehr pauschal zulassen -> sonst wieder 181
+        if (!td.length) return false;
+
+        // global immer mitnehmen, plus primary/secondary
+        return td.some((d) => d === "global" || allowDisciplines.includes(d as DisciplineKey));
+      }
+
+      // Wenn nichts erkannt: defensiv alles zulassen
+      return true;
     });
 
   // 3) Findings erzeugen
@@ -291,7 +342,8 @@ export async function POST(req: Request) {
   );
 
   if (debug) {
-    console.log("Detected disciplines:", detected);
+    console.log("Discipline scores:", det.scores);
+    console.log("Detected primary:", det.primary, "secondary:", det.secondary);
     console.log("Triggers used:", dbTriggers.length);
     console.log("perCategorySum(abs):", perCategorySum, "sizeF:", sizeF, "cfg.version:", cfg.version);
   }
@@ -304,7 +356,10 @@ export async function POST(req: Request) {
     ...(debug
       ? {
           debug: {
-            detectedDisciplines: detected,
+            disciplineScores: det.scores,
+            detectedDisciplines: det.all,
+            primaryDiscipline: det.primary,
+            secondaryDisciplines: det.secondary,
             triggersUsed: dbTriggers.length,
             perCategorySum,
             sizeF,
