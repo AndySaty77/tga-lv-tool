@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 type Finding = {
   id: string;
@@ -51,24 +51,41 @@ function severityDot(sev: string) {
 function isDbFinding(f: Finding) {
   return (f.id ?? "").startsWith("DB_");
 }
-
 function isSysFinding(f: Finding) {
   return (f.id ?? "").startsWith("SYS_");
 }
-
 function stripPrefix(id: string) {
   return id.replace(/^DB_/, "").replace(/^SYS_/, "");
 }
 
+function fmtKB(bytes: number) {
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  return `${(kb / 1024).toFixed(2)} MB`;
+}
+
+const MAX_FILE_BYTES = 2_000_000; // 2 MB MVP-Limit
+
 export default function ScorePage() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [lvText, setLvText] = useState("");
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [loading, setLoading] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
+
+  const [autoAnalyze, setAutoAnalyze] = useState(true);
+  const [dragOver, setDragOver] = useState(false);
+
+  const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
 
   const meta = levelMeta(result?.level);
 
-  const analyze = async () => {
+  const analyze = async (textOverride?: string) => {
+    const textToUse = (textOverride ?? lvText).trim();
+    if (!textToUse) return;
+
     setError(null);
     setLoading(true);
     setResult(null);
@@ -77,7 +94,7 @@ export default function ScorePage() {
       const res = await fetch("/api/score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lvText }),
+        body: JSON.stringify({ lvText: textToUse }),
       });
 
       if (!res.ok) {
@@ -94,10 +111,43 @@ export default function ScorePage() {
     }
   };
 
-  const onFile = async (file: File | null) => {
-    if (!file) return;
+  const loadFile = async (file: File) => {
+    setError(null);
+    setResult(null);
+
+    if (file.size > MAX_FILE_BYTES) {
+      setFileMeta({ name: file.name, size: file.size });
+      setLvText("");
+      setError(`Datei zu groß (${fmtKB(file.size)}). Limit aktuell: ${fmtKB(MAX_FILE_BYTES)}.`);
+      return;
+    }
+
+    // MVP: textbasiert (TXT/XML) -> später echtes GAEB/XML Parsing
     const text = await file.text();
+
+    setFileMeta({ name: file.name, size: file.size });
     setLvText(text);
+
+    if (autoAnalyze) {
+      await analyze(text);
+    }
+  };
+
+  const onPickFile = async (file: File | null) => {
+    if (!file) return;
+    await loadFile(file);
+    // reset input, damit man gleiche Datei nochmal auswählen kann
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+
+    await loadFile(file);
   };
 
   const catRows = useMemo(() => {
@@ -108,17 +158,12 @@ export default function ScorePage() {
     return entries;
   }, [result]);
 
-  const dbFindings = useMemo(() => {
-    return (result?.findingsSorted ?? []).filter(isDbFinding);
-  }, [result]);
-
-  const sysFindings = useMemo(() => {
-    return (result?.findingsSorted ?? []).filter(isSysFinding);
-  }, [result]);
-
-  const otherFindings = useMemo(() => {
-    return (result?.findingsSorted ?? []).filter((f) => !isDbFinding(f) && !isSysFinding(f));
-  }, [result]);
+  const dbFindings = useMemo(() => (result?.findingsSorted ?? []).filter(isDbFinding), [result]);
+  const sysFindings = useMemo(() => (result?.findingsSorted ?? []).filter(isSysFinding), [result]);
+  const otherFindings = useMemo(
+    () => (result?.findingsSorted ?? []).filter((f) => !isDbFinding(f) && !isSysFinding(f)),
+    [result]
+  );
 
   return (
     <div style={{ padding: 28, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" }}>
@@ -126,7 +171,7 @@ export default function ScorePage() {
         <div>
           <h1 style={{ margin: 0, fontSize: 26 }}>TGA LV Score</h1>
           <div style={{ color: "#666", marginTop: 6 }}>
-            Upload oder Text rein, Score raus.
+            Upload oder Text rein, Score raus. DB-Trigger vs System getrennt.
           </div>
         </div>
         <a href="/admin/triggers" style={{ color: "#111", textDecoration: "underline" }}>
@@ -134,6 +179,7 @@ export default function ScorePage() {
         </a>
       </div>
 
+      {/* Upload + Input Card */}
       <div
         style={{
           marginTop: 18,
@@ -143,18 +189,73 @@ export default function ScorePage() {
           background: "#fafafa",
         }}
       >
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <label style={{ fontWeight: 600 }}>Upload:</label>
-          <input
-            type="file"
-            accept=".txt,.xml,.gaeb,.x83,.x84,.x86,.json"
-            onChange={(e) => onFile(e.target.files?.[0] ?? null)}
-          />
-          <div style={{ color: "#666" }}>
-            (GAEB/XML wird aktuell nur als Text eingelesen – Parsing kommt später)
+        {/* Dropzone */}
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+          style={{
+            border: `2px dashed ${dragOver ? "#111" : "#ddd"}`,
+            borderRadius: 14,
+            padding: 14,
+            background: dragOver ? "#f1f1f1" : "#fff",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 900 }}>Drag & Drop Datei hier rein</div>
+            <div style={{ color: "#666", marginTop: 4 }}>
+              MVP: TXT/XML wird als Text eingelesen. GAEB/XML Parsing kommt später.
+            </div>
+            {fileMeta && (
+              <div style={{ marginTop: 8, color: "#111", fontWeight: 700 }}>
+                Geladen: {fileMeta.name} <span style={{ color: "#666", fontWeight: 600 }}>({fmtKB(fileMeta.size)})</span>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt,.xml,.gaeb,.x83,.x84,.x86,.json"
+              onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+              style={{ display: "none" }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 12,
+                border: "1px solid #111",
+                background: "#111",
+                color: "#fff",
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              Datei wählen
+            </button>
+
+            <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={autoAnalyze}
+                onChange={(e) => setAutoAnalyze(e.target.checked)}
+              />
+              <span style={{ fontWeight: 700, color: "#111" }}>Auto-Analyse</span>
+            </label>
           </div>
         </div>
 
+        {/* Textarea */}
         <textarea
           rows={10}
           style={{
@@ -172,9 +273,10 @@ export default function ScorePage() {
           onChange={(e) => setLvText(e.target.value)}
         />
 
-        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
           <button
-            onClick={analyze}
+            onClick={() => analyze()}
             disabled={loading || lvText.trim().length === 0}
             style={{
               padding: "10px 14px",
@@ -183,7 +285,7 @@ export default function ScorePage() {
               background: loading ? "#eee" : "#111",
               color: loading ? "#111" : "#fff",
               cursor: loading ? "default" : "pointer",
-              fontWeight: 700,
+              fontWeight: 800,
             }}
           >
             {loading ? "Analysiere..." : "Analysieren"}
@@ -194,6 +296,7 @@ export default function ScorePage() {
               setLvText("");
               setResult(null);
               setError(null);
+              setFileMeta(null);
             }}
             style={{
               padding: "10px 14px",
@@ -201,27 +304,32 @@ export default function ScorePage() {
               border: "1px solid #ddd",
               background: "#fff",
               cursor: "pointer",
-              fontWeight: 600,
+              fontWeight: 700,
             }}
           >
             Reset
           </button>
+
+          <div style={{ color: "#666", display: "flex", alignItems: "center" }}>
+            Limit: {fmtKB(MAX_FILE_BYTES)}
+          </div>
         </div>
 
         {error && (
-          <div style={{ marginTop: 12, color: "#b00020", fontWeight: 700 }}>
+          <div style={{ marginTop: 12, color: "#b00020", fontWeight: 800 }}>
             {error}
           </div>
         )}
       </div>
 
+      {/* Results */}
       {result && (
         <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           {/* Score Card */}
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 700 }}>GESAMT</div>
-              <div style={{ fontSize: 14, fontWeight: 800 }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 800 }}>GESAMT</div>
+              <div style={{ fontSize: 14, fontWeight: 900 }}>
                 {meta.dot} {meta.label}
               </div>
             </div>
@@ -243,13 +351,13 @@ export default function ScorePage() {
             </div>
 
             <div style={{ marginTop: 12, color: "#666" }}>
-              DB-Trigger und System-Checks werden getrennt angezeigt.
+              Tipp: Auto-Analyse ist gut für Upload-Workflows.
             </div>
           </div>
 
           {/* Category Bars */}
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
-            <div style={{ fontSize: 14, color: "#666", fontWeight: 800, marginBottom: 10 }}>
+            <div style={{ fontSize: 14, color: "#666", fontWeight: 900, marginBottom: 10 }}>
               KATEGORIEN
             </div>
 
@@ -259,7 +367,7 @@ export default function ScorePage() {
                 const pct = Math.round((val / max) * 100);
                 return (
                   <div key={cat}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800 }}>
                       <span>{cat}</span>
                       <span style={{ color: "#666" }}>
                         {val} / {max} ({pct}%)
@@ -286,7 +394,7 @@ export default function ScorePage() {
             {/* DB */}
             <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <div style={{ fontSize: 14, color: "#666", fontWeight: 800 }}>SUPABASE TRIGGER</div>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>SUPABASE TRIGGER</div>
                 <div style={{ color: "#666" }}>{dbFindings.length} Treffer</div>
               </div>
 
@@ -295,15 +403,12 @@ export default function ScorePage() {
                   <div style={{ color: "#666" }}>Keine DB-Trigger getroffen.</div>
                 ) : (
                   dbFindings.map((f) => (
-                    <div
-                      key={f.id}
-                      style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}
-                    >
+                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                         <div style={{ fontWeight: 900 }}>
                           {severityDot(f.severity)} {f.title}
                         </div>
-                        <div style={{ color: "#666", fontWeight: 800 }}>
+                        <div style={{ color: "#666", fontWeight: 900 }}>
                           -{f.penalty} ({f.category})
                         </div>
                       </div>
@@ -320,7 +425,7 @@ export default function ScorePage() {
             {/* SYS */}
             <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <div style={{ fontSize: 14, color: "#666", fontWeight: 800 }}>SYSTEM CHECKS</div>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>SYSTEM CHECKS</div>
                 <div style={{ color: "#666" }}>{sysFindings.length} Treffer</div>
               </div>
 
@@ -329,15 +434,12 @@ export default function ScorePage() {
                   <div style={{ color: "#666" }}>Keine System-Checks getroffen.</div>
                 ) : (
                   sysFindings.map((f) => (
-                    <div
-                      key={f.id}
-                      style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}
-                    >
+                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                         <div style={{ fontWeight: 900 }}>
                           {severityDot(f.severity)} {f.title}
                         </div>
-                        <div style={{ color: "#666", fontWeight: 800 }}>
+                        <div style={{ color: "#666", fontWeight: 900 }}>
                           -{f.penalty} ({f.category})
                         </div>
                       </div>
