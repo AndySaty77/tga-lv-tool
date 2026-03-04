@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const BASE_URL = process.env.SCORE_BASE_URL || "http://localhost:3000";
-const FIXTURES_DIR = "src/lib/scoreFixtures";
+const FIXTURES_DIR = "lib/scoreFixtures";
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
