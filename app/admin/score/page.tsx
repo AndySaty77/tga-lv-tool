@@ -66,6 +66,17 @@ function fmtKB(bytes: number) {
 
 const MAX_FILE_BYTES = 2_000_000; // 2 MB MVP-Limit
 
+type SourceFilter = "both" | "db" | "sys";
+type SeverityFilter = "all" | "high" | "medium" | "low";
+type SortMode = "penalty_desc" | "severity_desc" | "category_az";
+
+const severityRank = (sev: string) => {
+  if (sev === "high") return 3;
+  if (sev === "medium") return 2;
+  if (sev === "low") return 1;
+  return 0;
+};
+
 export default function ScorePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -79,6 +90,14 @@ export default function ScorePage() {
   const [dragOver, setDragOver] = useState(false);
 
   const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
+
+  // Filters (B)
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("both");
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [sortMode, setSortMode] = useState<SortMode>("penalty_desc");
+  const [top10, setTop10] = useState(false);
 
   const meta = levelMeta(result?.level);
 
@@ -104,6 +123,12 @@ export default function ScorePage() {
 
       const data = (await res.json()) as ScoreResult;
       setResult(data);
+
+      // Filter reset/auto-adjust: wenn Kategorie nicht existiert, zurücksetzen
+      const cats = new Set((data.findingsSorted ?? []).map((f) => f.category));
+      if (categoryFilter !== "all" && !cats.has(categoryFilter)) {
+        setCategoryFilter("all");
+      }
     } catch (e: any) {
       setError(e?.message ?? "Unbekannter Fehler");
     } finally {
@@ -122,7 +147,6 @@ export default function ScorePage() {
       return;
     }
 
-    // MVP: textbasiert (TXT/XML) -> später echtes GAEB/XML Parsing
     const text = await file.text();
 
     setFileMeta({ name: file.name, size: file.size });
@@ -136,17 +160,14 @@ export default function ScorePage() {
   const onPickFile = async (file: File | null) => {
     if (!file) return;
     await loadFile(file);
-    // reset input, damit man gleiche Datei nochmal auswählen kann
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-
     const file = e.dataTransfer.files?.[0];
     if (!file) return;
-
     await loadFile(file);
   };
 
@@ -158,12 +179,63 @@ export default function ScorePage() {
     return entries;
   }, [result]);
 
-  const dbFindings = useMemo(() => (result?.findingsSorted ?? []).filter(isDbFinding), [result]);
-  const sysFindings = useMemo(() => (result?.findingsSorted ?? []).filter(isSysFinding), [result]);
+  const availableFindingCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of result?.findingsSorted ?? []) set.add(f.category);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [result]);
+
+  const filteredFindings = useMemo(() => {
+    const all = result?.findingsSorted ?? [];
+    const q = search.trim().toLowerCase();
+
+    let list = all.filter((f) => {
+      // Quelle
+      if (sourceFilter === "db" && !isDbFinding(f)) return false;
+      if (sourceFilter === "sys" && !isSysFinding(f)) return false;
+
+      // Severity
+      if (severityFilter !== "all" && f.severity !== severityFilter) return false;
+
+      // Kategorie
+      if (categoryFilter !== "all" && f.category !== categoryFilter) return false;
+
+      // Search
+      if (q) {
+        const hay = `${f.title ?? ""} ${f.detail ?? ""} ${f.id ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+
+      return true;
+    });
+
+    // Sort
+    list.sort((a, b) => {
+      if (sortMode === "penalty_desc") return (b.penalty ?? 0) - (a.penalty ?? 0);
+      if (sortMode === "severity_desc") return severityRank(b.severity) - severityRank(a.severity);
+      if (sortMode === "category_az") return (a.category ?? "").localeCompare(b.category ?? "");
+      return 0;
+    });
+
+    if (top10) list = list.slice(0, 10);
+    return list;
+  }, [result, sourceFilter, severityFilter, categoryFilter, search, sortMode, top10]);
+
+  const dbFindings = useMemo(() => filteredFindings.filter(isDbFinding), [filteredFindings]);
+  const sysFindings = useMemo(() => filteredFindings.filter(isSysFinding), [filteredFindings]);
   const otherFindings = useMemo(
-    () => (result?.findingsSorted ?? []).filter((f) => !isDbFinding(f) && !isSysFinding(f)),
-    [result]
+    () => filteredFindings.filter((f) => !isDbFinding(f) && !isSysFinding(f)),
+    [filteredFindings]
   );
+
+  const resetFilters = () => {
+    setSourceFilter("both");
+    setSeverityFilter("all");
+    setCategoryFilter("all");
+    setSearch("");
+    setSortMode("penalty_desc");
+    setTop10(false);
+  };
 
   return (
     <div style={{ padding: 28, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" }}>
@@ -171,7 +243,7 @@ export default function ScorePage() {
         <div>
           <h1 style={{ margin: 0, fontSize: 26 }}>TGA LV Score</h1>
           <div style={{ color: "#666", marginTop: 6 }}>
-            Upload oder Text rein, Score raus. DB-Trigger vs System getrennt.
+            Upload oder Text rein, Score raus. Filter machen’s nutzbar.
           </div>
         </div>
         <a href="/admin/triggers" style={{ color: "#111", textDecoration: "underline" }}>
@@ -216,7 +288,8 @@ export default function ScorePage() {
             </div>
             {fileMeta && (
               <div style={{ marginTop: 8, color: "#111", fontWeight: 700 }}>
-                Geladen: {fileMeta.name} <span style={{ color: "#666", fontWeight: 600 }}>({fmtKB(fileMeta.size)})</span>
+                Geladen: {fileMeta.name}{" "}
+                <span style={{ color: "#666", fontWeight: 600 }}>({fmtKB(fileMeta.size)})</span>
               </div>
             )}
           </div>
@@ -245,11 +318,7 @@ export default function ScorePage() {
             </button>
 
             <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={autoAnalyze}
-                onChange={(e) => setAutoAnalyze(e.target.checked)}
-              />
+              <input type="checkbox" checked={autoAnalyze} onChange={(e) => setAutoAnalyze(e.target.checked)} />
               <span style={{ fontWeight: 700, color: "#111" }}>Auto-Analyse</span>
             </label>
           </div>
@@ -349,10 +418,6 @@ export default function ScorePage() {
                 }}
               />
             </div>
-
-            <div style={{ marginTop: 12, color: "#666" }}>
-              Tipp: Auto-Analyse ist gut für Upload-Workflows.
-            </div>
           </div>
 
           {/* Category Bars */}
@@ -389,6 +454,106 @@ export default function ScorePage() {
             </div>
           </div>
 
+          {/* Filters */}
+          <div style={{ gridColumn: "1 / -1", border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>FILTER</div>
+              <div style={{ color: "#666", fontWeight: 700 }}>
+                Treffer nach Filter: {filteredFindings.length}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr 1fr auto", gap: 10 }}>
+              {/* Search */}
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Suche (Titel, Detail, ID)..."
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid #ddd",
+                  width: "100%",
+                }}
+              />
+
+              {/* Source */}
+              <select
+                value={sourceFilter}
+                onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
+                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
+              >
+                <option value="both">Quelle: DB + SYS</option>
+                <option value="db">Quelle: nur DB</option>
+                <option value="sys">Quelle: nur SYS</option>
+              </select>
+
+              {/* Severity */}
+              <select
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value as SeverityFilter)}
+                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
+              >
+                <option value="all">Severity: alle</option>
+                <option value="high">Severity: high</option>
+                <option value="medium">Severity: medium</option>
+                <option value="low">Severity: low</option>
+              </select>
+
+              {/* Category */}
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
+              >
+                <option value="all">Kategorie: alle</option>
+                {availableFindingCategories.map((c) => (
+                  <option key={c} value={c}>
+                    Kategorie: {c}
+                  </option>
+                ))}
+              </select>
+
+              {/* Sort */}
+              <select
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
+              >
+                <option value="penalty_desc">Sort: Penalty ↓</option>
+                <option value="severity_desc">Sort: Severity ↓</option>
+                <option value="category_az">Sort: Kategorie A–Z</option>
+              </select>
+
+              {/* Reset */}
+              <button
+                onClick={resetFilters}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid #ddd",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                Reset
+              </button>
+            </div>
+
+            <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={top10} onChange={(e) => setTop10(e.target.checked)} />
+                <span style={{ fontWeight: 800 }}>Nur Top 10</span>
+              </label>
+
+              <div style={{ color: "#666", fontWeight: 700 }}>
+                DB: {dbFindings.length} | SYS: {sysFindings.length}
+                {otherFindings.length > 0 ? ` | Other: ${otherFindings.length}` : ""}
+              </div>
+            </div>
+          </div>
+
           {/* Findings Blocks */}
           <div style={{ gridColumn: "1 / -1", display: "grid", gap: 16 }}>
             {/* DB */}
@@ -400,7 +565,7 @@ export default function ScorePage() {
 
               <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
                 {dbFindings.length === 0 ? (
-                  <div style={{ color: "#666" }}>Keine DB-Trigger getroffen.</div>
+                  <div style={{ color: "#666" }}>Keine DB-Trigger nach Filter.</div>
                 ) : (
                   dbFindings.map((f) => (
                     <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
@@ -431,7 +596,7 @@ export default function ScorePage() {
 
               <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
                 {sysFindings.length === 0 ? (
-                  <div style={{ color: "#666" }}>Keine System-Checks getroffen.</div>
+                  <div style={{ color: "#666" }}>Keine System-Checks nach Filter.</div>
                 ) : (
                   sysFindings.map((f) => (
                     <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
@@ -454,7 +619,7 @@ export default function ScorePage() {
 
               {otherFindings.length > 0 && (
                 <div style={{ marginTop: 12, color: "#666", fontSize: 12 }}>
-                  Hinweis: {otherFindings.length} Findings ohne Prefix (DB_/SYS_) gefunden.
+                  Hinweis: {otherFindings.length} Findings ohne Prefix (DB_/SYS_) im Ergebnis.
                 </div>
               )}
             </div>
