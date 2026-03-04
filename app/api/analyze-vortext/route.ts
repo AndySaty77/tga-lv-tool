@@ -56,27 +56,19 @@ LV TEXT:
 ${text}
 `.trim();
 
-    // Optionaler Timeout, damit die Function nicht ewig hängt
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
-
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1",
       temperature: 0.2,
-      response_format: { type: "json_object" }, // erzwingt JSON
+      response_format: { type: "json_object" },
       messages: [
         { role: "system", content: "Du bist Experte für TGA Leistungsverzeichnisse." },
         { role: "user", content: prompt },
       ],
-      signal: controller.signal,
     });
-
-    clearTimeout(timeout);
 
     const content = completion.choices?.[0]?.message?.content ?? "{}";
     const data = safeJsonParse(content);
 
-    // Safety: mindestens riskClauses liefern
     if (!data || typeof data !== "object") {
       return NextResponse.json({ riskClauses: [], raw: content });
     }
