@@ -122,11 +122,21 @@ type Finding = {
   penalty: number;
 };
 
+type DebugBlock = {
+  detectedDisciplines?: string[];
+  triggersUsed?: number;
+  perCategorySum?: Record<string, number>;
+  sizeF?: number;
+  scoringConfigVersion?: number | string;
+  easing?: string;
+};
+
 type ScoreResult = {
   total: number;
   level: "hochriskant" | "mittel" | "solide" | "sauber" | string;
   perCategory: Record<string, number>; // Keys
   findingsSorted: Finding[];
+  debug?: DebugBlock;
 };
 
 function levelMeta(level?: string) {
@@ -213,7 +223,12 @@ export default function ScorePage() {
     setResult(null);
 
     try {
-      const res = await fetch("/api/score", {
+      // ✅ Debug-Flag aus URL lesen und an API durchreichen
+      const debug =
+        typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
+      const apiUrl = debug ? "/api/score?debug=1" : "/api/score";
+
+      const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lvText: textToUse }),
@@ -513,9 +528,52 @@ export default function ScorePage() {
               </div>
             </div>
 
-            {/* Category Bars (NEW) */}
+            {/* Category Bars */}
             <ScoreBarsCard perCategory={result.perCategory ?? {}} total={result.total} />
           </div>
+
+          {/* ✅ Debug Card */}
+          {result.debug && (
+            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>DEBUG</div>
+                <div style={{ color: "#666", fontWeight: 700 }}>
+                  Config: {String(result.debug.scoringConfigVersion ?? "-")} • Easing: {String(result.debug.easing ?? "-")}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                <div style={{ fontWeight: 800 }}>
+                  detectedDisciplines:{" "}
+                  <span style={{ fontWeight: 700, color: "#111" }}>
+                    {(result.debug.detectedDisciplines ?? []).join(", ") || "(leer)"}
+                  </span>
+                </div>
+                <div style={{ fontWeight: 800 }}>
+                  triggersUsed: <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.triggersUsed ?? "-"}</span>
+                </div>
+                <div style={{ fontWeight: 800 }}>
+                  sizeF: <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.sizeF ?? "-"}</span>
+                </div>
+
+                <div style={{ fontWeight: 900, marginTop: 6 }}>perCategorySum (roh)</div>
+                <pre
+                  style={{
+                    margin: 0,
+                    padding: 12,
+                    borderRadius: 12,
+                    border: "1px solid #eee",
+                    background: "#fafafa",
+                    fontSize: 12,
+                    whiteSpace: "pre-wrap",
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                  }}
+                >
+                  {JSON.stringify(result.debug.perCategorySum ?? {}, null, 2)}
+                </pre>
+              </div>
+            </div>
+          )}
 
           {/* Filters */}
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
@@ -635,10 +693,7 @@ export default function ScorePage() {
                   <div style={{ color: "#666" }}>Keine DB-Trigger nach Filter.</div>
                 ) : (
                   dbFindings.map((f) => (
-                    <div
-                      key={f.id}
-                      style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}
-                    >
+                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                         <div style={{ fontWeight: 900 }}>
                           {severityDot(f.severity)} {f.title}
@@ -665,10 +720,7 @@ export default function ScorePage() {
                   <div style={{ color: "#666" }}>Keine System-Checks nach Filter.</div>
                 ) : (
                   sysFindings.map((f) => (
-                    <div
-                      key={f.id}
-                      style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}
-                    >
+                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                         <div style={{ fontWeight: 900 }}>
                           {severityDot(f.severity)} {f.title}
