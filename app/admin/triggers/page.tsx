@@ -8,7 +8,7 @@ type TriggerRow = {
   id: string;
   name: string;
   description?: string | null;
-  category: string;
+  category: string; // ab jetzt: KEY (snake_case)
   trigger_type: string;
   keywords?: string[] | null; // text[]
   regex?: string | null;
@@ -67,6 +67,51 @@ function fmtKB(bytes: number) {
   return `${(kb / 1024).toFixed(2)} MB`;
 }
 
+/**
+ * ✅ Kategorie-Standard:
+ * - DB speichert NUR Keys (snake_case)
+ * - UI zeigt Labels
+ * - Import akzeptiert Keys ODER Labels und normalisiert auf Keys
+ */
+const ALLOWED_CATEGORY_KEYS = new Set([
+  "vertrags_lv_risiken",
+  "mengen_massenermittlung",
+  "technische_vollstaendigkeit",
+  "schnittstellen_nebenleistungen",
+  "kalkulationsunsicherheit",
+]);
+
+const CATEGORY_LABEL: Record<string, string> = {
+  vertrags_lv_risiken: "Vertrags-/LV-Risiken",
+  mengen_massenermittlung: "Mengen & Massenermittlung",
+  technische_vollstaendigkeit: "Technische Vollständigkeit",
+  schnittstellen_nebenleistungen: "Schnittstellen & Nebenleistungen",
+  kalkulationsunsicherheit: "Kalkulationsunsicherheit",
+};
+
+const CATEGORY_LABEL_TO_KEY: Record<string, string> = {
+  // Labels -> Keys (tolerant gegenüber Schreibweisen)
+  "Vertrags-/LV-Risiko": "vertrags_lv_risiken",
+  "Vertrags-/LV-Risiken": "vertrags_lv_risiken",
+  "Vertrags- / LV-Risiken": "vertrags_lv_risiken",
+
+  "Mengen & Massenermittlung": "mengen_massenermittlung",
+
+  "Technische Vollständigkeit": "technische_vollstaendigkeit",
+
+  "Schnittstellen & Nebenleistungen": "schnittstellen_nebenleistungen",
+  "Schnittstellen und Nebenleistungen": "schnittstellen_nebenleistungen",
+
+  "Kalkulationsunsicherheit": "kalkulationsunsicherheit",
+};
+
+function normalizeCategory(raw: any): string {
+  const v = String(raw ?? "").trim();
+  if (!v) return "";
+  if (ALLOWED_CATEGORY_KEYS.has(v)) return v; // schon Key
+  return CATEGORY_LABEL_TO_KEY[v] ?? ""; // Label -> Key, sonst invalid
+}
+
 export default function TriggersPage() {
   const [rows, setRows] = useState<TriggerRow[]>([]);
   const [msg, setMsg] = useState<string>("");
@@ -115,26 +160,36 @@ export default function TriggersPage() {
     }
 
     const data = (parsed.data as any[])
-      .map((r) => ({
-        name: (r["Trigger-Name"] || "").trim(),
-        description: (r["Beschreibung"] || "").trim(),
-        category: (r["Risikokategorie"] || "").trim(),
-        trigger_type: (r["Trigger-Art"] || "").trim(),
-        norms: split(r["Norm"]),
-        keywords: split(r["Keywords"]),
-        project_types: split(r["Projekttyp"]),
-        weight: Number(r["Gewichtung"] || 0),
-        claim_level: (r["Claim-Level"] || "").trim(),
-        risk_interpretation: (r["Risiko-Interpretation"] || "").trim(),
-        question_template: (r["Rückfrage-Generator"] || "").trim(),
-        offer_text_template: (r["Angebotstext-Baustein"] || "").trim(),
-        is_active: String(r["is_active"] ?? "true").toLowerCase() !== "false",
-        regex: (r["Regex"] || "").trim() || null,
-      }))
+      .map((r) => {
+        const categoryKey = normalizeCategory(r["Risikokategorie"]);
+        return {
+          name: (r["Trigger-Name"] || "").trim(),
+          description: (r["Beschreibung"] || "").trim(),
+          category: categoryKey, // ✅ immer Key
+          trigger_type: (r["Trigger-Art"] || "").trim(),
+          norms: split(r["Norm"]),
+          keywords: split(r["Keywords"]),
+          project_types: split(r["Projekttyp"]),
+          weight: Number(r["Gewichtung"] || 0),
+          claim_level: (r["Claim-Level"] || "").trim(),
+          risk_interpretation: (r["Risiko-Interpretation"] || "").trim(),
+          question_template: (r["Rückfrage-Generator"] || "").trim(),
+          offer_text_template: (r["Angebotstext-Baustein"] || "").trim(),
+          is_active: String(r["is_active"] ?? "true").toLowerCase() !== "false",
+          regex: (r["Regex"] || "").trim() || null,
+        };
+      })
       .filter((x) => x.name);
 
     for (const r of data) {
-      if (!r.category) return setMsg(`Fehlende Risikokategorie bei: ${r.name}`);
+      if (!r.name) return setMsg(`Fehlender Trigger-Name in CSV`);
+      if (!r.category)
+        return setMsg(
+          `Ungültige Risikokategorie bei: ${r.name} (nur 5 Keys/Labels erlaubt)`
+        );
+      if (!ALLOWED_CATEGORY_KEYS.has(r.category))
+        return setMsg(`Ungültige Risikokategorie-Key bei: ${r.name} -> ${r.category}`);
+
       if (!r.trigger_type) return setMsg(`Fehlende Trigger-Art bei: ${r.name}`);
       if (!(r.weight >= 1 && r.weight <= 10)) return setMsg(`Gewichtung 1–10 bei: ${r.name}`);
       if (!["Niedrig", "Mittel", "Hoch"].includes(r.claim_level))
@@ -145,7 +200,12 @@ export default function TriggersPage() {
       }
     }
 
-    const { error } = await supabase.from("triggers").upsert(data, { onConflict: "name,category" });
+    /**
+     * ✅ WICHTIG:
+     * Du willst keine doppelten Trigger-Namen.
+     * Deshalb upsert auf "name" (Voraussetzung: Unique-Constraint auf triggers.name in Supabase).
+     */
+    const { error } = await supabase.from("triggers").upsert(data, { onConflict: "name" });
     if (error) return setMsg("DB Upsert Fehler: " + error.message);
 
     setMsg(`Import ok: ${data.length} Trigger`);
@@ -165,7 +225,10 @@ export default function TriggersPage() {
     const exportRows = (data as any[]).map((r) => ({
       "Trigger-Name": r.name ?? "",
       "Beschreibung": r.description ?? "",
+      // ✅ Export: KEY als Quelle der Wahrheit
       "Risikokategorie": r.category ?? "",
+      // optional für Menschen (macht Import nicht kaputt)
+      "Risikokategorie_Label": CATEGORY_LABEL[r.category] ?? "",
       "Norm": (r.norms ?? []).join(";"),
       "Trigger-Art": r.trigger_type ?? "",
       "Keywords": (r.keywords ?? []).join(";"),
@@ -211,7 +274,7 @@ export default function TriggersPage() {
       id: selected.id,
       name: selected.name,
       description: selected.description ?? null,
-      category: selected.category,
+      category: selected.category, // ✅ Key an API
       trigger_type: selected.trigger_type ?? null,
       keywords: selected.keywords ?? null,
       regex: selected.regex ?? null,
@@ -415,7 +478,8 @@ export default function TriggersPage() {
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: 10 }}>{r.category}</td>
+                      {/* ✅ UI zeigt Label, DB speichert Key */}
+                      <td style={{ padding: 10 }}>{CATEGORY_LABEL[r.category] ?? r.category}</td>
                       <td style={{ padding: 10 }}>{r.trigger_type}</td>
                       <td style={{ padding: 10, fontWeight: 800 }}>{r.weight}</td>
                       <td style={{ padding: 10 }}>{r.claim_level}</td>
@@ -466,8 +530,8 @@ export default function TriggersPage() {
               >
                 <div style={{ fontWeight: 900 }}>{selected.name}</div>
                 <div style={{ marginTop: 6, color: "#666", fontWeight: 700 }}>
-                  {selected.category} • Gewicht {selected.weight} • Claim {selected.claim_level} •{" "}
-                  {selected.is_active ? "Aktiv" : "Inaktiv"}
+                  {CATEGORY_LABEL[selected.category] ?? selected.category} • Gewicht {selected.weight} • Claim{" "}
+                  {selected.claim_level} • {selected.is_active ? "Aktiv" : "Inaktiv"}
                 </div>
 
                 {selected.keywords?.length ? (
@@ -490,7 +554,14 @@ export default function TriggersPage() {
                       {selected.regex}
                     </div>
                     {regexState.msg && (
-                      <div style={{ marginTop: 4, fontSize: 12, color: regexState.ok ? "#0a7a2f" : "#b00020", fontWeight: 900 }}>
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 12,
+                          color: regexState.ok ? "#0a7a2f" : "#b00020",
+                          fontWeight: 900,
+                        }}
+                      >
                         {regexState.msg}
                       </div>
                     )}
@@ -597,9 +668,12 @@ export default function TriggersPage() {
                             {severityDot(f.severity)} {f.title}
                           </div>
                           <div style={{ color: "#666", marginTop: 4, fontWeight: 700, fontSize: 12 }}>
-                            Kategorie: {f.category} • Penalty: {f.penalty} • id: {stripPrefix(f.id)}
+                            Kategorie: {CATEGORY_LABEL[f.category] ?? f.category} • Penalty: {f.penalty} • id:{" "}
+                            {stripPrefix(f.id)}
                           </div>
-                          {f.detail && <div style={{ marginTop: 6, color: "#111", fontSize: 12 }}>{f.detail}</div>}
+                          {f.detail && (
+                            <div style={{ marginTop: 6, color: "#111", fontSize: 12 }}>{f.detail}</div>
+                          )}
                         </div>
                       ))}
                     </>
