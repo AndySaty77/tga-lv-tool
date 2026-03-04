@@ -24,7 +24,6 @@ function isCategoryKey(v: string): v is CategoryKey {
 
 /**
  * Alte Baseline-Kategorien -> 5 Ziel-Kategorien.
- * Wenn dein Fachmapping anders sein soll, ändere es hier zentral.
  */
 function mapCategoryTo5(cat: string, title?: string, detail?: string): CategoryKey {
   const c = String(cat ?? "").trim();
@@ -33,25 +32,13 @@ function mapCategoryTo5(cat: string, title?: string, detail?: string): CategoryK
   // Wenn schon neue Keys: durchlassen
   if (isCategoryKey(c)) return c;
 
-  // Alte Keys:
-  // normen -> meist vertraglich/normativ (Risiko/Haftung) oder technische Vollständigkeit.
-  // Ich mappe es auf Vertrags-/LV-Risiken, weil das in der Praxis Claim-/Haftungshebel ist.
   if (c === "normen") return "vertrags_lv_risiken";
-
   if (c === "vollstaendigkeit") return "technische_vollstaendigkeit";
-
-  // Vortexte = Vertrags-/LV-Risiken (bauseits, Abgrenzung, etc.)
   if (c === "vortext") return "vertrags_lv_risiken";
-
-  // Nachtrag = Vertrags-/LV-Risiken (Claim-Potenzial)
   if (c === "nachtrag") return "vertrags_lv_risiken";
-
-  // Ausführung -> technisch/Qualität/Leistungsbild
   if (c === "ausfuehrung") return "technische_vollstaendigkeit";
 
-  // Mengen & Schnittstellen: heuristisch splitten
   if (c === "mengen_schnittstellen") {
-    // Schnittstellen-Heuristik
     if (
       /schnittstelle|bauseits|gewerk|abgrenz|koordin|msr|elt|elektro|gu\b|bauherr|vorleistung|bim|planer|liefergrenze/.test(
         text
@@ -59,15 +46,12 @@ function mapCategoryTo5(cat: string, title?: string, detail?: string): CategoryK
     ) {
       return "schnittstellen_nebenleistungen";
     }
-    // Mengen-Heuristik
     if (/mengen|masse|aufmaß|pauschal|einheit|pos\.|position|meter|stück|kg|m2|m3/.test(text)) {
       return "mengen_massenermittlung";
     }
-    // Default: eher Mengen (weil die meisten Treffer dort landen)
     return "mengen_massenermittlung";
   }
 
-  // Letzter Fallback: Vertragsrisiken (konservativ)
   return "vertrags_lv_risiken";
 }
 
@@ -75,6 +59,25 @@ function supabaseServer() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   return createClient(url, key);
+}
+
+/**
+ * A) NORMALISIERUNG: pro Kategorie definierst du ein "Max", gegen das die Penalty-Summe skaliert wird.
+ * Sonst knallt jedes XXL-LV sofort auf 100/Rot.
+ * -> Werte kannst du später feinjustieren, aber das bringt sofort sinnvolle Ampeln.
+ */
+const CAT_MAX: Record<CategoryKey, number> = {
+  vertrags_lv_risiken: 40,
+  mengen_massenermittlung: 20,
+  technische_vollstaendigkeit: 25,
+  schnittstellen_nebenleistungen: 25,
+  kalkulationsunsicherheit: 20,
+};
+
+function clamp0_100(n: any) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Math.max(0, Math.min(100, Math.round(x)));
 }
 
 export async function GET() {
@@ -121,11 +124,11 @@ export async function POST(req: Request) {
     category: mapCategoryTo5(f.category, f.title, f.detail),
   }));
 
-  // 3) Score rechnen (weiterhin deine bestehende Logik nutzen)
+  // 3) Score rechnen (bestehende Logik bleibt)
   const result = computeScore({ findings: findingsMapped });
 
-  // 4) perCategory hart korrekt machen: aus gemappten Findings neu aufbauen
-  const perCategory: Record<CategoryKey, number> = {
+  // 4) Penalty-Summen je Kategorie (roh)
+  const perCategorySum: Record<CategoryKey, number> = {
     vertrags_lv_risiken: 0,
     mengen_massenermittlung: 0,
     technische_vollstaendigkeit: 0,
@@ -137,18 +140,33 @@ export async function POST(req: Request) {
     const k = mapCategoryTo5(f.category, f.title, f.detail);
     const pen = Number(f.penalty ?? 0);
     if (!Number.isFinite(pen)) continue;
-    perCategory[k] += pen;
+    perCategorySum[k] += pen;
   }
 
-  // Clamp 0..100, damit UI sauber bleibt
+  // 5) A) NORMALISIERTE perCategory (0..100), damit XXL nicht alles rot macht
+  const perCategory: Record<CategoryKey, number> = {
+    vertrags_lv_risiken: 0,
+    mengen_massenermittlung: 0,
+    technische_vollstaendigkeit: 0,
+    schnittstellen_nebenleistungen: 0,
+    kalkulationsunsicherheit: 0,
+  };
+
   for (const k of CATEGORY_KEYS) {
-    perCategory[k] = Math.max(0, Math.min(100, Math.round(perCategory[k])));
+    const sum = perCategorySum[k];
+    const max = CAT_MAX[k] || 20;
+    perCategory[k] = clamp0_100((sum / max) * 100);
   }
 
-  // 5) Response: alte Kategorien komplett eliminiert
+  // OPTIONAL: wenn du später im UI auch die Rohsummen anzeigen willst, sind sie schon da:
+  // perCategorySum
+
+  // 6) Response: alte Kategorien eliminiert, perCategory ist jetzt sinnvoll skaliert
   return NextResponse.json({
     ...result,
     perCategory,
+    // optional debug/insights:
+    // perCategorySum,
     findingsSorted: findingsMapped,
   });
 }
