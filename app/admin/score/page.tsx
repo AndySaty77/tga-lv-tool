@@ -48,6 +48,18 @@ function severityDot(sev: string) {
   return "🟡";
 }
 
+function isDbFinding(f: Finding) {
+  return (f.id ?? "").startsWith("DB_");
+}
+
+function isSysFinding(f: Finding) {
+  return (f.id ?? "").startsWith("SYS_");
+}
+
+function stripPrefix(id: string) {
+  return id.replace(/^DB_/, "").replace(/^SYS_/, "");
+}
+
 export default function ScorePage() {
   const [lvText, setLvText] = useState("");
   const [result, setResult] = useState<ScoreResult | null>(null);
@@ -91,10 +103,21 @@ export default function ScorePage() {
   const catRows = useMemo(() => {
     if (!result) return [];
     const entries = Object.entries(result.perCategory ?? {});
-    // feste Reihenfolge
     const order = Object.keys(CATEGORY_MAX);
     entries.sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
     return entries;
+  }, [result]);
+
+  const dbFindings = useMemo(() => {
+    return (result?.findingsSorted ?? []).filter(isDbFinding);
+  }, [result]);
+
+  const sysFindings = useMemo(() => {
+    return (result?.findingsSorted ?? []).filter(isSysFinding);
+  }, [result]);
+
+  const otherFindings = useMemo(() => {
+    return (result?.findingsSorted ?? []).filter((f) => !isDbFinding(f) && !isSysFinding(f));
   }, [result]);
 
   return (
@@ -103,7 +126,7 @@ export default function ScorePage() {
         <div>
           <h1 style={{ margin: 0, fontSize: 26 }}>TGA LV Score</h1>
           <div style={{ color: "#666", marginTop: 6 }}>
-            Upload oder Text rein, Score raus. Kein Gelaber.
+            Upload oder Text rein, Score raus.
           </div>
         </div>
         <a href="/admin/triggers" style={{ color: "#111", textDecoration: "underline" }}>
@@ -128,7 +151,7 @@ export default function ScorePage() {
             onChange={(e) => onFile(e.target.files?.[0] ?? null)}
           />
           <div style={{ color: "#666" }}>
-            (.xml / GAEB kommt später „richtig“, aktuell wird Text einfach eingelesen)
+            (GAEB/XML wird aktuell nur als Text eingelesen – Parsing kommt später)
           </div>
         </div>
 
@@ -208,7 +231,6 @@ export default function ScorePage() {
               <span style={{ fontSize: 16, color: "#666", marginLeft: 8 }}>/ 100</span>
             </div>
 
-            {/* Progress */}
             <div style={{ marginTop: 10, height: 12, background: "#eee", borderRadius: 999 }}>
               <div
                 style={{
@@ -221,7 +243,7 @@ export default function ScorePage() {
             </div>
 
             <div style={{ marginTop: 12, color: "#666" }}>
-              Hinweis: Kategorien sind aktuell nur so gut wie die Checks/Trigger, die wir implementiert haben.
+              DB-Trigger und System-Checks werden getrennt angezeigt.
             </div>
           </div>
 
@@ -259,38 +281,80 @@ export default function ScorePage() {
             </div>
           </div>
 
-          {/* Findings */}
-          <div style={{ gridColumn: "1 / -1", border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 800 }}>FINDINGS</div>
-              <div style={{ color: "#666" }}>{result.findingsSorted?.length ?? 0} Treffer</div>
+          {/* Findings Blocks */}
+          <div style={{ gridColumn: "1 / -1", display: "grid", gap: 16 }}>
+            {/* DB */}
+            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 800 }}>SUPABASE TRIGGER</div>
+                <div style={{ color: "#666" }}>{dbFindings.length} Treffer</div>
+              </div>
+
+              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                {dbFindings.length === 0 ? (
+                  <div style={{ color: "#666" }}>Keine DB-Trigger getroffen.</div>
+                ) : (
+                  dbFindings.map((f) => (
+                    <div
+                      key={f.id}
+                      style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                        <div style={{ fontWeight: 900 }}>
+                          {severityDot(f.severity)} {f.title}
+                        </div>
+                        <div style={{ color: "#666", fontWeight: 800 }}>
+                          -{f.penalty} ({f.category})
+                        </div>
+                      </div>
+                      {f.detail && <div style={{ marginTop: 6, color: "#444" }}>{f.detail}</div>}
+                      <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>
+                        id: {stripPrefix(f.id)}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
 
-            <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-              {(result.findingsSorted ?? []).map((f) => (
-                <div
-                  key={f.id}
-                  style={{
-                    border: "1px solid #eee",
-                    borderRadius: 12,
-                    padding: 12,
-                    background: "#fff",
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                    <div style={{ fontWeight: 900 }}>
-                      {severityDot(f.severity)} {f.title}
+            {/* SYS */}
+            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 800 }}>SYSTEM CHECKS</div>
+                <div style={{ color: "#666" }}>{sysFindings.length} Treffer</div>
+              </div>
+
+              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                {sysFindings.length === 0 ? (
+                  <div style={{ color: "#666" }}>Keine System-Checks getroffen.</div>
+                ) : (
+                  sysFindings.map((f) => (
+                    <div
+                      key={f.id}
+                      style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                        <div style={{ fontWeight: 900 }}>
+                          {severityDot(f.severity)} {f.title}
+                        </div>
+                        <div style={{ color: "#666", fontWeight: 800 }}>
+                          -{f.penalty} ({f.category})
+                        </div>
+                      </div>
+                      {f.detail && <div style={{ marginTop: 6, color: "#444" }}>{f.detail}</div>}
+                      <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>
+                        id: {stripPrefix(f.id)}
+                      </div>
                     </div>
-                    <div style={{ color: "#666", fontWeight: 800 }}>
-                      -{f.penalty} ({f.category})
-                    </div>
-                  </div>
-                  {f.detail && <div style={{ marginTop: 6, color: "#444" }}>{f.detail}</div>}
-                  <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>
-                    id: {f.id}
-                  </div>
+                  ))
+                )}
+              </div>
+
+              {otherFindings.length > 0 && (
+                <div style={{ marginTop: 12, color: "#666", fontSize: 12 }}>
+                  Hinweis: {otherFindings.length} Findings ohne Prefix (DB_/SYS_) gefunden.
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
