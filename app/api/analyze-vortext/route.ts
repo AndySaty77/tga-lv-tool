@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-// Optional, hilft bei Env-Problemen auf Vercel/Next gelegentlich:
 export const runtime = "nodejs";
 
 const openai = new OpenAI({
@@ -22,7 +21,10 @@ export async function POST(req: Request) {
     const text = (body?.text ?? "").toString().trim();
 
     if (!text) {
-      return NextResponse.json({ riskClauses: [], error: "No text provided" }, { status: 400 });
+      return NextResponse.json(
+        { riskClauses: [], error: "No text provided" },
+        { status: 400 }
+      );
     }
 
     const prompt = `
@@ -36,7 +38,7 @@ Suche insbesondere nach:
 - unbegrenzten Leistungsumfängen
 - Gewerkekoordination
 - Funktionsgarantien
-- unklaren Verantwortlichkeiten
+- unklare Verantwortlichkeiten
 
 Antworte NUR als JSON im Format:
 {
@@ -54,21 +56,47 @@ LV TEXT:
 ${text}
 `.trim();
 
+    // Optionaler Timeout, damit die Function nicht ewig hängt
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1",
       temperature: 0.2,
+      response_format: { type: "json_object" }, // erzwingt JSON
       messages: [
-        { role: "system", content: "Du bist Experte für TGA Leistungsverzeichnisse. Antworte strikt als JSON." },
+        { role: "system", content: "Du bist Experte für TGA Leistungsverzeichnisse." },
         { role: "user", content: prompt },
       ],
+      signal: controller.signal,
     });
+
+    clearTimeout(timeout);
 
     const content = completion.choices?.[0]?.message?.content ?? "{}";
     const data = safeJsonParse(content);
 
+    // Safety: mindestens riskClauses liefern
+    if (!data || typeof data !== "object") {
+      return NextResponse.json({ riskClauses: [], raw: content });
+    }
+    if (!("riskClauses" in data)) {
+      return NextResponse.json({ riskClauses: [], ...data });
+    }
+
     return NextResponse.json(data);
-  } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: "Vortext Analyse fehlgeschlagen" }, { status: 500 });
+  } catch (err: any) {
+    console.error("analyze-vortext error:", err);
+
+    return NextResponse.json(
+      {
+        error: "Vortext Analyse fehlgeschlagen",
+        message: err?.message ?? String(err),
+        type: err?.type,
+        code: err?.code,
+        status: err?.status,
+      },
+      { status: 500 }
+    );
   }
 }
