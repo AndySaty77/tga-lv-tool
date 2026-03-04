@@ -49,6 +49,7 @@ function severityDot(sev: string) {
   if (sev === "low") return "🟡";
   return "⚪️";
 }
+
 function validateRegex(re: string | null | undefined) {
   if (!re || !re.trim()) return { ok: true, msg: "" };
   try {
@@ -60,6 +61,12 @@ function validateRegex(re: string | null | undefined) {
   }
 }
 
+function fmtKB(bytes: number) {
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  return `${(kb / 1024).toFixed(2)} MB`;
+}
+
 export default function TriggersPage() {
   const [rows, setRows] = useState<TriggerRow[]>([]);
   const [msg, setMsg] = useState<string>("");
@@ -67,21 +74,24 @@ export default function TriggersPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Test Panel
-  const [testText, setTestText] = useState<string>("Der Schornstein ist ...\nAbgasanlage fehlt ...");
+  const [testText, setTestText] = useState<string>(
+    "Der Bestand ist aufzunehmen und in die Integration zu überführen.\nAnpassung an die bestehende Anlage erforderlich."
+  );
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   async function load() {
     const { data, error } = await supabase
       .from("triggers")
-      .select("id,name,description,category,trigger_type,keywords,regex,weight,claim_level,risk_interpretation,is_active,created_at")
+      .select(
+        "id,name,description,category,trigger_type,keywords,regex,weight,claim_level,risk_interpretation,is_active,created_at"
+      )
       .order("created_at", { ascending: false });
 
     if (error) setMsg("DB Fehler: " + error.message);
     else {
       const list = (data as TriggerRow[]) || [];
       setRows(list);
-      // default: ersten auswählen
       if (!selectedId && list.length) setSelectedId(list[0].id);
     }
   }
@@ -92,7 +102,6 @@ export default function TriggersPage() {
   }, []);
 
   const selected = useMemo(() => rows.find((r) => r.id === selectedId) ?? null, [rows, selectedId]);
-
   const regexState = useMemo(() => validateRegex(selected?.regex), [selected?.regex]);
 
   async function onImport(file: File) {
@@ -112,7 +121,7 @@ export default function TriggersPage() {
         category: (r["Risikokategorie"] || "").trim(),
         trigger_type: (r["Trigger-Art"] || "").trim(),
         norms: split(r["Norm"]),
-        keywords: split(r["Keywords"]), // CSV liefert ; getrennt -> wir speichern als text[]
+        keywords: split(r["Keywords"]),
         project_types: split(r["Projekttyp"]),
         weight: Number(r["Gewichtung"] || 0),
         claim_level: (r["Claim-Level"] || "").trim(),
@@ -120,19 +129,16 @@ export default function TriggersPage() {
         question_template: (r["Rückfrage-Generator"] || "").trim(),
         offer_text_template: (r["Angebotstext-Baustein"] || "").trim(),
         is_active: String(r["is_active"] ?? "true").toLowerCase() !== "false",
-        // optional: regex Feld aus CSV, falls vorhanden
         regex: (r["Regex"] || "").trim() || null,
       }))
       .filter((x) => x.name);
 
-    // Minimal-Validierung
     for (const r of data) {
       if (!r.category) return setMsg(`Fehlende Risikokategorie bei: ${r.name}`);
       if (!r.trigger_type) return setMsg(`Fehlende Trigger-Art bei: ${r.name}`);
       if (!(r.weight >= 1 && r.weight <= 10)) return setMsg(`Gewichtung 1–10 bei: ${r.name}`);
       if (!["Niedrig", "Mittel", "Hoch"].includes(r.claim_level))
         return setMsg(`Claim-Level (Niedrig/Mittel/Hoch) bei: ${r.name}`);
-      // Regex Validierung (nur falls gesetzt)
       if (r.regex) {
         const st = validateRegex(r.regex);
         if (!st.ok) return setMsg(`Regex ungültig bei: ${r.name} -> ${st.msg}`);
@@ -181,7 +187,6 @@ export default function TriggersPage() {
     a.href = url;
     a.download = "triggers_export.csv";
     a.click();
-
     URL.revokeObjectURL(url);
 
     setMsg(`Export ok: ${exportRows.length} Trigger`);
@@ -189,10 +194,10 @@ export default function TriggersPage() {
 
   async function testSelectedTrigger() {
     if (!selected) return;
+
     setTestLoading(true);
     setTestResult(null);
 
-    // Regex-Fehler sofort zeigen (nicht erst server)
     if (selected.regex) {
       const st = validateRegex(selected.regex);
       if (!st.ok) {
@@ -202,7 +207,6 @@ export default function TriggersPage() {
       }
     }
 
-    // Trigger so schicken, wie analyzeLvText es erwartet
     const triggerForApi: any = {
       id: selected.id,
       name: selected.name,
@@ -231,11 +235,8 @@ export default function TriggersPage() {
       });
 
       const data = (await res.json()) as TestResult;
-      if (!res.ok) {
-        setTestResult({ ok: false, error: data?.error || `HTTP ${res.status}` });
-      } else {
-        setTestResult(data);
-      }
+      if (!res.ok) setTestResult({ ok: false, error: data?.error || `HTTP ${res.status}` });
+      else setTestResult(data);
     } catch (e: any) {
       setTestResult({ ok: false, error: e?.message ?? "Test fehlgeschlagen" });
     } finally {
@@ -244,129 +245,311 @@ export default function TriggersPage() {
   }
 
   return (
-    <main className="p-6">
-      <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="text-xl font-bold">Trigger Admin</h1>
-
-        <label className="px-3 py-2 border rounded cursor-pointer">
-          CSV importieren
-          <input
-            type="file"
-            accept=".csv"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onImport(f);
-              e.currentTarget.value = "";
-            }}
-          />
-        </label>
-
-        <button className="px-3 py-2 border rounded" onClick={onExport}>
-          CSV exportieren
-        </button>
-
-        <button className="px-3 py-2 border rounded" onClick={load}>
-          Refresh
-        </button>
+    <div style={{ padding: 28, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 26 }}>Trigger Admin</h1>
+          <div style={{ color: "#666", marginTop: 6 }}>
+            Import/Export + Trigger-Tests direkt gegen LV-Text.
+          </div>
+        </div>
+        <a href="/admin/score" style={{ color: "#111", textDecoration: "underline" }}>
+          Zurück zum Score
+        </a>
       </div>
 
-      {msg && <p className="mt-3 text-sm">{msg}</p>}
+      {/* Toolbar Card */}
+      <div
+        style={{
+          marginTop: 18,
+          padding: 16,
+          border: "1px solid #e5e5e5",
+          borderRadius: 14,
+          background: "#fafafa",
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 10,
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <label
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "1px solid #111",
+              background: "#111",
+              color: "#fff",
+              cursor: "pointer",
+              fontWeight: 800,
+            }}
+          >
+            CSV importieren
+            <input
+              type="file"
+              accept=".csv"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onImport(f);
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
 
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* LEFT: Table */}
-        <div className="lg:col-span-2 overflow-auto border rounded">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                {["Name", "Kategorie", "Art", "Gew.", "Claim", "Aktiv"].map((h) => (
-                  <th key={h} className="text-left p-2 border-b">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const active = r.id === selectedId;
-                return (
-                  <tr
-                    key={r.id}
-                    className={`border-b cursor-pointer ${active ? "bg-gray-100" : ""}`}
-                    onClick={() => setSelectedId(r.id)}
-                    title="Klicken zum Testen"
-                  >
-                    <td className="p-2 font-medium">{r.name}</td>
-                    <td className="p-2">{r.category}</td>
-                    <td className="p-2">{r.trigger_type}</td>
-                    <td className="p-2">{r.weight}</td>
-                    <td className="p-2">{r.claim_level}</td>
-                    <td className="p-2">{r.is_active ? "Ja" : "Nein"}</td>
-                  </tr>
-                );
-              })}
+          <button
+            onClick={onExport}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              background: "#fff",
+              cursor: "pointer",
+              fontWeight: 800,
+            }}
+          >
+            CSV exportieren
+          </button>
 
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="p-3 text-gray-500">
-                    Noch keine Trigger – CSV importieren.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <button
+            onClick={load}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              background: "#fff",
+              cursor: "pointer",
+              fontWeight: 800,
+            }}
+          >
+            Refresh
+          </button>
         </div>
 
-        {/* RIGHT: Test Panel */}
-        <div className="border rounded p-3">
-          <div className="font-bold">Trigger Test</div>
+        <div style={{ color: "#666", fontWeight: 700 }}>
+          Trigger: {rows.length} • Auswahl: {selected ? selected.name : "-"}
+        </div>
+
+        {msg && (
+          <div style={{ width: "100%", marginTop: 8, color: "#111", fontWeight: 700 }}>
+            {msg}
+          </div>
+        )}
+      </div>
+
+      {/* Main grid */}
+      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
+        {/* Table Card */}
+        <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, overflow: "hidden" }}>
+          <div style={{ padding: 12, background: "#fafafa", borderBottom: "1px solid #e5e5e5" }}>
+            <div style={{ fontWeight: 900, color: "#111" }}>Trigger-Liste</div>
+            <div style={{ color: "#666", marginTop: 4 }}>
+              Tipp: Zeile anklicken, dann rechts testen.
+            </div>
+          </div>
+
+          <div style={{ overflow: "auto", maxHeight: "70vh" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "#f5f5f5" }}>
+                  {["Name", "Kategorie", "Art", "Gew.", "Claim", "Aktiv"].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        textAlign: "left",
+                        padding: 10,
+                        borderBottom: "1px solid #e5e5e5",
+                        color: "#444",
+                        fontWeight: 900,
+                        position: "sticky",
+                        top: 0,
+                        background: "#f5f5f5",
+                        zIndex: 1,
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const active = r.id === selectedId;
+                  return (
+                    <tr
+                      key={r.id}
+                      onClick={() => setSelectedId(r.id)}
+                      style={{
+                        cursor: "pointer",
+                        background: active ? "#efefef" : "#fff",
+                        borderBottom: "1px solid #f0f0f0",
+                        transition: "background 120ms",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (active) return;
+                        (e.currentTarget as HTMLTableRowElement).style.background = "#fafafa";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (active) return;
+                        (e.currentTarget as HTMLTableRowElement).style.background = "#fff";
+                      }}
+                      title="Klicken zum Auswählen"
+                    >
+                      <td style={{ padding: 10, fontWeight: 900 }}>
+                        {r.name}
+                        {active && (
+                          <span
+                            style={{
+                              marginLeft: 10,
+                              fontSize: 11,
+                              padding: "2px 8px",
+                              borderRadius: 999,
+                              background: "#111",
+                              color: "#fff",
+                              fontWeight: 900,
+                            }}
+                          >
+                            SELECTED
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: 10 }}>{r.category}</td>
+                      <td style={{ padding: 10 }}>{r.trigger_type}</td>
+                      <td style={{ padding: 10, fontWeight: 800 }}>{r.weight}</td>
+                      <td style={{ padding: 10 }}>{r.claim_level}</td>
+                      <td style={{ padding: 10 }}>{r.is_active ? "Ja" : "Nein"}</td>
+                    </tr>
+                  );
+                })}
+
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ padding: 14, color: "#777" }}>
+                      Noch keine Trigger – CSV importieren.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Test Card */}
+        <div
+          style={{
+            border: "1px solid #e5e5e5",
+            borderRadius: 14,
+            padding: 16,
+            background: "#fff",
+          }}
+        >
+          <div style={{ fontWeight: 900, color: "#111" }}>Trigger Test</div>
+          <div style={{ color: "#666", marginTop: 6 }}>
+            Testet nur den ausgewählten Trigger (kein System-Check).
+          </div>
 
           {!selected ? (
-            <div className="text-sm text-gray-500 mt-2">Wähle links einen Trigger aus.</div>
+            <div style={{ marginTop: 12, color: "#666" }}>Links einen Trigger auswählen.</div>
           ) : (
             <>
-              <div className="mt-2 text-sm">
-                <div className="font-semibold">{selected.name}</div>
-                <div className="text-gray-600">{selected.category} • Gewicht {selected.weight} • Claim {selected.claim_level}</div>
+              {/* Selected meta */}
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  borderRadius: 12,
+                  background: "#fafafa",
+                  border: "1px solid #eee",
+                }}
+              >
+                <div style={{ fontWeight: 900 }}>{selected.name}</div>
+                <div style={{ marginTop: 6, color: "#666", fontWeight: 700 }}>
+                  {selected.category} • Gewicht {selected.weight} • Claim {selected.claim_level} •{" "}
+                  {selected.is_active ? "Aktiv" : "Inaktiv"}
+                </div>
+
                 {selected.keywords?.length ? (
-                  <div className="mt-2">
-                    <div className="text-xs text-gray-500">Keywords</div>
-                    <div className="text-xs">{selected.keywords.join(", ")}</div>
-                  </div>
-                ) : null}
-                {selected.regex ? (
-                  <div className="mt-2">
-                    <div className="text-xs text-gray-500">Regex</div>
-                    <div className="text-xs break-all">{selected.regex}</div>
-                    <div className={`text-xs mt-1 ${regexState.ok ? "text-green-700" : "text-red-700"}`}>
-                      {regexState.msg}
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 12, color: "#777", fontWeight: 900 }}>Keywords</div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#111" }}>
+                      {selected.keywords.join(", ")}
                     </div>
                   </div>
+                ) : (
+                  <div style={{ marginTop: 10, fontSize: 12, color: "#777" }}>
+                    Keine Keywords hinterlegt.
+                  </div>
+                )}
+
+                {selected.regex ? (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 12, color: "#777", fontWeight: 900 }}>Regex</div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#111", wordBreak: "break-word" }}>
+                      {selected.regex}
+                    </div>
+                    {regexState.msg && (
+                      <div style={{ marginTop: 4, fontSize: 12, color: regexState.ok ? "#0a7a2f" : "#b00020", fontWeight: 900 }}>
+                        {regexState.msg}
+                      </div>
+                    )}
+                  </div>
                 ) : null}
               </div>
 
-              <div className="mt-3">
-                <div className="text-xs text-gray-500 mb-1">Test-LV-Text</div>
+              {/* Textarea */}
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 12, color: "#777", fontWeight: 900, marginBottom: 6 }}>
+                  Test-LV-Text
+                </div>
                 <textarea
-                  className="w-full border rounded p-2 text-xs"
-                  rows={8}
                   value={testText}
                   onChange={(e) => setTestText(e.target.value)}
+                  rows={8}
+                  style={{
+                    width: "100%",
+                    borderRadius: 12,
+                    border: "1px solid #ddd",
+                    padding: 10,
+                    resize: "vertical",
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                    fontSize: 12,
+                  }}
                 />
+                <div style={{ marginTop: 6, color: "#666", fontSize: 12 }}>
+                  Länge: {fmtKB(new Blob([testText]).size)}
+                </div>
               </div>
 
-              <div className="mt-3 flex gap-2">
+              {/* Buttons */}
+              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button
-                  className="px-3 py-2 border rounded font-semibold"
                   onClick={testSelectedTrigger}
                   disabled={testLoading || !testText.trim()}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 12,
+                    border: "1px solid #111",
+                    background: testLoading ? "#eee" : "#111",
+                    color: testLoading ? "#111" : "#fff",
+                    cursor: testLoading ? "default" : "pointer",
+                    fontWeight: 900,
+                  }}
                 >
                   {testLoading ? "Teste..." : "Trigger testen"}
                 </button>
 
                 <button
-                  className="px-3 py-2 border rounded"
                   onClick={() => setTestResult(null)}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 12,
+                    border: "1px solid #ddd",
+                    background: "#fff",
+                    cursor: "pointer",
+                    fontWeight: 800,
+                  }}
                 >
                   Clear
                 </button>
@@ -374,25 +557,49 @@ export default function TriggersPage() {
 
               {/* Result */}
               {testResult && (
-                <div className="mt-3 border rounded p-2 text-sm">
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 12,
+                    borderRadius: 12,
+                    border: "1px solid #eee",
+                    background: "#fafafa",
+                  }}
+                >
                   {!testResult.ok ? (
-                    <div className="text-red-700 font-semibold">Fehler: {testResult.error}</div>
+                    <div style={{ color: "#b00020", fontWeight: 900 }}>
+                      Fehler: {testResult.error}
+                    </div>
                   ) : (
                     <>
-                      <div className="font-semibold">
-                        Ergebnis: {testResult.hit ? "TREFFER ✅" : "kein Treffer ❌"}{" "}
-                        <span className="text-gray-600">(Findings: {testResult.count ?? 0})</span>
+                      <div style={{ fontWeight: 900, color: "#111" }}>
+                        Ergebnis:{" "}
+                        {testResult.hit ? (
+                          <span style={{ color: "#0a7a2f" }}>TREFFER ✅</span>
+                        ) : (
+                          <span style={{ color: "#b00020" }}>kein Treffer ❌</span>
+                        )}{" "}
+                        <span style={{ color: "#666", fontWeight: 700 }}>
+                          (Findings: {testResult.count ?? 0})
+                        </span>
                       </div>
 
                       {(testResult.findings ?? []).map((f) => (
-                        <div key={f.id} className="mt-2 border-t pt-2">
-                          <div className="font-semibold">
+                        <div
+                          key={f.id}
+                          style={{
+                            marginTop: 10,
+                            paddingTop: 10,
+                            borderTop: "1px solid #e5e5e5",
+                          }}
+                        >
+                          <div style={{ fontWeight: 900 }}>
                             {severityDot(f.severity)} {f.title}
                           </div>
-                          <div className="text-gray-600">
+                          <div style={{ color: "#666", marginTop: 4, fontWeight: 700, fontSize: 12 }}>
                             Kategorie: {f.category} • Penalty: {f.penalty} • id: {stripPrefix(f.id)}
                           </div>
-                          {f.detail && <div className="text-gray-800 mt-1">{f.detail}</div>}
+                          {f.detail && <div style={{ marginTop: 6, color: "#111", fontSize: 12 }}>{f.detail}</div>}
                         </div>
                       ))}
                     </>
@@ -403,6 +610,6 @@ export default function TriggersPage() {
           )}
         </div>
       </div>
-    </main>
+    </div>
   );
 }
