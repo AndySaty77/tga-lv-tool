@@ -4,18 +4,26 @@ import { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 import { supabase } from "@/lib/supabaseClient";
 
+type DisciplineKey = "sanitaer" | "heizung" | "lueftung" | "msr" | "elektro" | "kaelte";
+
 type TriggerRow = {
   id: string;
   name: string;
   description?: string | null;
-  category: string; // ab jetzt: KEY (snake_case)
+
+  // DB speichert NUR Kategorie-Keys
+  category: string;
+
   trigger_type: string;
-  keywords?: string[] | null; // text[]
+  keywords?: string[] | null;
   regex?: string | null;
   weight: number;
   claim_level: string;
   risk_interpretation?: string | null;
   is_active: boolean;
+
+  // ✅ neu: Gewerk/Disziplinen (text[])
+  disciplines?: string[] | null;
 };
 
 type TestResult = {
@@ -90,7 +98,6 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 
 const CATEGORY_LABEL_TO_KEY: Record<string, string> = {
-  // Labels -> Keys (tolerant gegenüber Schreibweisen)
   "Vertrags-/LV-Risiko": "vertrags_lv_risiken",
   "Vertrags-/LV-Risiken": "vertrags_lv_risiken",
   "Vertrags- / LV-Risiken": "vertrags_lv_risiken",
@@ -108,8 +115,43 @@ const CATEGORY_LABEL_TO_KEY: Record<string, string> = {
 function normalizeCategory(raw: any): string {
   const v = String(raw ?? "").trim();
   if (!v) return "";
-  if (ALLOWED_CATEGORY_KEYS.has(v)) return v; // schon Key
-  return CATEGORY_LABEL_TO_KEY[v] ?? ""; // Label -> Key, sonst invalid
+  if (ALLOWED_CATEGORY_KEYS.has(v)) return v;
+  return CATEGORY_LABEL_TO_KEY[v] ?? "";
+}
+
+/**
+ * ✅ Gewerk/Disziplinen
+ * - DB speichert text[] in triggers.disciplines
+ * - Import akzeptiert "Gewerk" als "sanitaer;heizung"
+ */
+const ALLOWED_DISCIPLINES: DisciplineKey[] = ["sanitaer", "heizung", "lueftung", "msr", "elektro", "kaelte"];
+const DISC_LABEL: Record<DisciplineKey, string> = {
+  sanitaer: "Sanitär",
+  heizung: "Heizung",
+  lueftung: "Lüftung",
+  msr: "MSR/GA",
+  elektro: "Elektro",
+  kaelte: "Kälte",
+};
+
+function normalizeDisciplineList(raw: any): DisciplineKey[] {
+  const vals = split(String(raw ?? ""));
+  // tolerant: lower-case, trim, ä->ae etc. (minimal)
+  const cleaned = vals.map((x) =>
+    x
+      .toLowerCase()
+      .trim()
+      .replace(/ä/g, "ae")
+      .replace(/ö/g, "oe")
+      .replace(/ü/g, "ue")
+  );
+  return cleaned.filter((x) => (ALLOWED_DISCIPLINES as string[]).includes(x)) as DisciplineKey[];
+}
+
+function disciplinesLabel(list?: string[] | null) {
+  const arr = Array.isArray(list) ? list : [];
+  if (!arr.length) return "—";
+  return arr.map((x) => (DISC_LABEL as any)[x] ?? x).join(", ");
 }
 
 export default function TriggersPage() {
@@ -129,7 +171,7 @@ export default function TriggersPage() {
     const { data, error } = await supabase
       .from("triggers")
       .select(
-        "id,name,description,category,trigger_type,keywords,regex,weight,claim_level,risk_interpretation,is_active,created_at"
+        "id,name,description,category,trigger_type,keywords,regex,weight,claim_level,risk_interpretation,is_active,disciplines,created_at"
       )
       .order("created_at", { ascending: false });
 
@@ -162,10 +204,11 @@ export default function TriggersPage() {
     const data = (parsed.data as any[])
       .map((r) => {
         const categoryKey = normalizeCategory(r["Risikokategorie"]);
+        const disciplines = normalizeDisciplineList(r["Gewerk"]); // ✅ neu
         return {
           name: (r["Trigger-Name"] || "").trim(),
           description: (r["Beschreibung"] || "").trim(),
-          category: categoryKey, // ✅ immer Key
+          category: categoryKey,
           trigger_type: (r["Trigger-Art"] || "").trim(),
           norms: split(r["Norm"]),
           keywords: split(r["Keywords"]),
@@ -177,16 +220,18 @@ export default function TriggersPage() {
           offer_text_template: (r["Angebotstext-Baustein"] || "").trim(),
           is_active: String(r["is_active"] ?? "true").toLowerCase() !== "false",
           regex: (r["Regex"] || "").trim() || null,
+
+          // ✅ neu: wird in triggers.disciplines (text[]) gespeichert
+          disciplines,
         };
       })
       .filter((x) => x.name);
 
-    for (const r of data) {
+    for (const r of data as any[]) {
       if (!r.name) return setMsg(`Fehlender Trigger-Name in CSV`);
+
       if (!r.category)
-        return setMsg(
-          `Ungültige Risikokategorie bei: ${r.name} (nur 5 Keys/Labels erlaubt)`
-        );
+        return setMsg(`Ungültige Risikokategorie bei: ${r.name} (nur 5 Keys/Labels erlaubt)`);
       if (!ALLOWED_CATEGORY_KEYS.has(r.category))
         return setMsg(`Ungültige Risikokategorie-Key bei: ${r.name} -> ${r.category}`);
 
@@ -194,40 +239,41 @@ export default function TriggersPage() {
       if (!(r.weight >= 1 && r.weight <= 10)) return setMsg(`Gewichtung 1–10 bei: ${r.name}`);
       if (!["Niedrig", "Mittel", "Hoch"].includes(r.claim_level))
         return setMsg(`Claim-Level (Niedrig/Mittel/Hoch) bei: ${r.name}`);
+
+      // ✅ Gewerk ist jetzt Pflicht (sonst feuert später wieder alles)
+      if (!Array.isArray(r.disciplines) || r.disciplines.length === 0)
+        return setMsg(`Fehlendes Gewerk (Spalte "Gewerk") bei: ${r.name} (z.B. sanitaer)`);
+
+      for (const d of r.disciplines) {
+        if (!(ALLOWED_DISCIPLINES as string[]).includes(d))
+          return setMsg(`Ungültiges Gewerk "${d}" bei: ${r.name} (erlaubt: ${ALLOWED_DISCIPLINES.join(", ")})`);
+      }
+
       if (r.regex) {
         const st = validateRegex(r.regex);
         if (!st.ok) return setMsg(`Regex ungültig bei: ${r.name} -> ${st.msg}`);
       }
     }
 
-    /**
-     * ✅ WICHTIG:
-     * Du willst keine doppelten Trigger-Namen.
-     * Deshalb upsert auf "name" (Voraussetzung: Unique-Constraint auf triggers.name in Supabase).
-     */
-    const { error } = await supabase.from("triggers").upsert(data, { onConflict: "name" });
+    // ✅ keine doppelten Trigger-Namen
+    const { error } = await supabase.from("triggers").upsert(data as any[], { onConflict: "name" });
     if (error) return setMsg("DB Upsert Fehler: " + error.message);
 
-    setMsg(`Import ok: ${data.length} Trigger`);
+    setMsg(`Import ok: ${(data as any[]).length} Trigger`);
     await load();
   }
 
   async function onExport() {
     setMsg("Export läuft...");
 
-    const { data, error } = await supabase
-      .from("triggers")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("triggers").select("*").order("created_at", { ascending: false });
 
     if (error) return setMsg("DB Export Fehler: " + error.message);
 
     const exportRows = (data as any[]).map((r) => ({
       "Trigger-Name": r.name ?? "",
       "Beschreibung": r.description ?? "",
-      // ✅ Export: KEY als Quelle der Wahrheit
       "Risikokategorie": r.category ?? "",
-      // optional für Menschen (macht Import nicht kaputt)
       "Risikokategorie_Label": CATEGORY_LABEL[r.category] ?? "",
       "Norm": (r.norms ?? []).join(";"),
       "Trigger-Art": r.trigger_type ?? "",
@@ -240,6 +286,9 @@ export default function TriggersPage() {
       "Rückfrage-Generator": r.question_template ?? "",
       "Angebotstext-Baustein": r.offer_text_template ?? "",
       "is_active": r.is_active ?? true,
+
+      // ✅ neu
+      "Gewerk": Array.isArray(r.disciplines) ? r.disciplines.join(";") : "",
     }));
 
     const csv = Papa.unparse(exportRows);
@@ -274,7 +323,7 @@ export default function TriggersPage() {
       id: selected.id,
       name: selected.name,
       description: selected.description ?? null,
-      category: selected.category, // ✅ Key an API
+      category: selected.category,
       trigger_type: selected.trigger_type ?? null,
       keywords: selected.keywords ?? null,
       regex: selected.regex ?? null,
@@ -285,6 +334,9 @@ export default function TriggersPage() {
       question_template: null,
       offer_text_template: null,
       is_active: selected.is_active,
+
+      // ✅ neu: an API geben (optional; /api/test-trigger ignoriert es aktuell vermutlich)
+      disciplines: selected.disciplines ?? null,
     };
 
     try {
@@ -298,7 +350,7 @@ export default function TriggersPage() {
       });
 
       const data = (await res.json()) as TestResult;
-      if (!res.ok) setTestResult({ ok: false, error: data?.error || `HTTP ${res.status}` });
+      if (!res.ok) setTestResult({ ok: false, error: (data as any)?.error || `HTTP ${res.status}` });
       else setTestResult(data);
     } catch (e: any) {
       setTestResult({ ok: false, error: e?.message ?? "Test fehlgeschlagen" });
@@ -313,8 +365,9 @@ export default function TriggersPage() {
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 26 }}>Trigger Admin</h1>
-          <div style={{ color: "#666", marginTop: 6 }}>
-            Import/Export + Trigger-Tests direkt gegen LV-Text.
+          <div style={{ color: "#666", marginTop: 6 }}>Import/Export + Trigger-Tests direkt gegen LV-Text.</div>
+          <div style={{ color: "#666", marginTop: 6, fontWeight: 700 }}>
+            Pflicht-Spalte CSV: <span style={{ color: "#111" }}>"Gewerk"</span> (sanitaer/heizung/lueftung/msr/elektro/kaelte)
           </div>
         </div>
         <a href="/admin/score" style={{ color: "#111", textDecoration: "underline" }}>
@@ -408,16 +461,14 @@ export default function TriggersPage() {
         <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, overflow: "hidden" }}>
           <div style={{ padding: 12, background: "#fafafa", borderBottom: "1px solid #e5e5e5" }}>
             <div style={{ fontWeight: 900, color: "#111" }}>Trigger-Liste</div>
-            <div style={{ color: "#666", marginTop: 4 }}>
-              Tipp: Zeile anklicken, dann rechts testen.
-            </div>
+            <div style={{ color: "#666", marginTop: 4 }}>Tipp: Zeile anklicken, dann rechts testen.</div>
           </div>
 
           <div style={{ overflow: "auto", maxHeight: "70vh" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#f5f5f5" }}>
-                  {["Name", "Kategorie", "Art", "Gew.", "Claim", "Aktiv"].map((h) => (
+                  {["Name", "Gewerk", "Kategorie", "Art", "Gew.", "Claim", "Aktiv"].map((h) => (
                     <th
                       key={h}
                       style={{
@@ -437,6 +488,7 @@ export default function TriggersPage() {
                   ))}
                 </tr>
               </thead>
+
               <tbody>
                 {rows.map((r) => {
                   const active = r.id === selectedId;
@@ -478,7 +530,8 @@ export default function TriggersPage() {
                           </span>
                         )}
                       </td>
-                      {/* ✅ UI zeigt Label, DB speichert Key */}
+
+                      <td style={{ padding: 10 }}>{disciplinesLabel(r.disciplines)}</td>
                       <td style={{ padding: 10 }}>{CATEGORY_LABEL[r.category] ?? r.category}</td>
                       <td style={{ padding: 10 }}>{r.trigger_type}</td>
                       <td style={{ padding: 10, fontWeight: 800 }}>{r.weight}</td>
@@ -490,7 +543,7 @@ export default function TriggersPage() {
 
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ padding: 14, color: "#777" }}>
+                    <td colSpan={7} style={{ padding: 14, color: "#777" }}>
                       Noch keine Trigger – CSV importieren.
                     </td>
                   </tr>
@@ -501,24 +554,14 @@ export default function TriggersPage() {
         </div>
 
         {/* Test Card */}
-        <div
-          style={{
-            border: "1px solid #e5e5e5",
-            borderRadius: 14,
-            padding: 16,
-            background: "#fff",
-          }}
-        >
+        <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
           <div style={{ fontWeight: 900, color: "#111" }}>Trigger Test</div>
-          <div style={{ color: "#666", marginTop: 6 }}>
-            Testet nur den ausgewählten Trigger (kein System-Check).
-          </div>
+          <div style={{ color: "#666", marginTop: 6 }}>Testet nur den ausgewählten Trigger (kein System-Check).</div>
 
           {!selected ? (
             <div style={{ marginTop: 12, color: "#666" }}>Links einen Trigger auswählen.</div>
           ) : (
             <>
-              {/* Selected meta */}
               <div
                 style={{
                   marginTop: 12,
@@ -530,21 +573,17 @@ export default function TriggersPage() {
               >
                 <div style={{ fontWeight: 900 }}>{selected.name}</div>
                 <div style={{ marginTop: 6, color: "#666", fontWeight: 700 }}>
-                  {CATEGORY_LABEL[selected.category] ?? selected.category} • Gewicht {selected.weight} • Claim{" "}
-                  {selected.claim_level} • {selected.is_active ? "Aktiv" : "Inaktiv"}
+                  {disciplinesLabel(selected.disciplines)} • {CATEGORY_LABEL[selected.category] ?? selected.category} • Gewicht{" "}
+                  {selected.weight} • Claim {selected.claim_level} • {selected.is_active ? "Aktiv" : "Inaktiv"}
                 </div>
 
                 {selected.keywords?.length ? (
                   <div style={{ marginTop: 10 }}>
                     <div style={{ fontSize: 12, color: "#777", fontWeight: 900 }}>Keywords</div>
-                    <div style={{ marginTop: 4, fontSize: 12, color: "#111" }}>
-                      {selected.keywords.join(", ")}
-                    </div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#111" }}>{selected.keywords.join(", ")}</div>
                   </div>
                 ) : (
-                  <div style={{ marginTop: 10, fontSize: 12, color: "#777" }}>
-                    Keine Keywords hinterlegt.
-                  </div>
+                  <div style={{ marginTop: 10, fontSize: 12, color: "#777" }}>Keine Keywords hinterlegt.</div>
                 )}
 
                 {selected.regex ? (
@@ -569,11 +608,8 @@ export default function TriggersPage() {
                 ) : null}
               </div>
 
-              {/* Textarea */}
               <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 12, color: "#777", fontWeight: 900, marginBottom: 6 }}>
-                  Test-LV-Text
-                </div>
+                <div style={{ fontSize: 12, color: "#777", fontWeight: 900, marginBottom: 6 }}>Test-LV-Text</div>
                 <textarea
                   value={testText}
                   onChange={(e) => setTestText(e.target.value)}
@@ -588,12 +624,9 @@ export default function TriggersPage() {
                     fontSize: 12,
                   }}
                 />
-                <div style={{ marginTop: 6, color: "#666", fontSize: 12 }}>
-                  Länge: {fmtKB(new Blob([testText]).size)}
-                </div>
+                <div style={{ marginTop: 6, color: "#666", fontSize: 12 }}>Länge: {fmtKB(new Blob([testText]).size)}</div>
               </div>
 
-              {/* Buttons */}
               <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button
                   onClick={testSelectedTrigger}
@@ -626,54 +659,27 @@ export default function TriggersPage() {
                 </button>
               </div>
 
-              {/* Result */}
               {testResult && (
-                <div
-                  style={{
-                    marginTop: 12,
-                    padding: 12,
-                    borderRadius: 12,
-                    border: "1px solid #eee",
-                    background: "#fafafa",
-                  }}
-                >
+                <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #eee", background: "#fafafa" }}>
                   {!testResult.ok ? (
-                    <div style={{ color: "#b00020", fontWeight: 900 }}>
-                      Fehler: {testResult.error}
-                    </div>
+                    <div style={{ color: "#b00020", fontWeight: 900 }}>Fehler: {testResult.error}</div>
                   ) : (
                     <>
                       <div style={{ fontWeight: 900, color: "#111" }}>
                         Ergebnis:{" "}
-                        {testResult.hit ? (
-                          <span style={{ color: "#0a7a2f" }}>TREFFER ✅</span>
-                        ) : (
-                          <span style={{ color: "#b00020" }}>kein Treffer ❌</span>
-                        )}{" "}
-                        <span style={{ color: "#666", fontWeight: 700 }}>
-                          (Findings: {testResult.count ?? 0})
-                        </span>
+                        {testResult.hit ? <span style={{ color: "#0a7a2f" }}>TREFFER ✅</span> : <span style={{ color: "#b00020" }}>kein Treffer ❌</span>}{" "}
+                        <span style={{ color: "#666", fontWeight: 700 }}>(Findings: {testResult.count ?? 0})</span>
                       </div>
 
                       {(testResult.findings ?? []).map((f) => (
-                        <div
-                          key={f.id}
-                          style={{
-                            marginTop: 10,
-                            paddingTop: 10,
-                            borderTop: "1px solid #e5e5e5",
-                          }}
-                        >
+                        <div key={f.id} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e5e5" }}>
                           <div style={{ fontWeight: 900 }}>
                             {severityDot(f.severity)} {f.title}
                           </div>
                           <div style={{ color: "#666", marginTop: 4, fontWeight: 700, fontSize: 12 }}>
-                            Kategorie: {CATEGORY_LABEL[f.category] ?? f.category} • Penalty: {f.penalty} • id:{" "}
-                            {stripPrefix(f.id)}
+                            Kategorie: {CATEGORY_LABEL[f.category] ?? f.category} • Penalty: {f.penalty} • id: {stripPrefix(f.id)}
                           </div>
-                          {f.detail && (
-                            <div style={{ marginTop: 6, color: "#111", fontSize: 12 }}>{f.detail}</div>
-                          )}
+                          {f.detail && <div style={{ marginTop: 6, color: "#111", fontSize: 12 }}>{f.detail}</div>}
                         </div>
                       ))}
                     </>
