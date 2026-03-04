@@ -166,7 +166,7 @@ function fmtKB(bytes: number) {
   return `${(kb / 1024).toFixed(2)} MB`;
 }
 
-const MAX_FILE_BYTES = 2_000_000; // 2 MB MVP-Limit
+const MAX_FILE_BYTES = 10_000_000; // 10 MB MVP-Limit
 
 type SourceFilter = "both" | "db" | "sys";
 type SeverityFilter = "all" | "high" | "medium" | "low";
