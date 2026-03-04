@@ -1,10 +1,121 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type DragEvent } from "react";
+
+type CategoryKey =
+  | "vertrags_lv_risiken"
+  | "mengen_massenermittlung"
+  | "technische_vollstaendigkeit"
+  | "schnittstellen_nebenleistungen"
+  | "kalkulationsunsicherheit";
+
+const CATEGORY_ORDER: CategoryKey[] = [
+  "vertrags_lv_risiken",
+  "mengen_massenermittlung",
+  "technische_vollstaendigkeit",
+  "schnittstellen_nebenleistungen",
+  "kalkulationsunsicherheit",
+];
+
+const CATEGORY_LABEL: Record<CategoryKey, string> = {
+  vertrags_lv_risiken: "Vertrags-/LV-Risiken",
+  mengen_massenermittlung: "Mengen & Massenermittlung",
+  technische_vollstaendigkeit: "Technische Vollständigkeit",
+  schnittstellen_nebenleistungen: "Schnittstellen & Nebenleistungen",
+  kalkulationsunsicherheit: "Kalkulationsunsicherheit",
+};
+
+function catLabel(k: string) {
+  return (CATEGORY_LABEL as any)[k] ?? k;
+}
+
+function clamp0_100(n: any) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Math.max(0, Math.min(100, Math.round(x)));
+}
+
+function traffic(score: number) {
+  if (score >= 70) return { dot: "🔴", text: "Rot", tone: "#b00020" };
+  if (score >= 40) return { dot: "🟡", text: "Gelb", tone: "#a36b00" };
+  return { dot: "🟢", text: "Grün", tone: "#0a7a2f" };
+}
+
+function ScoreBarRow(props: { k: CategoryKey; value: number }) {
+  const v = clamp0_100(props.value);
+  const amp = traffic(v);
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "240px 1fr 60px 80px",
+        gap: 12,
+        alignItems: "center",
+        padding: "10px 0",
+        borderBottom: "1px solid #eee",
+      }}
+    >
+      <div style={{ fontWeight: 900, color: "#111" }}>{CATEGORY_LABEL[props.k]}</div>
+
+      <div
+        style={{
+          height: 14,
+          borderRadius: 999,
+          background: "#f0f0f0",
+          border: "1px solid #e5e5e5",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            width: `${v}%`,
+            height: "100%",
+            background: amp.tone,
+            borderRadius: 999,
+            transition: "width 200ms",
+          }}
+        />
+      </div>
+
+      <div style={{ textAlign: "right", fontWeight: 900 }}>{v}</div>
+
+      <div style={{ textAlign: "right", fontWeight: 900, color: amp.tone }}>
+        {amp.dot} {amp.text}
+      </div>
+    </div>
+  );
+}
+
+function ScoreBarsCard(props: { perCategory: Record<string, number>; total: number }) {
+  const total = clamp0_100(props.total);
+  const totalAmp = traffic(total);
+
+  return (
+    <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ fontWeight: 900, fontSize: 16, color: "#111" }}>Risiko-Ampel je Kategorie</div>
+        <div style={{ fontWeight: 900, color: totalAmp.tone }}>
+          Gesamt: {total} {totalAmp.dot} {totalAmp.text}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        {CATEGORY_ORDER.map((k) => (
+          <ScoreBarRow key={k} k={k} value={props.perCategory?.[k] ?? 0} />
+        ))}
+      </div>
+
+      <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
+        Ampel: 0–39 Grün • 40–69 Gelb • 70–100 Rot
+      </div>
+    </div>
+  );
+}
 
 type Finding = {
   id: string;
-  category: string;
+  category: string; // Key
   title: string;
   detail?: string;
   severity: "low" | "medium" | "high" | string;
@@ -14,17 +125,8 @@ type Finding = {
 type ScoreResult = {
   total: number;
   level: "hochriskant" | "mittel" | "solide" | "sauber" | string;
-  perCategory: Record<string, number>;
+  perCategory: Record<string, number>; // Keys
   findingsSorted: Finding[];
-};
-
-const CATEGORY_MAX: Record<string, number> = {
-  normen: 15,
-  vollstaendigkeit: 20,
-  vortext: 15,
-  mengen_schnittstellen: 15,
-  nachtrag: 20,
-  ausfuehrung: 15,
 };
 
 function levelMeta(level?: string) {
@@ -91,7 +193,7 @@ export default function ScorePage() {
 
   const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
 
-  // Filters (B)
+  // Filters
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("both");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -100,6 +202,7 @@ export default function ScorePage() {
   const [top10, setTop10] = useState(false);
 
   const meta = levelMeta(result?.level);
+  const totalAmp = traffic(clamp0_100(result?.total ?? 0));
 
   const analyze = async (textOverride?: string) => {
     const textToUse = (textOverride ?? lvText).trim();
@@ -163,7 +266,7 @@ export default function ScorePage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const onDrop = async (e: React.DragEvent) => {
+  const onDrop = async (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files?.[0];
@@ -171,18 +274,19 @@ export default function ScorePage() {
     await loadFile(file);
   };
 
-  const catRows = useMemo(() => {
-    if (!result) return [];
-    const entries = Object.entries(result.perCategory ?? {});
-    const order = Object.keys(CATEGORY_MAX);
-    entries.sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
-    return entries;
-  }, [result]);
-
   const availableFindingCategories = useMemo(() => {
     const set = new Set<string>();
     for (const f of result?.findingsSorted ?? []) set.add(f.category);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
+    const arr = Array.from(set);
+
+    // sort by our category order first, then alphabetically
+    arr.sort((a, b) => {
+      const ia = CATEGORY_ORDER.indexOf(a as any);
+      const ib = CATEGORY_ORDER.indexOf(b as any);
+      if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+      return a.localeCompare(b);
+    });
+    return arr;
   }, [result]);
 
   const filteredFindings = useMemo(() => {
@@ -190,26 +294,21 @@ export default function ScorePage() {
     const q = search.trim().toLowerCase();
 
     let list = all.filter((f) => {
-      // Quelle
       if (sourceFilter === "db" && !isDbFinding(f)) return false;
       if (sourceFilter === "sys" && !isSysFinding(f)) return false;
 
-      // Severity
       if (severityFilter !== "all" && f.severity !== severityFilter) return false;
 
-      // Kategorie
       if (categoryFilter !== "all" && f.category !== categoryFilter) return false;
 
-      // Search
       if (q) {
-        const hay = `${f.title ?? ""} ${f.detail ?? ""} ${f.id ?? ""}`.toLowerCase();
+        const hay = `${f.title ?? ""} ${f.detail ?? ""} ${f.id ?? ""} ${f.category ?? ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
 
       return true;
     });
 
-    // Sort
     list.sort((a, b) => {
       if (sortMode === "penalty_desc") return (b.penalty ?? 0) - (a.penalty ?? 0);
       if (sortMode === "severity_desc") return severityRank(b.severity) - severityRank(a.severity);
@@ -242,9 +341,7 @@ export default function ScorePage() {
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 26 }}>TGA LV Score</h1>
-          <div style={{ color: "#666", marginTop: 6 }}>
-            Upload oder Text rein, Score raus. Filter machen’s nutzbar.
-          </div>
+          <div style={{ color: "#666", marginTop: 6 }}>Upload oder Text rein, Score raus. Filter machen’s nutzbar.</div>
         </div>
         <a href="/admin/triggers" style={{ color: "#111", textDecoration: "underline" }}>
           Trigger-Admin
@@ -283,13 +380,10 @@ export default function ScorePage() {
         >
           <div>
             <div style={{ fontWeight: 900 }}>Drag & Drop Datei hier rein</div>
-            <div style={{ color: "#666", marginTop: 4 }}>
-              MVP: TXT/XML wird als Text eingelesen. GAEB/XML Parsing kommt später.
-            </div>
+            <div style={{ color: "#666", marginTop: 4 }}>MVP: TXT/XML wird als Text eingelesen. GAEB/XML Parsing kommt später.</div>
             {fileMeta && (
               <div style={{ marginTop: 8, color: "#111", fontWeight: 700 }}>
-                Geladen: {fileMeta.name}{" "}
-                <span style={{ color: "#666", fontWeight: 600 }}>({fmtKB(fileMeta.size)})</span>
+                Geladen: {fileMeta.name} <span style={{ color: "#666", fontWeight: 600 }}>({fmtKB(fileMeta.size)})</span>
               </div>
             )}
           </div>
@@ -379,105 +473,73 @@ export default function ScorePage() {
             Reset
           </button>
 
-          <div style={{ color: "#666", display: "flex", alignItems: "center" }}>
-            Limit: {fmtKB(MAX_FILE_BYTES)}
-          </div>
+          <div style={{ color: "#666", display: "flex", alignItems: "center" }}>Limit: {fmtKB(MAX_FILE_BYTES)}</div>
         </div>
 
-        {error && (
-          <div style={{ marginTop: 12, color: "#b00020", fontWeight: 800 }}>
-            {error}
-          </div>
-        )}
+        {error && <div style={{ marginTop: 12, color: "#b00020", fontWeight: 800 }}>{error}</div>}
       </div>
 
       {/* Results */}
       {result && (
-        <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          {/* Score Card */}
-          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 800 }}>GESAMT</div>
-              <div style={{ fontSize: 14, fontWeight: 900 }}>
-                {meta.dot} {meta.label}
+        <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+          {/* Top Cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 16 }}>
+            {/* Score Card */}
+            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 800 }}>GESAMT</div>
+                <div style={{ fontSize: 14, fontWeight: 900 }}>
+                  {meta.dot} {meta.label}
+                </div>
+              </div>
+
+              <div style={{ fontSize: 44, fontWeight: 900, marginTop: 10, color: totalAmp.tone }}>
+                {clamp0_100(result.total)}
+                <span style={{ fontSize: 16, color: "#666", marginLeft: 8 }}>/ 100</span>
+              </div>
+
+              <div style={{ marginTop: 10, height: 12, background: "#eee", borderRadius: 999 }}>
+                <div
+                  style={{
+                    width: `${clamp0_100(result.total)}%`,
+                    height: 12,
+                    background: totalAmp.tone,
+                    borderRadius: 999,
+                  }}
+                />
+              </div>
+              <div style={{ marginTop: 10, color: "#666", fontWeight: 700, fontSize: 12 }}>
+                Ampel: 0–39 Grün • 40–69 Gelb • 70–100 Rot
               </div>
             </div>
 
-            <div style={{ fontSize: 44, fontWeight: 900, marginTop: 10 }}>
-              {result.total}
-              <span style={{ fontSize: 16, color: "#666", marginLeft: 8 }}>/ 100</span>
-            </div>
-
-            <div style={{ marginTop: 10, height: 12, background: "#eee", borderRadius: 999 }}>
-              <div
-                style={{
-                  width: `${Math.max(0, Math.min(100, result.total))}%`,
-                  height: 12,
-                  background: "#111",
-                  borderRadius: 999,
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Category Bars */}
-          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
-            <div style={{ fontSize: 14, color: "#666", fontWeight: 900, marginBottom: 10 }}>
-              KATEGORIEN
-            </div>
-
-            <div style={{ display: "grid", gap: 10 }}>
-              {catRows.map(([cat, val]) => {
-                const max = CATEGORY_MAX[cat] ?? 20;
-                const pct = Math.round((val / max) * 100);
-                return (
-                  <div key={cat}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800 }}>
-                      <span>{cat}</span>
-                      <span style={{ color: "#666" }}>
-                        {val} / {max} ({pct}%)
-                      </span>
-                    </div>
-                    <div style={{ marginTop: 6, height: 10, background: "#eee", borderRadius: 999 }}>
-                      <div
-                        style={{
-                          width: `${Math.max(0, Math.min(100, pct))}%`,
-                          height: 10,
-                          background: "#111",
-                          borderRadius: 999,
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            {/* Category Bars (NEW) */}
+            <ScoreBarsCard perCategory={result.perCategory ?? {}} total={result.total} />
           </div>
 
           {/* Filters */}
-          <div style={{ gridColumn: "1 / -1", border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
               <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>FILTER</div>
-              <div style={{ color: "#666", fontWeight: 700 }}>
-                Treffer nach Filter: {filteredFindings.length}
-              </div>
+              <div style={{ color: "#666", fontWeight: 700 }}>Treffer nach Filter: {filteredFindings.length}</div>
             </div>
 
             <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr 1fr auto", gap: 10 }}>
-              {/* Search */}
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Suche (Titel, Detail, ID)..."
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #ddd",
-                  width: "100%",
-                }}
+                placeholder="Suche (Titel, Detail, ID, Kategorie)..."
+                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
               />
 
-              {/* Source */}
               <select
                 value={sourceFilter}
                 onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
@@ -488,7 +550,6 @@ export default function ScorePage() {
                 <option value="sys">Quelle: nur SYS</option>
               </select>
 
-              {/* Severity */}
               <select
                 value={severityFilter}
                 onChange={(e) => setSeverityFilter(e.target.value as SeverityFilter)}
@@ -500,7 +561,6 @@ export default function ScorePage() {
                 <option value="low">Severity: low</option>
               </select>
 
-              {/* Category */}
               <select
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
@@ -509,12 +569,11 @@ export default function ScorePage() {
                 <option value="all">Kategorie: alle</option>
                 {availableFindingCategories.map((c) => (
                   <option key={c} value={c}>
-                    Kategorie: {c}
+                    {catLabel(c)}
                   </option>
                 ))}
               </select>
 
-              {/* Sort */}
               <select
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as SortMode)}
@@ -525,7 +584,6 @@ export default function ScorePage() {
                 <option value="category_az">Sort: Kategorie A–Z</option>
               </select>
 
-              {/* Reset */}
               <button
                 onClick={resetFilters}
                 style={{
@@ -541,7 +599,16 @@ export default function ScorePage() {
               </button>
             </div>
 
-            <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+            <div
+              style={{
+                marginTop: 10,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 10,
+              }}
+            >
               <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
                 <input type="checkbox" checked={top10} onChange={(e) => setTop10(e.target.checked)} />
                 <span style={{ fontWeight: 800 }}>Nur Top 10</span>
@@ -555,9 +622,9 @@ export default function ScorePage() {
           </div>
 
           {/* Findings Blocks */}
-          <div style={{ gridColumn: "1 / -1", display: "grid", gap: 16 }}>
+          <div style={{ display: "grid", gap: 16 }}>
             {/* DB */}
-            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
+            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>SUPABASE TRIGGER</div>
                 <div style={{ color: "#666" }}>{dbFindings.length} Treffer</div>
@@ -568,19 +635,18 @@ export default function ScorePage() {
                   <div style={{ color: "#666" }}>Keine DB-Trigger nach Filter.</div>
                 ) : (
                   dbFindings.map((f) => (
-                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                    <div
+                      key={f.id}
+                      style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}
+                    >
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                         <div style={{ fontWeight: 900 }}>
                           {severityDot(f.severity)} {f.title}
                         </div>
-                        <div style={{ color: "#666", fontWeight: 900 }}>
-                          -{f.penalty} ({f.category})
-                        </div>
+                        <div style={{ color: "#666", fontWeight: 900 }}>-{f.penalty} ({catLabel(f.category)})</div>
                       </div>
                       {f.detail && <div style={{ marginTop: 6, color: "#444" }}>{f.detail}</div>}
-                      <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>
-                        id: {stripPrefix(f.id)}
-                      </div>
+                      <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>id: {stripPrefix(f.id)}</div>
                     </div>
                   ))
                 )}
@@ -588,7 +654,7 @@ export default function ScorePage() {
             </div>
 
             {/* SYS */}
-            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16 }}>
+            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>SYSTEM CHECKS</div>
                 <div style={{ color: "#666" }}>{sysFindings.length} Treffer</div>
@@ -599,19 +665,18 @@ export default function ScorePage() {
                   <div style={{ color: "#666" }}>Keine System-Checks nach Filter.</div>
                 ) : (
                   sysFindings.map((f) => (
-                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                    <div
+                      key={f.id}
+                      style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}
+                    >
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                         <div style={{ fontWeight: 900 }}>
                           {severityDot(f.severity)} {f.title}
                         </div>
-                        <div style={{ color: "#666", fontWeight: 900 }}>
-                          -{f.penalty} ({f.category})
-                        </div>
+                        <div style={{ color: "#666", fontWeight: 900 }}>-{f.penalty} ({catLabel(f.category)})</div>
                       </div>
                       {f.detail && <div style={{ marginTop: 6, color: "#444" }}>{f.detail}</div>}
-                      <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>
-                        id: {stripPrefix(f.id)}
-                      </div>
+                      <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>id: {stripPrefix(f.id)}</div>
                     </div>
                   ))
                 )}
