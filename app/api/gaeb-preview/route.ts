@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const HARD_MAX_CHARS = 200_000;          // Roh-Preview (gesamt)
-const VORTEXT_PREVIEW_MAX_CHARS = 20_000; // UI-Preview für Vortext
+const HARD_MAX_CHARS = 200_000;            // Roh-Preview (gesamt)
+const VORTEXT_PREVIEW_MAX_CHARS = 120_000; // UI-Preview für Vortext (hochgesetzt!)
 
 function hardCut(s: string, max: number) {
   const t = (s ?? "").toString();
@@ -12,7 +12,6 @@ function hardCut(s: string, max: number) {
 }
 
 function normalizeNewlines(s: string) {
-  // macht \r\n und \r zu \n
   return (s ?? "").toString().replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
@@ -35,7 +34,7 @@ function stripHtml(input: string) {
 }
 
 type VortextGuess = {
-  cutIdx: number;        // Index im rawPreview
+  cutIdx: number; // Index im rawPreview
   method: string;
 };
 
@@ -45,20 +44,18 @@ function clampIdx(idx: number, len: number) {
 }
 
 /**
- * Ziel: exakt dort schneiden, wo bei dir die Positionen anfangen:
- * "Einrichtungsgegenstände" + danach No/Menge/Einheit/No/No
+ * Ziel: genau dort schneiden, wo bei dir die Positionen anfangen:
+ * - bevorzugt: "Einrichtungsgegenstände"
+ * - sonst: Titelzeile + No + Menge + Einheit + No + No
  */
 function findCutIdx(rawPreview: string): VortextGuess {
   const t = normalizeNewlines(rawPreview);
   const lower = t.toLowerCase();
   const len = t.length;
 
-  // 1) HARDCODED: wenn "Einrichtungsgegenstände" existiert -> DAS ist bei dir der richtige Schnitt
-  // (ohne \n-Anker, damit es nicht an CRLF/Spaces scheitert)
+  // 1) Harte Ankerstelle (bei deinem Export 100% richtig)
   const eg = lower.indexOf("einrichtungsgegenstände");
-  if (eg > 0) {
-    return { cutIdx: clampIdx(eg, len), method: "anchor-einrichtungsgegenstaende" };
-  }
+  if (eg > 0) return { cutIdx: clampIdx(eg, len), method: "anchor-einrichtungsgegenstaende" };
 
   // 2) XML Marker (falls echtes XML)
   for (const m of ["<lvpos", "<position", "<pos"]) {
@@ -102,7 +99,6 @@ function findCutIdx(rawPreview: string): VortextGuess {
       (window.includes("hersteller") ? 2 : 0) +
       (window.includes("modell") ? 1 : 0);
 
-    // Bonus wenn kurz vorher Vorbemerkungen vorkommen
     const before = t.slice(Math.max(0, idx - 15000), idx).toLowerCase();
     const bonus = before.includes("allgemeine vorbemerkungen") ? 3 : 0;
 
@@ -117,7 +113,7 @@ function findCutIdx(rawPreview: string): VortextGuess {
     return { cutIdx: clampIdx(bestIdx, len), method: `title+no-qty-unit score=${bestScore}` };
   }
 
-  // 4) Letzter Fallback: NICHT 200k setzen. Wenn wir nix finden -> keine Trennung.
+  // 4) Letzter Fallback: keine Trennung
   return { cutIdx: len, method: "fallback-no-cut-found" };
 }
 
@@ -142,8 +138,9 @@ export async function POST(req: Request) {
     const vortextFullRaw = rawPreview.slice(0, cutIdx);
     const positionsFullRaw = rawPreview.slice(cutIdx);
 
-    // UI-Preview fürs Vortext-Feld (damit die Ausgabe nicht riesig wird)
+    // UI-Preview fürs Vortext-Feld
     const vortextGuessRaw = hardCut(vortextFullRaw, VORTEXT_PREVIEW_MAX_CHARS);
+    const vortextWasTruncated = vortextFullRaw.length > VORTEXT_PREVIEW_MAX_CHARS;
 
     return NextResponse.json({
       filename: f.name,
@@ -153,14 +150,15 @@ export async function POST(req: Request) {
       rawPreview,
       cleanPreview,
 
-      // Vortext
+      // Vortext (Preview + Full)
       vortextGuessRaw,
       vortextGuessClean: stripHtml(vortextGuessRaw),
+      vortextWasTruncated,
       vortextFullRaw,
       vortextFullClean: stripHtml(vortextFullRaw),
 
-      // Positionen
-      positionsGuessRaw: positionsFullRaw, // (hier NICHT noch mal hardCutten – sonst verfälschst du)
+      // Positionen (Full)
+      positionsGuessRaw: positionsFullRaw,
       positionsGuessClean: stripHtml(positionsFullRaw),
 
       debug: {
@@ -169,6 +167,7 @@ export async function POST(req: Request) {
         cutIdx,
         method: g.method,
         vortextFullChars: vortextFullRaw.length,
+        vortextPreviewChars: vortextGuessRaw.length,
         positionsFullChars: positionsFullRaw.length,
         positionsStartsWith: stripHtml(positionsFullRaw).slice(0, 200),
       },
