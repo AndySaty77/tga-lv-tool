@@ -21,20 +21,42 @@ function clampText(s: string, maxChars: number) {
 }
 
 /**
+ * Entfernt HTML/Inline-Markup aus importierten Texten (Word/PDF/GAEB Exporte).
+ * Ziel: KeyFacts sollen lesbar sein, ohne <span ...>.
+ */
+function stripHtml(s: string) {
+  return (s ?? "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
  * Heuristische Vortext-Extraktion:
  * - nimmt typischerweise den Anfang (Vorbemerkungen)
  * - stoppt wenn Positions-/Tabellenstruktur beginnt
  * - hat eine harte Zeichenbegrenzung
  */
 function extractVortext(full: string) {
-  const t = (full ?? "").toString();
-  if (!t.trim()) return "";
+  const raw = (full ?? "").toString();
+  if (!raw.trim()) return "";
+
+  // WICHTIG: erst HTML/Markup entfernen, dann Marker suchen
+  const t = stripHtml(raw);
 
   const HARD_MAX_CHARS = 12_000;
-
   const lower = t.toLowerCase();
 
-  // Marker, ab denen häufig Positionen / Tabellen beginnen
   const markers = [
     "\nposition",
     "\npos.",
@@ -67,19 +89,24 @@ function extractVortext(full: string) {
  * Ziel: gezielt anzeigen, ohne LLM-Kosten.
  */
 function extractKeyFacts(text: string) {
-  const src = (text ?? "").toString();
+  // nochmal strippen, weil hier auch einzelne Zeilen HTML enthalten können
+  const src = stripHtml((text ?? "").toString());
   const t = src.replace(/\r/g, "");
-  const lower = t.toLowerCase();
 
   const pickLine = (pattern: RegExp) => {
     const m = t.match(pattern);
     if (!m) return null;
-    // Nimm die komplette Zeile um den Match herum (bessere Lesbarkeit)
+
     const idx = m.index ?? 0;
     const start = t.lastIndexOf("\n", idx);
     const end = t.indexOf("\n", idx);
-    const line = t.slice(start === -1 ? 0 : start + 1, end === -1 ? t.length : end).trim();
-    return line || m[0].trim();
+    const line = t
+      .slice(start === -1 ? 0 : start + 1, end === -1 ? t.length : end)
+      .trim();
+
+    // final clean + clamp, damit keine Monster-Zeilen im UI landen
+    const out = (line || m[0].trim()).trim();
+    return clampText(out, 240);
   };
 
   const keyFacts: Record<string, string | null> = {
@@ -93,49 +120,47 @@ function extractKeyFacts(text: string) {
     gewaerhleistung: null,
   };
 
-  // Baubeginn / Ausführungsbeginn
   keyFacts.baubeginn =
-    pickLine(/(?:bau|ausführungs)\s*beginn[^:\n]{0,40}[:\-]?\s*[^\n]{0,120}/i) ||
-    pickLine(/(?:beginn)\s*(?:der)?\s*(?:arbeiten|ausführung)[^:\n]{0,40}[:\-]?\s*[^\n]{0,120}/i);
+    pickLine(/(?:bau|ausführungs)\s*beginn[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i) ||
+    pickLine(/(?:beginn)\s*(?:der)?\s*(?:arbeiten|ausführung)[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i);
 
-  // Bauzeit / Ausführungsdauer
   keyFacts.bauzeit =
-    pickLine(/(?:bauzeit|ausführungsdauer|ausführungszeit)[^:\n]{0,40}[:\-]?\s*[^\n]{0,120}/i) ||
-    pickLine(/(?:dauer)\s*(?:der)?\s*(?:ausführung|arbeiten)[^:\n]{0,40}[:\-]?\s*[^\n]{0,120}/i) ||
+    pickLine(/(?:bauzeit|ausführungsdauer|ausführungszeit)[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i) ||
+    pickLine(/(?:dauer)\s*(?:der)?\s*(?:ausführung|arbeiten)[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i) ||
     pickLine(/\b\d{1,3}\s*(?:wochen|woche|tage|tag|monate|monat)\b/i);
 
-  // Fertigstellung / Abnahme / Termin
   keyFacts.fertigstellung =
-    pickLine(/(?:fertigstellung|übergabe|abnahme)\s*(?:bis|spätestens|termin)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,120}/i) ||
-    pickLine(/spätestens\s+bis\s+[^\n]{0,120}/i);
+    pickLine(/(?:fertigstellung|übergabe|abnahme)\s*(?:bis|spätestens|termin)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i) ||
+    pickLine(/spätestens\s+bis\s+[^\n]{0,180}/i);
 
-  // Ausführungsfrist / Fristen allgemein
   keyFacts.ausfuehrungsfrist =
-    pickLine(/(?:ausführungsfrist|fristenplan|terminplan)[^:\n]{0,40}[:\-]?\s*[^\n]{0,120}/i) ||
-    pickLine(/(?:frist)\s*(?:für)?\s*(?:ausführung|arbeiten)[^:\n]{0,40}[:\-]?\s*[^\n]{0,120}/i);
+    pickLine(/(?:ausführungsfrist|fristenplan|terminplan)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i) ||
+    pickLine(/(?:frist)\s*(?:für)?\s*(?:ausführung|arbeiten)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i);
 
-  // Angebotsfrist
   keyFacts.fristAngebot =
-    pickLine(/(?:angebotsfrist|abgabefrist|abgabe\s*frist)[^:\n]{0,40}[:\-]?\s*[^\n]{0,120}/i) ||
-    pickLine(/(?:angebot)\s*(?:abgabe|einreichung)\s*(?:bis|spätestens)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,120}/i);
+    pickLine(/(?:angebotsfrist|abgabefrist|abgabe\s*frist)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i) ||
+    pickLine(/(?:angebot)\s*(?:abgabe|einreichung)\s*(?:bis|spätestens)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i);
 
-  // Bindefrist
   keyFacts.bindefrist =
-    pickLine(/(?:bindefrist|angebot\s*bindefrist|bindend\s*bis)[^:\n]{0,40}[:\-]?\s*[^\n]{0,120}/i);
+    pickLine(/(?:bindefrist|angebot\s*bindefrist|bindend\s*bis)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i);
 
-  // Vertragsstrafe / Pönale
   keyFacts.vertragsstrafe =
-    pickLine(/(?:vertragsstrafe|pönale|konventionalstrafe)[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i);
+    pickLine(/(?:vertragsstrafe|pönale|konventionalstrafe)[^:\n]{0,40}[:\-]?\s*[^\n]{0,220}/i);
 
-  // Gewährleistung
   keyFacts.gewaerhleistung =
-    pickLine(/(?:gewährleistung|mängelhaftung|verjährung)\s*(?:frist|dauer)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i) ||
+    pickLine(/(?:gewährleistung|mängelhaftung|verjährung)\s*(?:frist|dauer)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,220}/i) ||
     pickLine(/\b(?:4|5)\s*(?:jahre|jahr)\b/i);
 
-  // Nur Werte behalten, die wirklich gefunden wurden
+  // dedupe: gleiche Zeile nicht in 2 Feldern ausgeben
+  const seen = new Set<string>();
   const cleaned: Record<string, string> = {};
   for (const [k, v] of Object.entries(keyFacts)) {
-    if (v && v.trim()) cleaned[k] = v.trim();
+    const vv = (v ?? "").trim();
+    if (!vv) continue;
+    const norm = vv.toLowerCase();
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    cleaned[k] = vv;
   }
 
   return cleaned;
@@ -147,10 +172,7 @@ export async function POST(req: Request) {
     const text = (body?.text ?? "").toString().trim();
 
     if (!text) {
-      return NextResponse.json(
-        { riskClauses: [], keyFacts: {}, error: "No text provided" },
-        { status: 400 }
-      );
+      return NextResponse.json({ riskClauses: [], keyFacts: {}, error: "No text provided" }, { status: 400 });
     }
 
     // 1) Vortext extrahieren (damit LLM nicht das ganze LV bekommt)
