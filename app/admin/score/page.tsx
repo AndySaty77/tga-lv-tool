@@ -1,3 +1,4 @@
+// app/admin/score/page.tsx
 "use client";
 
 import { useMemo, useRef, useState, type DragEvent } from "react";
@@ -210,8 +211,7 @@ function riskTone(level: "low" | "medium" | "high") {
 }
 
 /**
- * UI-seitig: Vortext grob aus Anfang extrahieren (Server macht es eh nochmal).
- * Wichtig: harte Begrenzung, damit Uploads nicht ewig im Browser hängen.
+ * UI-seitig: Vortext grob aus Anfang extrahieren (Fallback).
  */
 function extractVortextUI(full: string) {
   const t = (full ?? "").toString();
@@ -221,10 +221,12 @@ function extractVortextUI(full: string) {
   const hardCut = (s: string) => (s.length > HARD_MAX_CHARS ? s.slice(0, HARD_MAX_CHARS) : s);
 
   const markers = [
+    "\ntitel ",
+    "\nlos ",
+    "\nabschnitt ",
     "\nposition",
     "\npos.",
     "\npos ",
-    "\nleistungstext",
     "\nleistungsverzeichnis",
     "\nkurztext",
     "\nlangtext",
@@ -279,6 +281,13 @@ function prettyKey(k: string) {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+// ===== SPLIT RESULT =====
+type SplitResult = {
+  vortext: string;
+  positions: string;
+  meta?: any;
+};
+
 export default function ScorePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -292,12 +301,20 @@ export default function ScorePage() {
   const [dragOver, setDragOver] = useState(false);
 
   const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
+  const [lastFile, setLastFile] = useState<File | null>(null);
 
   // ===== GAEB PREVIEW STATE =====
   const [gaebPreviewLoading, setGaebPreviewLoading] = useState(false);
   const [gaebPreviewError, setGaebPreviewError] = useState<string | null>(null);
   const [gaebPreview, setGaebPreview] = useState<any>(null);
-  const [gaebTab, setGaebTab] = useState<"vortext" | "positions" | "raw" | "clean">("vortext");
+  const [gaebTab, setGaebTab] = useState<"vortext" | "positions" | "raw" | "clean" | "llm_vortext" | "llm_positions">(
+    "vortext"
+  );
+
+  // ===== SPLIT (LLM) STATE =====
+  const [splitLoading, setSplitLoading] = useState(false);
+  const [splitError, setSplitError] = useState<string | null>(null);
+  const [split, setSplit] = useState<SplitResult | null>(null);
 
   // ===== VORTEXT (LLM) STATE =====
   const [vortextLoading, setVortextLoading] = useState(false);
@@ -330,71 +347,10 @@ export default function ScorePage() {
     setGaebTab("vortext");
   };
 
-  const analyze = async (textOverride?: string) => {
-    const textToUse = (textOverride ?? lvText).trim();
-    if (!textToUse) return;
-
-    setError(null);
-    setLoading(true);
-    setResult(null);
-    resetVortext();
-
-    try {
-      const debug =
-        typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
-      const apiUrl = debug ? "/api/score?debug=1" : "/api/score";
-
-      const res = await fetch(apiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lvText: textToUse }),
-      });
-
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`API ${res.status}: ${t}`);
-      }
-
-      const data = (await res.json()) as ScoreResult;
-      setResult(data);
-
-      const cats = new Set((data.findingsSorted ?? []).map((f) => f.category));
-      if (categoryFilter !== "all" && !cats.has(categoryFilter)) setCategoryFilter("all");
-
-      // ===== VORTEXT ANALYSE =====
-      setVortextLoading(true);
-      try {
-        const vRes = await fetch("/api/analyze-vortext", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: extractVortextUI(textToUse) }),
-        });
-
-        const vData = await vRes.json();
-
-        if (!vRes.ok) {
-          setVortextError(vData?.message || vData?.error || "Vortext Analyse fehlgeschlagen");
-          setRiskClauses([]);
-          setKeyFacts({});
-        } else {
-          const clauses = Array.isArray(vData?.riskClauses) ? vData.riskClauses : [];
-          setRiskClauses(clauses);
-
-          const facts = vData?.keyFacts && typeof vData.keyFacts === "object" ? vData.keyFacts : {};
-          setKeyFacts(facts);
-        }
-      } catch (e: any) {
-        setVortextError(e?.message || "Vortext Analyse fehlgeschlagen");
-        setRiskClauses([]);
-        setKeyFacts({});
-      } finally {
-        setVortextLoading(false);
-      }
-    } catch (e: any) {
-      setError(e?.message ?? "Unbekannter Fehler");
-    } finally {
-      setLoading(false);
-    }
+  const resetSplit = () => {
+    setSplit(null);
+    setSplitError(null);
+    setSplitLoading(false);
   };
 
   const runGaebPreview = async (file: File) => {
@@ -415,11 +371,125 @@ export default function ScorePage() {
     }
   };
 
+  const runGaebSplitLLM = async (file: File) => {
+    resetSplit();
+    setSplitLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch("/api/gaeb-split-llm", { method: "POST", body: fd });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.message || j?.error || "gaeb-split-llm failed");
+      const s: SplitResult = {
+        vortext: String(j?.vortext ?? ""),
+        positions: String(j?.positions ?? ""),
+        meta: j?.meta ?? j?.debug ?? null,
+      };
+      setSplit(s);
+    } catch (e: any) {
+      setSplitError(e?.message || "gaeb-split-llm failed");
+      setSplit(null);
+    } finally {
+      setSplitLoading(false);
+    }
+  };
+
+  const analyzeVortextLLM = async (vortext: string) => {
+    setVortextLoading(true);
+    setVortextError(null);
+    setRiskClauses([]);
+    setKeyFacts({});
+
+    try {
+      const vRes = await fetch("/api/analyze-vortext", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: vortext }),
+      });
+
+      const vData = await vRes.json();
+
+      if (!vRes.ok) {
+        setVortextError(vData?.message || vData?.error || "Vortext Analyse fehlgeschlagen");
+        setRiskClauses([]);
+        setKeyFacts({});
+      } else {
+        const clauses = Array.isArray(vData?.riskClauses) ? vData.riskClauses : [];
+        setRiskClauses(clauses);
+
+        const facts = vData?.keyFacts && typeof vData.keyFacts === "object" ? vData.keyFacts : {};
+        setKeyFacts(facts);
+      }
+    } catch (e: any) {
+      setVortextError(e?.message || "Vortext Analyse fehlgeschlagen");
+      setRiskClauses([]);
+      setKeyFacts({});
+    } finally {
+      setVortextLoading(false);
+    }
+  };
+
+  const analyze = async (textOverride?: string) => {
+    const textToUse = (textOverride ?? lvText).trim();
+    if (!textToUse) return;
+
+    setError(null);
+    setLoading(true);
+    setResult(null);
+    resetVortext();
+
+    try {
+      const debug =
+        typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
+      const apiUrl = debug ? "/api/score?debug=1" : "/api/score";
+
+      // Wenn wir einen Split haben: score sauber getrennt schicken
+      const payload: any = { lvText: textToUse };
+      if (split?.vortext || split?.positions) {
+        payload.vortext = split?.vortext ?? "";
+        payload.positions = split?.positions ?? "";
+      }
+
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`API ${res.status}: ${t}`);
+      }
+
+      const data = (await res.json()) as ScoreResult;
+      setResult(data);
+
+      const cats = new Set((data.findingsSorted ?? []).map((f) => f.category));
+      if (categoryFilter !== "all" && !cats.has(categoryFilter)) setCategoryFilter("all");
+
+      // ===== VORTEXT ANALYSE =====
+      // Priorität: Split-LLM Vortext -> sonst UI-Fallback
+      const vortextForRisk = (split?.vortext ?? "").trim() || extractVortextUI(textToUse);
+      if (vortextForRisk.trim().length > 0) {
+        await analyzeVortextLLM(vortextForRisk);
+      } else {
+        setVortextError("Vortext ist leer (Split/Extraktion hat nichts geliefert).");
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Unbekannter Fehler");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const loadFile = async (file: File) => {
     setError(null);
     setResult(null);
     resetVortext();
     resetGaebPreview();
+    resetSplit();
+
+    setLastFile(file);
 
     if (file.size > MAX_FILE_BYTES) {
       setFileMeta({ name: file.name, size: file.size });
@@ -428,18 +498,16 @@ export default function ScorePage() {
       return;
     }
 
-    // Preview call zuerst (damit wir "sehen" können, was wirklich im File steckt)
+    // 1) Preview (Debug)
     await runGaebPreview(file);
 
+    // 2) LLM Split (Echte Trennung, stabiler als Guess)
+    await runGaebSplitLLM(file);
+
+    // 3) Originaltext in Textarea (Debug/Transparenz)
     const text = await file.text();
     setFileMeta({ name: file.name, size: file.size });
-
-    // Default: originaler Text
     setLvText(text);
-
-    // Optional besser: wenn Preview Vortext liefert, setze Textfeld direkt auf VortextGuessClean
-    // (du kannst das wieder auskommentieren, wenn du es nicht willst)
-    // if (gaebPreview?.vortextGuessClean) setLvText(gaebPreview.vortextGuessClean);
 
     if (autoAnalyze) await analyze(text);
   };
@@ -529,12 +597,18 @@ export default function ScorePage() {
   }, [keyFacts]);
 
   const gaebTextForTab = useMemo(() => {
+    if (gaebTab === "llm_vortext") return (split?.vortext ?? "").toString();
+    if (gaebTab === "llm_positions") return (split?.positions ?? "").toString();
+
     if (!gaebPreview) return "";
     if (gaebTab === "vortext") return gaebPreview.vortextGuessClean ?? "";
     if (gaebTab === "positions") return gaebPreview.positionsGuessClean ?? "";
     if (gaebTab === "raw") return gaebPreview.rawPreview ?? "";
     return gaebPreview.cleanPreview ?? "";
-  }, [gaebPreview, gaebTab]);
+  }, [gaebPreview, gaebTab, split]);
+
+  const effectiveVortextLen = (split?.vortext ?? "").trim().length;
+  const effectivePositionsLen = (split?.positions ?? "").trim().length;
 
   return (
     <div style={{ padding: 28, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" }}>
@@ -542,7 +616,7 @@ export default function ScorePage() {
         <div>
           <h1 style={{ margin: 0, fontSize: 26 }}>TGA LV Score</h1>
           <div style={{ color: "#666", marginTop: 6 }}>
-            Upload oder Text rein, Score raus. Und jetzt: GAEB-Preview, damit wir Vortext/Positionen sauber sehen.
+            Upload oder Text rein, Score raus. Jetzt mit LLM-Split (Vortext/Positionen) statt Guess-Heuristik.
           </div>
         </div>
         <a href="/admin/triggers" style={{ color: "#111", textDecoration: "underline" }}>
@@ -583,7 +657,7 @@ export default function ScorePage() {
           <div>
             <div style={{ fontWeight: 900 }}>Drag & Drop Datei hier rein</div>
             <div style={{ color: "#666", marginTop: 4 }}>
-              MVP: Datei wird als Text eingelesen. Zusätzlich GAEB-Preview (Raw/Clean/Vortext/Positionen).
+              GAEB-Preview (Debug) + LLM-Split (Produktiv): trennt Vortext/Positionen robust.
             </div>
             {fileMeta && (
               <div style={{ marginTop: 8, color: "#111", fontWeight: 700 }}>
@@ -660,13 +734,38 @@ export default function ScorePage() {
           </button>
 
           <button
+            onClick={async () => {
+              // Manual re-split wenn Datei vorhanden
+              if (!lastFile) {
+                setSplitError("Kein File vorhanden (nur Text im Feld). Re-Split geht nur mit Datei.");
+                return;
+              }
+              await runGaebSplitLLM(lastFile);
+            }}
+            disabled={splitLoading || !lastFile}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              background: "#fff",
+              cursor: splitLoading || !lastFile ? "default" : "pointer",
+              fontWeight: 800,
+            }}
+            title={!lastFile ? "Nur möglich, wenn eine Datei geladen wurde." : ""}
+          >
+            {splitLoading ? "Splitte..." : "LLM-Split neu ausführen"}
+          </button>
+
+          <button
             onClick={() => {
               setLvText("");
               setResult(null);
               setError(null);
               setFileMeta(null);
+              setLastFile(null);
               resetVortext();
               resetGaebPreview();
+              resetSplit();
             }}
             style={{
               padding: "10px 14px",
@@ -689,18 +788,31 @@ export default function ScorePage() {
       {/* GAEB Preview Card */}
       <div style={{ marginTop: 14, border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-          <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>GAEB PREVIEW</div>
+          <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>GAEB PREVIEW + SPLIT</div>
           <div style={{ color: "#666", fontWeight: 700 }}>
             {gaebPreviewLoading ? "Lade…" : gaebPreview ? `${gaebPreview.filename} (${fmtKB(gaebPreview.size)})` : "—"}
           </div>
         </div>
 
-        {gaebPreviewError && <div style={{ marginTop: 10, color: "#b00020", fontWeight: 800 }}>{gaebPreviewError}</div>}
+        {(gaebPreviewError || splitError) && (
+          <div style={{ marginTop: 10, color: "#b00020", fontWeight: 800 }}>
+            {gaebPreviewError ? `Preview: ${gaebPreviewError}` : ""}
+            {gaebPreviewError && splitError ? " • " : ""}
+            {splitError ? `Split: ${splitError}` : ""}
+          </div>
+        )}
 
-        {!gaebPreviewLoading && gaebPreview && (
+        {!gaebPreviewLoading && (gaebPreview || split) && (
           <>
             <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {(["vortext", "positions", "raw", "clean"] as const).map((t) => (
+              {([
+                "llm_vortext",
+                "llm_positions",
+                "vortext",
+                "positions",
+                "raw",
+                "clean",
+              ] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setGaebTab(t)}
@@ -714,7 +826,17 @@ export default function ScorePage() {
                     fontWeight: 800,
                   }}
                 >
-                  {t === "vortext" ? "Vortext (guess)" : t === "positions" ? "Positionen (guess)" : t === "raw" ? "Raw" : "Clean"}
+                  {t === "llm_vortext"
+                    ? "LLM Vortext"
+                    : t === "llm_positions"
+                    ? "LLM Positionen"
+                    : t === "vortext"
+                    ? "Vortext (guess)"
+                    : t === "positions"
+                    ? "Positionen (guess)"
+                    : t === "raw"
+                    ? "Raw"
+                    : "Clean"}
                 </button>
               ))}
 
@@ -751,7 +873,16 @@ export default function ScorePage() {
             </pre>
 
             <div style={{ marginTop: 8, color: "#666", fontSize: 12, fontWeight: 700 }}>
-              Debug: raw {gaebPreview.debug?.rawChars} chars • preview {gaebPreview.debug?.previewChars} • vortext {gaebPreview.debug?.vortextChars}
+              {split ? (
+                <>
+                  Split(LLM): vortext {effectiveVortextLen} chars • positions {effectivePositionsLen} chars
+                </>
+              ) : (
+                <>
+                  Debug: raw {gaebPreview?.debug?.rawChars} chars • preview {gaebPreview?.debug?.previewChars} • vortext{" "}
+                  {gaebPreview?.debug?.vortextChars}
+                </>
+              )}
             </div>
           </>
         )}
@@ -828,7 +959,7 @@ export default function ScorePage() {
             )}
 
             <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
-              Hinweis: Key Facts bleiben erstmal “Best Effort”. Erst GAEB sauber splitten, dann werden sie stabil.
+              Hinweis: Vortext kommt jetzt aus LLM-Split. Wenn der leer ist, stimmt der GAEB-Import oder die Datei nicht.
             </div>
           </div>
 
@@ -858,7 +989,7 @@ export default function ScorePage() {
 
             {!vortextLoading && !vortextError && riskClauses.length === 0 && (
               <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>
-                Keine auffälligen Risikoformulierungen erkannt. (Wenn GAEB-Vortext leer ist, ist das normal.)
+                Keine auffälligen Risikoformulierungen erkannt.
               </div>
             )}
 
@@ -897,7 +1028,7 @@ export default function ScorePage() {
             </div>
 
             <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
-              Hinweis: Im nächsten Schritt ersetzen wir “guess” durch echtes GAEB-Parsing (XML-Struktur).
+              Hinweis: Das ist jetzt wirklich Vortext (LLM-Split) – nicht mehr “guess bis 6.4”.
             </div>
           </div>
 
