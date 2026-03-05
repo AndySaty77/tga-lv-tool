@@ -17,6 +17,7 @@ const HARD_MAX_CHARS = 12000;
 const HARD_MAX_VALUE_CHARS = 280;
 const MAX_RISK_CLAUSES = 12;
 
+// ========= Helpers =========
 function hardCut(s: string, max = HARD_MAX_CHARS) {
   const t = (s ?? "").toString();
   return t.length > max ? t.slice(0, max) : t;
@@ -24,9 +25,11 @@ function hardCut(s: string, max = HARD_MAX_CHARS) {
 
 function stripHtml(input: string) {
   let s = (input ?? "").toString();
+
   s = s.replace(/<script[\s\S]*?<\/script>/gi, " ");
   s = s.replace(/<style[\s\S]*?<\/style>/gi, " ");
   s = s.replace(/<\/?[^>]+>/g, " ");
+
   s = s
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
@@ -34,9 +37,11 @@ function stripHtml(input: string) {
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'");
+
   s = s.replace(/\u00A0/g, " ");
   s = s.replace(/[ \t]+/g, " ");
   s = s.replace(/\s*\n\s*/g, "\n");
+
   return s.trim();
 }
 
@@ -47,7 +52,7 @@ function sanitizeVortext(raw: string) {
 function normVal(v: any) {
   let s = (v ?? "").toString();
 
-  // falls doch noch HTML-Reste kommen
+  // falls noch Tag-Reste drin sind
   if (/<\/?[^>]+>/.test(s)) s = s.replace(/<\/?[^>]+>/g, " ");
 
   s = s.replace(/\s+/g, " ").trim();
@@ -59,11 +64,25 @@ function isGarbageValue(v: string) {
   const s = (v ?? "").trim();
   if (!s) return true;
   if (s.length < 3) return true;
-  if (/^(\[|z|\[z|\[z\.\b)$/i.test(s)) return true;
-  if (/^(\]|\/span>|<\/span>)$/i.test(s)) return true;
-  // “Platzhalter” im Text
-  if (/\[z\.?b\.?\]/i.test(s)) return true;
+  if (/^(<\/span>|\/span>|<span>|span)$/i.test(s)) return true;
+  if (/^\[z/i.test(s)) return true; // [z oder [z.B....
+  if (/\[z\.?\s*b\.?\]/i.test(s)) return true;
   return false;
+}
+
+function mergeKeyFactsPreferRegex(regexFacts: KeyFacts, llmFacts: KeyFacts): KeyFacts {
+  const out: KeyFacts = { ...(regexFacts ?? {}) };
+
+  for (const [k, v] of Object.entries(llmFacts ?? {})) {
+    const vv = normVal(v);
+    if (!vv) continue;
+    if (!out[k] || !out[k].trim() || isGarbageValue(out[k])) out[k] = vv; // Lücken + Müll ersetzen
+  }
+
+  for (const k of Object.keys(out)) out[k] = normVal(out[k]);
+  for (const [k, v] of Object.entries(out)) if (isGarbageValue(v)) delete out[k];
+
+  return out;
 }
 
 // ========= KeyFacts Regex =========
@@ -75,6 +94,7 @@ function extractKeyFactsRegex(input: string): KeyFacts {
     const m = re.exec(text);
     return m?.[1] ? m[1].trim() : "";
   };
+
   const pickAny = (res: RegExp[]) => {
     for (const re of res) {
       const v = pick(re);
@@ -85,6 +105,7 @@ function extractKeyFactsRegex(input: string): KeyFacts {
 
   const out: KeyFacts = {};
 
+  // Termine/Fristen
   out.baubeginn = pickAny([
     /Baubeginn\s*[:\-]?\s*([^\n\r;.]{3,120})/i,
     /Ausführungsbeginn\s*[:\-]?\s*([^\n\r;.]{3,120})/i,
@@ -93,6 +114,7 @@ function extractKeyFactsRegex(input: string): KeyFacts {
   out.fertigstellung = pickAny([
     /Fertigstellung\s*[:\-]?\s*([^\n\r;.]{3,120})/i,
     /Abnahme\s*[:\-]?\s*([^\n\r;.]{3,120})/i,
+    /Übergabe\s*[:\-]?\s*([^\n\r;.]{3,120})/i,
   ]);
 
   out.bauzeit = pickAny([
@@ -102,9 +124,9 @@ function extractKeyFactsRegex(input: string): KeyFacts {
   ]);
 
   out.ausfuehrungsfrist = pickAny([
-    /Ausführungsfrist\s*[:\-]?\s*([^\n\r;.]{3,160})/i,
-    /Terminplan\s*[:\-]?\s*([^\n\r;.]{3,160})/i,
-    /Bauzeitenplan\s*[:\-]?\s*([^\n\r;.]{3,160})/i,
+    /Ausführungsfrist\s*[:\-]?\s*([^\n\r;.]{3,180})/i,
+    /Terminplan\s*[:\-]?\s*([^\n\r;.]{3,180})/i,
+    /Bauzeitenplan\s*[:\-]?\s*([^\n\r;.]{3,180})/i,
   ]);
 
   out.fristAngebot = pickAny([
@@ -112,11 +134,9 @@ function extractKeyFactsRegex(input: string): KeyFacts {
     /Abgabefrist\s*[:\-]?\s*([^\n\r;.]{3,120})/i,
   ]);
 
-  out.bindefrist = pickAny([
-    /Bindefrist\s*[:\-]?\s*([^\n\r;.]{3,120})/i,
-  ]);
+  out.bindefrist = pickAny([/Bindefrist\s*[:\-]?\s*([^\n\r;.]{3,120})/i]);
 
-  // VOB/B, VOB/C, BGB
+  // VOB/B / BGB
   const hasVOB = /(vob\/b|vob b|vob\/c|vob c|\bvob\/?b\b|\bvob\/?c\b)/i.test(text);
   const hasBGB = /\bBGB\b/i.test(text);
   if (hasVOB) out.vob_bgb = "VOB";
@@ -124,39 +144,38 @@ function extractKeyFactsRegex(input: string): KeyFacts {
 
   // Rangfolge
   {
-    const m = /Rangfolge\s+(der\s+)?Vertragsunterlagen\s*[:\-]?\s*([^\n\r;.]{3,200})/i.exec(text);
+    const m = /Rangfolge\s+(der\s+)?Vertragsunterlagen\s*[:\-]?\s*([^\n\r;.]{3,220})/i.exec(text);
     out.rangfolge = m?.[2]?.trim() ?? "";
   }
 
-  // Gewährleistung – hier bewusst “bis Zeilenende”
-  out.gewaerhleistung = pickAny([
-    /Gewährleistung\s*(beträgt|:)?\s*([^\n\r]{3,200})/i, // Gruppe 2
-  ]);
-  if (out.gewaerhleistung) {
-    // oben pick() nimmt Gruppe 1 — daher korrigieren:
-    const m = /Gewährleistung\s*(beträgt|:)?\s*([^\n\r]{3,200})/i.exec(text);
-    out.gewaerhleistung = m?.[2]?.trim() ?? out.gewaerhleistung;
+  // Gewährleistung (Zeile)
+  {
+    const m = /Gewährleistung\s*(beträgt|:)?\s*([^\n\r]{3,220})/i.exec(text);
+    out.gewaerhleistung = m?.[2]?.trim() ?? "";
   }
 
+  // Vertragsstrafe
   out.vertragsstrafe = pickAny([
     /Vertragsstrafe\s*[:\-]?\s*([^\n\r]{3,220})/i,
     /Pönale\s*[:\-]?\s*([^\n\r]{3,220})/i,
   ]);
 
-  out.zahlungsbedingungen = pickAny([
-    /Zahlungsbedingungen\s*[:\-]?\s*([^\n\r]{3,220})/i,
-  ]);
+  // Zahlungsbedingungen
+  out.zahlungsbedingungen = pickAny([/Zahlungsbedingungen\s*[:\-]?\s*([^\n\r]{3,220})/i]);
 
+  // Abschlagszahlung
   out.abschlagszahlung = pickAny([
     /Abschlagszahlung(?:en)?\s*[:\-]?\s*([^\n\r]{3,220})/i,
     /Abschlagsrechn(?:ung|ungen)\s*[:\-]?\s*([^\n\r]{3,220})/i,
   ]);
 
+  // Schlussrechnung / Zahlungsziel
   out.schlussrechnung = pickAny([
     /Schlussrechnung\s*[:\-]?\s*([^\n\r]{3,220})/i,
     /Zahlungsziel\s*[:\-]?\s*([^\n\r]{3,220})/i,
   ]);
 
+  // Preisgleitung
   if (/(preisgleit|stoffpreis|rohstoff|index|gleitklausel)/i.test(lower)) {
     out.preisgleitung = pickAny([
       /Preisgleit(?:klausel|ung)\s*[:\-]?\s*([^\n\r]{3,220})/i,
@@ -165,14 +184,13 @@ function extractKeyFactsRegex(input: string): KeyFacts {
     if (!out.preisgleitung) out.preisgleitung = "Hinweis auf Preisgleitung/Stoffpreisregelung erkannt";
   }
 
-  // normalize + garbage raus
   for (const k of Object.keys(out)) out[k] = normVal(out[k]);
   for (const [k, v] of Object.entries(out)) if (isGarbageValue(v)) delete out[k];
 
   return out;
 }
 
-// ========= Risk fallback (wenn LLM parse kaputt) =========
+// ========= Risk fallback (wenn LLM leer/kaputt) =========
 function fallbackRiskClausesRegex(v: string): RiskClause[] {
   const t = (v ?? "").toString();
 
@@ -181,13 +199,13 @@ function fallbackRiskClausesRegex(v: string): RiskClause[] {
       re: /Spätere Forderungen[^.\n]*werden nicht anerkannt/i,
       type: "Keine Nachforderungen",
       riskLevel: "high",
-      interp: "Nachträge/Mehrkosten werden pauschal abgewehrt → hohes Nachtragsrisiko bzw. Streitpotenzial.",
+      interp: "Nachträge/Mehrkosten werden pauschal abgewehrt → hohes Streit-/Nachtragsrisiko.",
     },
     {
-      re: /Einheitspreise[^.\n]*(beinhalten|umfassen)[^.\n]*(auch wenn|auch dann|selbst wenn)[^.\n]*nicht explizit/i,
-      type: "EP umfasst alles (auch nicht genannte Leistungen)",
+      re: /Einheitspreise[^.\n]*(beinhalten|umfassen)[^.\n]*(auch wenn|selbst wenn)[^.\n]*nicht explizit/i,
+      type: "EP umfasst nicht genannte Leistungen",
       riskLevel: "high",
-      interp: "Leistungsabgrenzung wird zu deinen Ungunsten ausgelegt → Kalkulations- und Nachtragsrisiko.",
+      interp: "Leistungsabgrenzung zu deinen Ungunsten → Kalkulations-/Nachtragsrisiko.",
     },
     {
       re: /Nachträge[^.\n]*nur anerkannt[^.\n]*schriftlich/i,
@@ -197,7 +215,7 @@ function fallbackRiskClausesRegex(v: string): RiskClause[] {
     },
     {
       re: /täglich besenrein/i,
-      type: "Sauberkeitspflicht / Baustellenlogistik",
+      type: "Sauberkeitspflichten",
       riskLevel: "low",
       interp: "Zusätzlicher Aufwand/Logistik in EP einkalkulieren.",
     },
@@ -224,18 +242,17 @@ function fallbackRiskClausesRegex(v: string): RiskClause[] {
   return out.slice(0, MAX_RISK_CLAUSES);
 }
 
-// ========= JSON extraction (robust) =========
+// ========= Robust JSON parsing =========
 function extractJsonCandidate(raw: string) {
   const s = (raw ?? "").toString().trim();
   if (!s) return "";
 
-  // 1) ```json ... ```
   const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(s);
   if (fenced?.[1]) return fenced[1].trim();
 
-  // 2) erster { ... } Block mit Brace-Balancing
   const start = s.indexOf("{");
   if (start === -1) return "";
+
   let depth = 0;
   for (let i = start; i < s.length; i++) {
     const c = s[i];
@@ -254,6 +271,18 @@ function safeParseJson(raw: string) {
   } catch {
     return null;
   }
+}
+
+function cleanRiskClauses(list: any[]): RiskClause[] {
+  return (Array.isArray(list) ? list : [])
+    .slice(0, MAX_RISK_CLAUSES)
+    .map((r: any) => ({
+      type: normVal(r?.type) || "Risiko",
+      riskLevel: r?.riskLevel === "high" || r?.riskLevel === "medium" || r?.riskLevel === "low" ? r.riskLevel : "low",
+      text: (r?.text ?? "").toString().trim().slice(0, 900),
+      interpretation: (r?.interpretation ?? "").toString().trim().slice(0, 500),
+    }))
+    .filter((r) => r.text.length > 0);
 }
 
 // ========= OpenAI =========
@@ -291,18 +320,6 @@ function buildPrompt(vortext: string, missingKeys: string[]) {
   ];
 }
 
-function cleanRiskClauses(list: any[]): RiskClause[] {
-  return (Array.isArray(list) ? list : [])
-    .slice(0, MAX_RISK_CLAUSES)
-    .map((r: any) => ({
-      type: normVal(r?.type) || "Risiko",
-      riskLevel: r?.riskLevel === "high" || r?.riskLevel === "medium" || r?.riskLevel === "low" ? r.riskLevel : "low",
-      text: (r?.text ?? "").toString().trim().slice(0, 900),
-      interpretation: (r?.interpretation ?? "").toString().trim().slice(0, 500),
-    }))
-    .filter((r) => r.text.length > 0);
-}
-
 // ========= Route =========
 export async function POST(req: Request) {
   try {
@@ -332,10 +349,8 @@ export async function POST(req: Request) {
       "preisgleitung",
     ];
 
-    // Wichtig: wenn Regex Müll liefert -> als missing behandeln
     const missing = KEYSET.filter((k) => !regexFacts[k] || isGarbageValue(regexFacts[k]));
 
-    // LLM Call
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
     const completion = await openai.chat.completions.create({
@@ -350,13 +365,12 @@ export async function POST(req: Request) {
 
     const llmFacts: KeyFacts =
       parsed?.keyFacts && typeof parsed.keyFacts === "object" ? (parsed.keyFacts as KeyFacts) : {};
+
     const llmRisk: RiskClause[] = parsed ? cleanRiskClauses(parsed.riskClauses) : [];
 
     const keyFacts = mergeKeyFactsPreferRegex(regexFacts, llmFacts);
 
-    // Fallback: wenn LLM-JSON nicht parsebar oder liefert 0 Risiken, nutze Regex-Risiken
-    const riskClauses =
-      llmRisk.length > 0 ? llmRisk : fallbackRiskClausesRegex(vortext);
+    const riskClauses = llmRisk.length > 0 ? llmRisk : fallbackRiskClausesRegex(vortext);
 
     return NextResponse.json(
       {
