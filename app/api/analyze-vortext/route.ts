@@ -37,35 +37,39 @@ export async function POST(req: Request) {
     const safeText = clampText(text, MAX_CHARS);
 
     const prompt = `
-Du bist TGA Sachverständiger.
+Du bist TGA-Sachverständiger und Prüfer für Leistungsverzeichnisse.
 
-Analysiere folgenden LV Text auf Risikoformulierungen in Vorbemerkungen (Vortext).
-Suche insbesondere nach:
-- pauschalen Nebenleistungen
-- unklaren Leistungsabgrenzungen
-- fehlenden Normbezügen
-- unbegrenzten Leistungsumfängen
-- Gewerkekoordination
-- Funktionsgarantien
-- unklare Verantwortlichkeiten
+Aufgabe:
+Finde in den Vorbemerkungen/Vortexten Risikoformulierungen, die Kosten-, Haftungs- oder Nachtragsrisiken auf den Auftragnehmer verlagern.
+
+Markiere ALLES, was nach:
+- pauschalen Nebenleistungen / "mit abgegolten"
+- unbegrenztem Leistungsumfang / Funktionsfähigkeit / Vollständigkeit
+- unklarer Abgrenzung / "alle erforderlichen Leistungen"
+- Koordinations-/GU-Pflichten
+- Normenpflicht ohne konkrete Norm oder ohne Vergütung
+- Material-/Montagepauschalen
+- Dokumentations-/Inbetriebnahme-/Prüfpflichten ohne klare Leistung/Abrechnung
+klingt.
 
 WICHTIG:
-- Zitiere im Feld "text" nur den relevanten Auszug (max. 300 Zeichen).
+- Wenn du auch nur eine plausible Risiko-Klausel siehst, gib sie aus. Lieber 1–3 gute Treffer als 0.
+- Zitiere im Feld "text" den exakten Satz oder Halbsatz aus dem Text (max. 300 Zeichen).
 - Liefere maximal 12 riskClauses.
 
-Antworte NUR als JSON im Format:
+Antworte NUR als JSON:
 {
   "riskClauses":[
     {
-      "type":"string",
+      "type":"Pauschalrisiko | Leistungsumfang | Normenrisiko | Koordination | Materialrisiko | Doku/IBN/Prüfung | Sonstiges",
       "riskLevel":"low | medium | high",
-      "text":"original text excerpt",
-      "interpretation":"technical explanation"
+      "text":"...",
+      "interpretation":"kurz und fachlich, warum das riskant ist"
     }
   ]
 }
 
-LV TEXT:
+TEXT:
 ${safeText}
 `.trim();
 
