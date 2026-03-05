@@ -1,7 +1,8 @@
+// src/app/api/analyze-vortext/route.ts
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-// ---------- Types (must match UI) ----------
+// ========= Types (UI-kompatibel) =========
 type RiskClause = {
   type: string;
   riskLevel: "low" | "medium" | "high";
@@ -11,9 +12,10 @@ type RiskClause = {
 
 type KeyFacts = Record<string, string>;
 
-// ---------- Hard limits ----------
+// ========= Limits =========
 const HARD_MAX_CHARS = 12000;
-const HARD_MAX_VALUE_CHARS = 280; // keep UI card readable
+const HARD_MAX_VALUE_CHARS = 280;
+const MAX_RISK_CLAUSES = 12;
 
 function hardCut(s: string, max = HARD_MAX_CHARS) {
   const t = (s ?? "").toString();
@@ -28,17 +30,20 @@ function normVal(v: any) {
 
 function mergeKeyFactsPreferRegex(regexFacts: KeyFacts, llmFacts: KeyFacts): KeyFacts {
   const out: KeyFacts = { ...(regexFacts ?? {}) };
+
   for (const [k, v] of Object.entries(llmFacts ?? {})) {
     const vv = normVal(v);
     if (!vv) continue;
-    if (!out[k] || !out[k].trim()) out[k] = vv; // only fill missing
+    if (!out[k] || !out[k].trim()) out[k] = vv; // nur Lücken füllen
   }
-  // normalize all
+
   for (const k of Object.keys(out)) out[k] = normVal(out[k]);
+  for (const [k, v] of Object.entries(out)) if (!v) delete out[k];
+
   return out;
 }
 
-// ---------- Regex extraction (fast/stable) ----------
+// ========= Regex-KeyFacts (schnell/stabil) =========
 function extractKeyFactsRegex(input: string): KeyFacts {
   const text = (input ?? "").toString();
   const lower = text.toLowerCase();
@@ -58,7 +63,7 @@ function extractKeyFactsRegex(input: string): KeyFacts {
 
   const out: KeyFacts = {};
 
-  // --- Termine / Fristen ---
+  // --- Termine/Fristen ---
   out.baubeginn = pickAny([
     /Baubeginn\s*[:\-]?\s*([^\n\r;.]{3,80})/i,
     /Ausführungsbeginn\s*[:\-]?\s*([^\n\r;.]{3,80})/i,
@@ -94,26 +99,21 @@ function extractKeyFactsRegex(input: string): KeyFacts {
   ]);
 
   // --- Vertrag / Recht ---
-  // VOB/B vs BGB – nur als Kurz-Label
   if (/(vob\/b|vob b|vob\/c|vob c)/i.test(text)) out.vob_bgb = "VOB";
   if (/\bBGB\b/i.test(text)) out.vob_bgb = out.vob_bgb ? out.vob_bgb + " + BGB" : "BGB";
 
-  out.rangfolge = pickAny([
-    /Rangfolge\s+(der\s+)?Vertragsunterlagen\s*[:\-]?\s*([^\n\r;.]{3,140})/i, // group 2
-  ]);
-  if (!out.rangfolge) {
+  // Rangfolge
+  {
     const m = /Rangfolge\s+(der\s+)?Vertragsunterlagen\s*[:\-]?\s*([^\n\r;.]{3,140})/i.exec(text);
     out.rangfolge = m?.[2]?.trim() ?? "";
   }
 
-  // Gewährleistung / Mängelhaftung
   out.gewaerhleistung = pickAny([
     /Gewährleistung\s*[:\-]?\s*([^\n\r;.]{3,120})/i,
     /Mängelhaftung\s*[:\-]?\s*([^\n\r;.]{3,120})/i,
     /Verjährung\s+von\s+Mängelansprüchen\s*[:\-]?\s*([^\n\r;.]{3,120})/i,
   ]);
 
-  // Vertragsstrafe / Pönale
   out.vertragsstrafe = pickAny([
     /Vertragsstrafe\s*[:\-]?\s*([^\n\r;.]{3,140})/i,
     /Pönale\s*[:\-]?\s*([^\n\r;.]{3,140})/i,
@@ -136,7 +136,6 @@ function extractKeyFactsRegex(input: string): KeyFacts {
     /Fälligkeit\s*[:\-]?\s*([^\n\r;.]{3,180})/i,
   ]);
 
-  // Preisgleitung / Stoffpreis
   if (/(preisgleit|stoffpreis|rohstoff|index|gleitklausel)/i.test(lower)) {
     out.preisgleitung = pickAny([
       /Preisgleit(?:klausel|ung)\s*[:\-]?\s*([^\n\r;.]{3,180})/i,
@@ -145,16 +144,17 @@ function extractKeyFactsRegex(input: string): KeyFacts {
     if (!out.preisgleitung) out.preisgleitung = "Hinweis auf Preisgleitung/Stoffpreisregelung erkannt";
   }
 
-  // normalize and remove empties
+  // normalize + remove empties
   for (const k of Object.keys(out)) out[k] = normVal(out[k]);
   for (const [k, v] of Object.entries(out)) if (!v) delete out[k];
 
   return out;
 }
 
-// ---------- LLM extraction for missing facts + risk clauses ----------
+// ========= OpenAI Setup =========
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// Responses JSON Schema
 const JSON_SCHEMA = {
   name: "vortext_analysis",
   schema: {
@@ -184,7 +184,8 @@ const JSON_SCHEMA = {
   },
 } as const;
 
-function buildPrompt(vortext: string, missingKeys: string[]) {
+// WICHTIG: kein `as const` beim Return -> sonst readonly TypeError
+function buildPrompt(vortext: string, missingKeys: string[]): OpenAI.ResponseInput {
   return [
     {
       role: "system",
@@ -200,15 +201,30 @@ function buildPrompt(vortext: string, missingKeys: string[]) {
         `missingKeys (nur diese befüllen): ${missingKeys.join(", ") || "(keine)"}\n\n` +
         `Regeln:\n` +
         `- keyFacts: nur missingKeys liefern; wenn nicht klar -> "".\n` +
-        `- riskClauses: max. 12 Treffer; text = Originalsatz/Passage; interpretation = 1 Satz.\n` +
+        `- riskClauses: max. ${MAX_RISK_CLAUSES} Treffer; text = Originalsatz/Passage; interpretation = 1 Satz.\n` +
         `- Output muss JSON gemäß Schema sein.`,
     },
-  ] as const;
+  ];
 }
 
+function cleanRiskClauses(list: any[]): RiskClause[] {
+  const out: RiskClause[] = (Array.isArray(list) ? list : [])
+    .slice(0, MAX_RISK_CLAUSES)
+    .map((r: any) => ({
+      type: normVal(r?.type) || "Risiko",
+      riskLevel: r?.riskLevel === "high" || r?.riskLevel === "medium" || r?.riskLevel === "low" ? r.riskLevel : "low",
+      text: (r?.text ?? "").toString().trim().slice(0, 900),
+      interpretation: (r?.interpretation ?? "").toString().trim().slice(0, 500),
+    }))
+    .filter((r) => r.text.length > 0);
+
+  return out;
+}
+
+// ========= Route =========
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const textRaw = (body?.text ?? "").toString();
     const vortext = hardCut(textRaw).trim();
 
@@ -216,10 +232,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ riskClauses: [], keyFacts: {} }, { status: 200 });
     }
 
-    // 1) Regex first
+    // 1) Regex zuerst
     const regexFacts = extractKeyFactsRegex(vortext);
 
-    // missing keys list = the set you care about (UI labels) minus what regex already found
+    // 2) Missing Keys bestimmen
     const KEYSET = [
       "baubeginn",
       "bauzeit",
@@ -236,64 +252,47 @@ export async function POST(req: Request) {
       "schlussrechnung",
       "preisgleitung",
     ];
+
     const missing = KEYSET.filter((k) => !(regexFacts[k] && regexFacts[k].trim().length > 0));
 
-    // 2) LLM only if needed (and for risk clauses)
-    // If you want risk clauses always, keep LLM call always.
-    // If you want to save money, call LLM only when missing>0 OR you explicitly request risk clauses.
-    const needLLM = true;
+    // 3) LLM (RiskClauses + nur fehlende KeyFacts)
+    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-    let llmRisk: RiskClause[] = [];
-    let llmFacts: KeyFacts = {};
+    const resp = await openai.responses.create({
+      model,
+      input: buildPrompt(vortext, missing),
+      response_format: { type: "json_schema", json_schema: JSON_SCHEMA as any },
+      temperature: 0.2,
+      max_output_tokens: 900,
+    });
 
-    if (needLLM) {
-      const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const raw = resp.output_text || "{}";
 
-      const resp = await openai.responses.create({
-        model,
-        input: buildPrompt(vortext, missing),
-        response_format: { type: "json_schema", json_schema: JSON_SCHEMA as any },
-        temperature: 0.2,
-        max_output_tokens: 900,
-      });
-
-      // responses API: text is in output_text
-      const raw = resp.output_text || "{}";
-      let parsed: any = {};
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        // fallback: give at least regex facts
-        parsed = { riskClauses: [], keyFacts: {} };
-      }
-
-      llmRisk = Array.isArray(parsed?.riskClauses) ? parsed.riskClauses : [];
-      llmFacts = parsed?.keyFacts && typeof parsed.keyFacts === "object" ? parsed.keyFacts : {};
+    let parsed: any = {};
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = { riskClauses: [], keyFacts: {} };
     }
 
-    // 3) Merge: regex wins, LLM fills gaps
+    const llmRisk = cleanRiskClauses(parsed?.riskClauses);
+    const llmFacts: KeyFacts = parsed?.keyFacts && typeof parsed.keyFacts === "object" ? parsed.keyFacts : {};
+
+    // 4) Merge (Regex gewinnt, LLM füllt nur Lücken)
     const keyFacts = mergeKeyFactsPreferRegex(regexFacts, llmFacts);
 
-    // clean risk clauses
-    const riskClauses: RiskClause[] = (llmRisk ?? [])
-      .slice(0, 12)
-      .map((r: any) => ({
-        type: normVal(r?.type) || "Risiko",
-        riskLevel: (r?.riskLevel === "high" || r?.riskLevel === "medium" || r?.riskLevel === "low") ? r.riskLevel : "low",
-        text: (r?.text ?? "").toString().trim().slice(0, 900),
-        interpretation: (r?.interpretation ?? "").toString().trim().slice(0, 500),
-      }))
-      .filter((r) => r.text.length > 0);
+    // optional debug (UI ignoriert’s, stört nicht)
+    const keyFactsDebug = {
+      regexFound: Object.keys(regexFacts),
+      llmFilled: Object.keys(llmFacts || {}).filter((k) => !!normVal((llmFacts as any)[k])),
+      missingKeysRequested: missing,
+    };
 
     return NextResponse.json(
       {
-        riskClauses,
+        riskClauses: llmRisk,
         keyFacts,
-        // optional debug without breaking UI:
-        keyFactsDebug: {
-          regexFound: Object.keys(regexFacts),
-          llmFilled: Object.keys(llmFacts || {}).filter((k) => !!normVal((llmFacts as any)[k])),
-        },
+        keyFactsDebug,
       },
       { status: 200 }
     );
