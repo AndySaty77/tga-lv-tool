@@ -1,3 +1,4 @@
+// app/api/score/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { analyzeLvText, DbTrigger } from "../../../lib/analyzeLvText";
@@ -104,7 +105,6 @@ async function getScoringConfig(supabase: ReturnType<typeof supabaseServer>): Pr
     total: (v?.total ?? FALLBACK_CONFIG.total) as { method: "mean" },
   };
 
-  // Defensive: fehlende Keys ergänzen
   for (const k of CATEGORY_KEYS) {
     if (!Number.isFinite(Number(cfg.catMax?.[k]))) cfg.catMax[k] = FALLBACK_CONFIG.catMax[k];
   }
@@ -137,8 +137,6 @@ function lvSizeFactor(lvText: string, cfg: ScoringConfig) {
 
 /**
  * ✅ GEWERK-ERKENNUNG (primary + secondary)
- * Wir zählen Treffer je Gewerk, wählen primary (höchster Score),
- * und sekundäre nur, wenn sie nah genug dran sind.
  */
 type DisciplineKey = "heizung" | "sanitaer" | "lueftung" | "msr" | "elektro" | "kaelte" | "global";
 
@@ -200,7 +198,6 @@ function detectDisciplines(lvText: string): DisciplineDetect {
     /\bk(ä|ae)lte\b|\bk(ä|ae)ltemittel\b|\bchiller\b|\bk(ü|ue)hlung\b|\bverdampfer\b|\bverfl(ü|ue)ssiger\b/g
   );
 
-  // Substanziell erst ab MIN_HITS
   const MIN_HITS = 3;
 
   const ordered = (Object.keys(scores) as Array<Exclude<DisciplineKey, "global">>)
@@ -229,8 +226,18 @@ export async function POST(req: Request) {
   const url = new URL(req.url);
   const debug = url.searchParams.get("debug") === "1";
 
-  const body = await req.json().catch(() => ({}));
+  const body = await req.json().catch(() => ({} as any));
+
+  // Backward compatible: lvText bleibt Pflichtfeld wie bisher
   const lvText = String((body as any)?.lvText ?? "");
+
+  // Neu: getrennt, kommt vom LLM-Split
+  const vortext = String((body as any)?.vortext ?? "");
+  const positions = String((body as any)?.positions ?? "");
+
+  // Wichtiger Fix: für Trigger/Scoring NICHT mehr "guessen" – wenn Split da ist:
+  const hasSplit = (vortext.trim().length > 0 || positions.trim().length > 0);
+  const textForAnalysis = hasSplit ? [vortext, positions].filter((s) => String(s).trim().length > 0).join("\n\n") : lvText;
 
   const supabase = supabaseServer();
   const cfg = await getScoringConfig(supabase);
@@ -257,8 +264,8 @@ export async function POST(req: Request) {
     console.error("Supabase Trigger Fehler:", error);
   }
 
-  // 1) Gewerke erkennen (primary + secondary)
-  const det = detectDisciplines(lvText);
+  // 1) Gewerke erkennen (primary + secondary) – auf dem Text, den wir wirklich analysieren
+  const det = detectDisciplines(textForAnalysis);
   const allowDisciplines = det.all; // nur primary + secondary
 
   // 2) Trigger filtern: NUR primary+secondary + global
@@ -267,12 +274,8 @@ export async function POST(req: Request) {
     .filter((t: any) => {
       const td: string[] = Array.isArray(t.disciplines) ? t.disciplines : [];
 
-      // Wenn wir etwas erkannt haben: nur passende + global
       if (allowDisciplines.length) {
-        // Legacy ohne disciplines NICHT mehr pauschal zulassen -> sonst wieder 181
-        if (!td.length) return false;
-
-        // global immer mitnehmen, plus primary/secondary
+        if (!td.length) return false; // Legacy ohne disciplines NICHT pauschal zulassen
         return td.some((d) => d === "global" || allowDisciplines.includes(d as DisciplineKey));
       }
 
@@ -280,8 +283,8 @@ export async function POST(req: Request) {
       return true;
     });
 
-  // 3) Findings erzeugen
-  const findings = analyzeLvText(lvText, dbTriggers);
+  // 3) Findings erzeugen (wichtig: jetzt aus dem richtigen Text)
+  const findings = analyzeLvText(textForAnalysis, dbTriggers);
 
   // 4) Kategorien mappen
   const findingsMapped = (findings ?? []).map((f: any) => ({
@@ -308,7 +311,7 @@ export async function POST(req: Request) {
     perCategorySum[k] += pen;
   }
 
-  const sizeF = lvSizeFactor(lvText, cfg);
+  const sizeF = lvSizeFactor(textForAnalysis, cfg);
 
   // 7) NORMALISIERTE perCategory (0..100)
   const perCategory: Record<CategoryKey, number> = {
@@ -330,7 +333,7 @@ export async function POST(req: Request) {
     perCategory[k] = clamp0_100(eased * 100);
   }
 
-  // TOTAL = mean (Ampel konsistent)
+  // TOTAL = mean
   const totalNormalized = clamp0_100(
     Math.round(
       (perCategory.vertrags_lv_risiken +
@@ -342,6 +345,7 @@ export async function POST(req: Request) {
   );
 
   if (debug) {
+    console.log("Split used:", hasSplit, "lens:", { lvText: lvText.length, vortext: vortext.length, positions: positions.length });
     console.log("Discipline scores:", det.scores);
     console.log("Detected primary:", det.primary, "secondary:", det.secondary);
     console.log("Triggers used:", dbTriggers.length);
@@ -356,6 +360,8 @@ export async function POST(req: Request) {
     ...(debug
       ? {
           debug: {
+            splitUsed: hasSplit,
+            lens: { lvText: lvText.length, vortext: vortext.length, positions: positions.length },
             disciplineScores: det.scores,
             detectedDisciplines: det.all,
             primaryDiscipline: det.primary,
