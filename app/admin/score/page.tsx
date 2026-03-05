@@ -189,6 +189,26 @@ const severityRank = (sev: string) => {
   return 0;
 };
 
+// ===== VORTEXT (LLM) TYPES =====
+type RiskClause = {
+  type: string;
+  riskLevel: "low" | "medium" | "high";
+  text: string;
+  interpretation: string;
+};
+
+function riskIcon(level: "low" | "medium" | "high") {
+  if (level === "high") return "🔴";
+  if (level === "medium") return "🟡";
+  return "🟢";
+}
+
+function riskTone(level: "low" | "medium" | "high") {
+  if (level === "high") return "#b00020";
+  if (level === "medium") return "#a36b00";
+  return "#0a7a2f";
+}
+
 export default function ScorePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -202,6 +222,11 @@ export default function ScorePage() {
   const [dragOver, setDragOver] = useState(false);
 
   const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
+
+  // ===== VORTEXT (LLM) STATE =====
+  const [vortextLoading, setVortextLoading] = useState(false);
+  const [vortextError, setVortextError] = useState<string | null>(null);
+  const [riskClauses, setRiskClauses] = useState<RiskClause[]>([]);
 
   // Filters
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("both");
@@ -221,6 +246,11 @@ export default function ScorePage() {
     setError(null);
     setLoading(true);
     setResult(null);
+
+    // vortext reset
+    setVortextError(null);
+    setRiskClauses([]);
+    setVortextLoading(false);
 
     try {
       // ✅ Debug-Flag aus URL lesen und an API durchreichen
@@ -247,6 +277,31 @@ export default function ScorePage() {
       if (categoryFilter !== "all" && !cats.has(categoryFilter)) {
         setCategoryFilter("all");
       }
+
+      // ===== VORTEXT LLM ANALYSE (nach Score) =====
+      setVortextLoading(true);
+      try {
+        const vRes = await fetch("/api/analyze-vortext", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: textToUse }),
+        });
+
+        const vData = await vRes.json();
+
+        if (!vRes.ok) {
+          setVortextError(vData?.message || vData?.error || "Vortext Analyse fehlgeschlagen");
+          setRiskClauses([]);
+        } else {
+          const clauses = Array.isArray(vData?.riskClauses) ? vData.riskClauses : [];
+          setRiskClauses(clauses);
+        }
+      } catch (e: any) {
+        setVortextError(e?.message || "Vortext Analyse fehlgeschlagen");
+        setRiskClauses([]);
+      } finally {
+        setVortextLoading(false);
+      }
     } catch (e: any) {
       setError(e?.message ?? "Unbekannter Fehler");
     } finally {
@@ -257,6 +312,11 @@ export default function ScorePage() {
   const loadFile = async (file: File) => {
     setError(null);
     setResult(null);
+
+    // vortext reset
+    setVortextError(null);
+    setRiskClauses([]);
+    setVortextLoading(false);
 
     if (file.size > MAX_FILE_BYTES) {
       setFileMeta({ name: file.name, size: file.size });
@@ -395,10 +455,13 @@ export default function ScorePage() {
         >
           <div>
             <div style={{ fontWeight: 900 }}>Drag & Drop Datei hier rein</div>
-            <div style={{ color: "#666", marginTop: 4 }}>MVP: TXT/XML wird als Text eingelesen. GAEB/XML Parsing kommt später.</div>
+            <div style={{ color: "#666", marginTop: 4 }}>
+              MVP: TXT/XML wird als Text eingelesen. GAEB/XML Parsing kommt später.
+            </div>
             {fileMeta && (
               <div style={{ marginTop: 8, color: "#111", fontWeight: 700 }}>
-                Geladen: {fileMeta.name} <span style={{ color: "#666", fontWeight: 600 }}>({fmtKB(fileMeta.size)})</span>
+                Geladen: {fileMeta.name}{" "}
+                <span style={{ color: "#666", fontWeight: 600 }}>({fmtKB(fileMeta.size)})</span>
               </div>
             )}
           </div>
@@ -475,6 +538,9 @@ export default function ScorePage() {
               setResult(null);
               setError(null);
               setFileMeta(null);
+              setVortextError(null);
+              setRiskClauses([]);
+              setVortextLoading(false);
             }}
             style={{
               padding: "10px 14px",
@@ -530,6 +596,67 @@ export default function ScorePage() {
 
             {/* Category Bars */}
             <ScoreBarsCard perCategory={result.perCategory ?? {}} total={result.total} />
+          </div>
+
+          {/* ===== VORTEXT RISIKO CARD ===== */}
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>VORTEXT RISIKEN (LLM)</div>
+              <div style={{ color: "#666", fontWeight: 700 }}>
+                {vortextLoading ? "Analysiere…" : `${riskClauses.length} Treffer`}
+              </div>
+            </div>
+
+            {vortextError && (
+              <div style={{ marginTop: 10, border: "1px solid #f2c2c7", background: "#fdecef", padding: 12, borderRadius: 12 }}>
+                <div style={{ fontWeight: 900, color: "#b00020" }}>Fehler</div>
+                <div style={{ marginTop: 6, color: "#8a0010", fontWeight: 700 }}>{vortextError}</div>
+              </div>
+            )}
+
+            {!vortextLoading && !vortextError && riskClauses.length === 0 && (
+              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>
+                Keine auffälligen Risikoformulierungen erkannt.
+              </div>
+            )}
+
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {riskClauses.map((r, idx) => (
+                <div key={idx} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                    <div style={{ fontWeight: 900, color: "#111" }}>
+                      {riskIcon(r.riskLevel)} {r.type || "Risiko"}
+                    </div>
+                    <div style={{ fontWeight: 900, color: riskTone(r.riskLevel) }}>{String(r.riskLevel).toUpperCase()}</div>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: 10,
+                      borderRadius: 12,
+                      border: "1px solid #eee",
+                      background: "#fafafa",
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                      fontSize: 12,
+                    }}
+                  >
+                    {r.text}
+                  </div>
+
+                  {r.interpretation && (
+                    <div style={{ marginTop: 8, color: "#333" }}>
+                      <span style={{ fontWeight: 900 }}>Interpretation:</span> {r.interpretation}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
+              Hinweis: Aktuell wird der gesamte LV-Text analysiert. Nächster Schritt: automatische Vortext-Extraktion (billiger + präziser).
+            </div>
           </div>
 
           {/* ✅ Debug Card */}
