@@ -1,9 +1,9 @@
 // app/api/gaeb-preview/route.ts
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs"; // wichtig für File/Buffer
+export const runtime = "nodejs";
 
-const HARD_MAX_CHARS = 200_000; // Preview-Limit (roh)
+const HARD_MAX_CHARS = 200_000;
 const VORTEXT_MAX_CHARS = 20_000;
 
 function hardCut(s: string, max: number) {
@@ -29,45 +29,58 @@ function stripHtml(input: string) {
   return s.trim();
 }
 
-/**
- * GAEB/XML-Preview MVP:
- * - liest Datei als Text
- * - macht eine "Rohansicht"
- * - versucht einen GROBEN Vortext-Schnitt (heuristisch)
- * - liefert zusätzlich einen "clean" Text (HTML stripped)
- *
- * Perfektes GAEB-Parsing kommt später. Hier geht’s nur um Sichtbarkeit.
- */
-function guessVortext(raw: string) {
+type VortextGuess = {
+  vortextRaw: string;
+  cutIdx: number;          // <- entscheidend
+  method: string;
+};
+
+function guessVortext(raw: string): VortextGuess {
   const t = raw ?? "";
   const lower = t.toLowerCase();
 
-  const markers = [
-    "\nposition",
-    "\npos.",
-    "\npos ",
-    "\nleistungstext",
-    "\nleistungsverzeichnis",
-    "\nkurztext",
-    "\nlangtext",
-    "\nmenge",
-    "\neinheit",
-    "\n ep",
-    "\ngp",
-    "\n€",
-    "<position", // XML
-    "<pos", // XML
-    "<lvpos", // XML
-  ];
-
+  // 1) XML echte Positions-Tags (wenn GAEB-XML)
+  const xmlMarkers = ["<lvpos", "<position", "<pos"];
   let cutIdx = -1;
-  for (const m of markers) {
+  for (const m of xmlMarkers) {
     const i = lower.indexOf(m);
     if (i !== -1) cutIdx = cutIdx === -1 ? i : Math.min(cutIdx, i);
   }
+  if (cutIdx !== -1 && cutIdx > 300) {
+    const vt = hardCut(t.slice(0, cutIdx).trim(), VORTEXT_MAX_CHARS);
+    return { vortextRaw: vt, cutIdx, method: "xml-marker" };
+  }
 
-  const candidate = cutIdx > 300 ? t.slice(0, cutIdx) : t.slice(0, Math.min(t.length, VORTEXT_MAX_CHARS));
-  return hardCut(candidate.trim(), VORTEXT_MAX_CHARS);
+  // 2) TEXT-EXPORT (wie bei dir): Position-Row Muster "No / <zahl> / <Einheit> / No / No"
+  // Wichtig: Einheit-Liste bewusst kurz halten, sonst false positives.
+  const unit = "(St|Std|h|min|m|m2|m²|m3|m³|kg|t|l)";
+  const posRowRe = new RegExp(
+    String.raw`(?:^|\n)No\s*\n\d{1,7}\s*\n${unit}\s*\nNo\s*\nNo\s*\n`,
+    "i"
+  );
+  const m = posRowRe.exec(t);
+  if (m && typeof m.index === "number") {
+    // cut am Beginn der Tabellenzeile "No..."
+    cutIdx = m.index === 0 ? 0 : m.index; 
+    // Optional: noch 1-2 Zeilen nach oben ziehen, wenn davor ein Positionskurztext steht.
+    // Heuristik: schau 1 Zeile nach oben.
+    const before = t.slice(0, cutIdx);
+    const lastNl = before.lastIndexOf("\n");
+    const prevLineStart = before.lastIndexOf("\n", lastNl - 1);
+    const prevLine = before.slice(prevLineStart + 1, lastNl).trim();
+
+    // Wenn die vorherige Zeile NICHT leer ist, ist das wahrscheinlich der Kurztext -> mitnehmen
+    if (prevLine && prevLine.length < 120) {
+      cutIdx = prevLineStart + 1;
+    }
+
+    const vt = hardCut(t.slice(0, cutIdx).trim(), VORTEXT_MAX_CHARS);
+    return { vortextRaw: vt, cutIdx, method: "no-qty-unit-pattern" };
+  }
+
+  // 3) Fallback: nix gefunden -> einfach Top-Chunk
+  const fallbackCut = Math.min(t.length, VORTEXT_MAX_CHARS);
+  return { vortextRaw: hardCut(t.slice(0, fallbackCut).trim(), VORTEXT_MAX_CHARS), cutIdx: fallbackCut, method: "fallback-top-chunk" };
 }
 
 export async function POST(req: Request) {
@@ -85,15 +98,12 @@ export async function POST(req: Request) {
     const rawPreview = hardCut(raw, HARD_MAX_CHARS);
     const cleanPreview = stripHtml(rawPreview);
 
-    const vortextGuessRaw = guessVortext(rawPreview);
+    const g = guessVortext(rawPreview);
+    const vortextGuessRaw = g.vortextRaw;
     const vortextGuessClean = stripHtml(vortextGuessRaw);
 
-    // positionsGuess: einfach "alles nach vortextGuessRaw" (heuristisch)
-    const positionsGuessRaw =
-      vortextGuessRaw && rawPreview.startsWith(vortextGuessRaw)
-        ? rawPreview.slice(vortextGuessRaw.length)
-        : rawPreview;
-
+    // Positions = ab cutIdx (nicht startsWith/trim-Spielchen)
+    const positionsGuessRaw = rawPreview.slice(Math.max(0, g.cutIdx));
     const positionsGuessClean = stripHtml(hardCut(positionsGuessRaw, HARD_MAX_CHARS));
 
     return NextResponse.json({
@@ -109,6 +119,8 @@ export async function POST(req: Request) {
         rawChars: raw.length,
         previewChars: rawPreview.length,
         vortextChars: vortextGuessRaw.length,
+        cutIdx: g.cutIdx,
+        method: g.method,
       },
     });
   } catch (e: any) {
