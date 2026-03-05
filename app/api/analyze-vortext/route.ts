@@ -15,6 +15,11 @@ function safeJsonParse(s: string) {
   }
 }
 
+function clampText(s: string, maxChars: number) {
+  if (!s) return "";
+  return s.length > maxChars ? s.slice(0, maxChars) : s;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -26,6 +31,10 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    // Server-seitige Sicherheitsbremse gegen Token-Explosion
+    const MAX_CHARS = 12_000; // ~2k–4k Tokens, safe gegen TPM/Context
+    const safeText = clampText(text, MAX_CHARS);
 
     const prompt = `
 Du bist TGA Sachverständiger.
@@ -40,25 +49,30 @@ Suche insbesondere nach:
 - Funktionsgarantien
 - unklare Verantwortlichkeiten
 
+WICHTIG:
+- Zitiere im Feld "text" nur den relevanten Auszug (max. 300 Zeichen).
+- Liefere maximal 12 riskClauses.
+
 Antworte NUR als JSON im Format:
 {
- "riskClauses":[
-   {
-     "type":"string",
-     "riskLevel":"low | medium | high",
-     "text":"original text excerpt",
-     "interpretation":"technical explanation"
-   }
- ]
+  "riskClauses":[
+    {
+      "type":"string",
+      "riskLevel":"low | medium | high",
+      "text":"original text excerpt",
+      "interpretation":"technical explanation"
+    }
+  ]
 }
 
 LV TEXT:
-${text}
+${safeText}
 `.trim();
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4.1",
+      model: "gpt-4.1-mini", // stabiler/ günstiger, weniger Rate-Limit Stress
       temperature: 0.2,
+      max_tokens: 700, // Output begrenzen
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: "Du bist Experte für TGA Leistungsverzeichnisse." },
@@ -76,7 +90,9 @@ ${text}
       return NextResponse.json({ riskClauses: [], ...data });
     }
 
-    return NextResponse.json(data);
+    // Optional: riskClauses hart auf 12 begrenzen (falls Modell nicht spurt)
+    const clauses = Array.isArray((data as any).riskClauses) ? (data as any).riskClauses.slice(0, 12) : [];
+    return NextResponse.json({ ...data, riskClauses: clauses });
   } catch (err: any) {
     console.error("analyze-vortext error:", err);
 
