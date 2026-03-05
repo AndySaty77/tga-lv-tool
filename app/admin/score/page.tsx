@@ -209,7 +209,11 @@ function riskTone(level: "low" | "medium" | "high") {
   return "#0a7a2f";
 }
 
-function extractVortext(full: string) {
+/**
+ * UI-seitig: Vortext grob aus Anfang extrahieren (Server macht es eh nochmal).
+ * Wichtig: harte Begrenzung, damit Uploads nicht ewig im Browser hängen.
+ */
+function extractVortextUI(full: string) {
   const t = (full ?? "").toString();
   if (!t.trim()) return "";
 
@@ -243,6 +247,35 @@ function extractVortext(full: string) {
   return hardCut(candidate.trim());
 }
 
+// ===== KEY FACT LABELS (optional nice names) =====
+const KEYFACT_LABELS: Record<string, string> = {
+  // Termine/Fristen
+  baubeginn: "Baubeginn",
+  bauzeit: "Bauzeit / Dauer",
+  fertigstellung: "Fertigstellung / Abnahme",
+  ausfuehrungsfrist: "Ausführungsfrist / Terminplan",
+  fristAngebot: "Angebotsfrist",
+  bindefrist: "Bindefrist",
+
+  // Vertrag
+  vertragsstrafe: "Vertragsstrafe / Pönale",
+  gewaerhleistung: "Gewährleistung / Mängelhaftung",
+  vob_bgb: "VOB/B / BGB",
+  rangfolge: "Rangfolge Vertragsunterlagen",
+
+  // Zahlung/Preis
+  zahlungsbedingungen: "Zahlungsbedingungen",
+  abschlagszahlung: "Abschlagszahlung",
+  schlussrechnung: "Schlussrechnung / Zahlungsziel",
+  preisgleitung: "Preisgleitklausel / Rohstoffpreise",
+};
+
+function prettyKey(k: string) {
+  return (k ?? "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
 export default function ScorePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -274,6 +307,13 @@ export default function ScorePage() {
   const meta = levelMeta(result?.level);
   const totalAmp = traffic(clamp0_100(result?.total ?? 0));
 
+  const resetVortext = () => {
+    setVortextError(null);
+    setRiskClauses([]);
+    setKeyFacts({});
+    setVortextLoading(false);
+  };
+
   const analyze = async (textOverride?: string) => {
     const textToUse = (textOverride ?? lvText).trim();
     if (!textToUse) return;
@@ -281,12 +321,7 @@ export default function ScorePage() {
     setError(null);
     setLoading(true);
     setResult(null);
-
-    // vortext reset
-    setVortextError(null);
-    setRiskClauses([]);
-    setKeyFacts({});
-    setVortextLoading(false);
+    resetVortext();
 
     try {
       const debug =
@@ -308,17 +343,15 @@ export default function ScorePage() {
       setResult(data);
 
       const cats = new Set((data.findingsSorted ?? []).map((f) => f.category));
-      if (categoryFilter !== "all" && !cats.has(categoryFilter)) {
-        setCategoryFilter("all");
-      }
+      if (categoryFilter !== "all" && !cats.has(categoryFilter)) setCategoryFilter("all");
 
-      // ===== VORTEXT LLM ANALYSE (nach Score) =====
+      // ===== VORTEXT ANALYSE =====
       setVortextLoading(true);
       try {
         const vRes = await fetch("/api/analyze-vortext", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: extractVortext(textToUse) }),
+          body: JSON.stringify({ text: extractVortextUI(textToUse) }),
         });
 
         const vData = await vRes.json();
@@ -351,12 +384,7 @@ export default function ScorePage() {
   const loadFile = async (file: File) => {
     setError(null);
     setResult(null);
-
-    // vortext reset
-    setVortextError(null);
-    setRiskClauses([]);
-    setKeyFacts({});
-    setVortextLoading(false);
+    resetVortext();
 
     if (file.size > MAX_FILE_BYTES) {
       setFileMeta({ name: file.name, size: file.size });
@@ -366,13 +394,10 @@ export default function ScorePage() {
     }
 
     const text = await file.text();
-
     setFileMeta({ name: file.name, size: file.size });
     setLvText(text);
 
-    if (autoAnalyze) {
-      await analyze(text);
-    }
+    if (autoAnalyze) await analyze(text);
   };
 
   const onPickFile = async (file: File | null) => {
@@ -400,6 +425,7 @@ export default function ScorePage() {
       if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
       return a.localeCompare(b);
     });
+
     return arr;
   }, [result]);
 
@@ -410,16 +436,13 @@ export default function ScorePage() {
     let list = all.filter((f) => {
       if (sourceFilter === "db" && !isDbFinding(f)) return false;
       if (sourceFilter === "sys" && !isSysFinding(f)) return false;
-
       if (severityFilter !== "all" && f.severity !== severityFilter) return false;
-
       if (categoryFilter !== "all" && f.category !== categoryFilter) return false;
 
       if (q) {
         const hay = `${f.title ?? ""} ${f.detail ?? ""} ${f.id ?? ""} ${f.category ?? ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
-
       return true;
     });
 
@@ -449,6 +472,17 @@ export default function ScorePage() {
     setSortMode("penalty_desc");
     setTop10(false);
   };
+
+  const keyFactsEntries = useMemo(() => {
+    const entries = Object.entries(keyFacts ?? {}).filter(([, v]) => typeof v === "string" && v.trim().length > 0);
+    entries.sort(([a], [b]) => {
+      const la = KEYFACT_LABELS[a] ? 0 : 1;
+      const lb = KEYFACT_LABELS[b] ? 0 : 1;
+      if (la !== lb) return la - lb; // bekannte zuerst
+      return a.localeCompare(b);
+    });
+    return entries;
+  }, [keyFacts]);
 
   return (
     <div style={{ padding: 28, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" }}>
@@ -494,9 +528,7 @@ export default function ScorePage() {
         >
           <div>
             <div style={{ fontWeight: 900 }}>Drag & Drop Datei hier rein</div>
-            <div style={{ color: "#666", marginTop: 4 }}>
-              MVP: TXT/XML wird als Text eingelesen. GAEB/XML Parsing kommt später.
-            </div>
+            <div style={{ color: "#666", marginTop: 4 }}>MVP: TXT/XML wird als Text eingelesen. GAEB/XML Parsing kommt später.</div>
             {fileMeta && (
               <div style={{ marginTop: 8, color: "#111", fontWeight: 700 }}>
                 Geladen: {fileMeta.name}{" "}
@@ -577,10 +609,7 @@ export default function ScorePage() {
               setResult(null);
               setError(null);
               setFileMeta(null);
-              setVortextError(null);
-              setRiskClauses([]);
-              setKeyFacts({});
-              setVortextLoading(false);
+              resetVortext();
             }}
             style={{
               padding: "10px 14px",
@@ -638,12 +667,12 @@ export default function ScorePage() {
             <ScoreBarsCard perCategory={result.perCategory ?? {}} total={result.total} />
           </div>
 
-          {/* ===== KEY FACTS CARD ===== */}
+          {/* ===== KEY FACTS CARD (DYNAMIC) ===== */}
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
               <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>KEY FACTS (VORTEXT)</div>
               <div style={{ color: "#666", fontWeight: 700 }}>
-                {vortextLoading ? "Extrahiere…" : `${Object.keys(keyFacts ?? {}).length} Felder`}
+                {vortextLoading ? "Extrahiere…" : `${keyFactsEntries.length} Felder`}
               </div>
             </div>
 
@@ -653,40 +682,20 @@ export default function ScorePage() {
               </div>
             )}
 
-            {!vortextLoading && !vortextError && (!keyFacts || Object.keys(keyFacts).length === 0) && (
-              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>
-                Keine Key Facts gefunden (Baubeginn/Bauzeit/Fristen/etc.).
-              </div>
+            {!vortextLoading && !vortextError && keyFactsEntries.length === 0 && (
+              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>Keine Key Facts gefunden.</div>
             )}
 
-            {!vortextError && keyFacts && Object.keys(keyFacts).length > 0 && (
-              <div
-                style={{
-                  marginTop: 12,
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 12,
-                }}
-              >
-                {[
-                  ["baubeginn", "Baubeginn"],
-                  ["bauzeit", "Bauzeit / Dauer"],
-                  ["fertigstellung", "Fertigstellung / Abnahme"],
-                  ["ausfuehrungsfrist", "Ausführungsfrist / Terminplan"],
-                  ["fristAngebot", "Angebotsfrist"],
-                  ["bindefrist", "Bindefrist"],
-                  ["vertragsstrafe", "Vertragsstrafe / Pönale"],
-                  ["gewaerhleistung", "Gewährleistung / Mängelhaftung"],
-                ].map(([k, label]) => {
-                  const v = (keyFacts as any)?.[k];
-                  if (!v) return null;
-                  return (
-                    <div key={k} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
-                      <div style={{ fontSize: 12, color: "#666", fontWeight: 900 }}>{label}</div>
-                      <div style={{ marginTop: 6, fontWeight: 800, color: "#111", whiteSpace: "pre-wrap" }}>{v}</div>
+            {!vortextError && keyFactsEntries.length > 0 && (
+              <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {keyFactsEntries.map(([k, v]) => (
+                  <div key={k} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                    <div style={{ fontSize: 12, color: "#666", fontWeight: 900 }}>
+                      {KEYFACT_LABELS[k] ?? prettyKey(k)}
                     </div>
-                  );
-                })}
+                    <div style={{ marginTop: 6, fontWeight: 800, color: "#111", whiteSpace: "pre-wrap" }}>{v}</div>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -705,24 +714,14 @@ export default function ScorePage() {
             </div>
 
             {vortextError && (
-              <div
-                style={{
-                  marginTop: 10,
-                  border: "1px solid #f2c2c7",
-                  background: "#fdecef",
-                  padding: 12,
-                  borderRadius: 12,
-                }}
-              >
+              <div style={{ marginTop: 10, border: "1px solid #f2c2c7", background: "#fdecef", padding: 12, borderRadius: 12 }}>
                 <div style={{ fontWeight: 900, color: "#b00020" }}>Fehler</div>
                 <div style={{ marginTop: 6, color: "#8a0010", fontWeight: 700 }}>{vortextError}</div>
               </div>
             )}
 
             {!vortextLoading && !vortextError && riskClauses.length === 0 && (
-              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>
-                Keine auffälligen Risikoformulierungen erkannt.
-              </div>
+              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>Keine auffälligen Risikoformulierungen erkannt.</div>
             )}
 
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
@@ -732,9 +731,7 @@ export default function ScorePage() {
                     <div style={{ fontWeight: 900, color: "#111" }}>
                       {riskIcon(r.riskLevel)} {r.type || "Risiko"}
                     </div>
-                    <div style={{ fontWeight: 900, color: riskTone(r.riskLevel) }}>
-                      {String(r.riskLevel).toUpperCase()}
-                    </div>
+                    <div style={{ fontWeight: 900, color: riskTone(r.riskLevel) }}>{String(r.riskLevel).toUpperCase()}</div>
                   </div>
 
                   <div
@@ -772,8 +769,7 @@ export default function ScorePage() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
                 <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>DEBUG</div>
                 <div style={{ color: "#666", fontWeight: 700 }}>
-                  Config: {String(result.debug.scoringConfigVersion ?? "-")} • Easing:{" "}
-                  {String(result.debug.easing ?? "-")}
+                  Config: {String(result.debug.scoringConfigVersion ?? "-")} • Easing: {String(result.debug.easing ?? "-")}
                 </div>
               </div>
 
@@ -785,8 +781,7 @@ export default function ScorePage() {
                   </span>
                 </div>
                 <div style={{ fontWeight: 800 }}>
-                  triggersUsed:{" "}
-                  <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.triggersUsed ?? "-"}</span>
+                  triggersUsed: <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.triggersUsed ?? "-"}</span>
                 </div>
                 <div style={{ fontWeight: 800 }}>
                   sizeF: <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.sizeF ?? "-"}</span>
@@ -813,27 +808,12 @@ export default function ScorePage() {
 
           {/* Filters */}
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "baseline",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
-            >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>FILTER</div>
               <div style={{ color: "#666", fontWeight: 700 }}>Treffer nach Filter: {filteredFindings.length}</div>
             </div>
 
-            <div
-              style={{
-                marginTop: 10,
-                display: "grid",
-                gridTemplateColumns: "1.5fr 1fr 1fr 1fr 1fr auto",
-                gap: 10,
-              }}
-            >
+            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr 1fr auto", gap: 10 }}>
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -900,16 +880,7 @@ export default function ScorePage() {
               </button>
             </div>
 
-            <div
-              style={{
-                marginTop: 10,
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: 10,
-              }}
-            >
+            <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
               <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
                 <input type="checkbox" checked={top10} onChange={(e) => setTop10(e.target.checked)} />
                 <span style={{ fontWeight: 800 }}>Nur Top 10</span>
