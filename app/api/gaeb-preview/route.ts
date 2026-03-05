@@ -40,93 +40,56 @@ function clampIdx(idx: number, len: number) {
   return Math.max(0, Math.min(idx, len));
 }
 
+/**
+ * Cut-Logik für mehrere GAEB-Text-Exporte:
+ * 1) Dangl: "Einrichtungsgegenstände"
+ * 2) CaliforniaX: Zeile "TITEL <n>: ..."
+ * 3) Fallback: erster Mengenblock "40.000" + Einheit (m/St/...)
+ */
 function findCutIdx(rawPreview: string): CutResult {
   const t = normalizeNewlines(rawPreview);
   const lower = t.toLowerCase();
   const len = t.length;
 
-  // A) Dangl-Export: "Einrichtungsgegenstände" = sicherer Start Positionsblock
+  // 1) Dangl-Anchor
   const eg = lower.indexOf("einrichtungsgegenstände");
   if (eg > 0) return { cutIdx: clampIdx(eg, len), method: "anchor-einrichtungsgegenstaende" };
 
-  // B) CaliforniaX / GAEB-Text: TITEL <nr>: <name>
-  // Schneide am Beginn der Zeile "TITEL ..."
-  const titelRe = /(?:^|\n)(titel\s+\d+\s*:\s*[^\n]+)/i;
-  const mt = titelRe.exec(t);
-  if (mt && typeof mt.index === "number") {
-    const idx = mt.index === 0 ? 0 : mt.index + 1; // +1 weil match kann mit \n starten
+  // 2) CaliforniaX: TITEL n:
+  // Wichtig: wir suchen den Start einer ZEILE, also "\ntitel " oder am Anfang "titel "
+  // und schneiden GENAU dort.
+  const mTitel = /(?:^|\n)titel\s+\d+\s*:\s*/i.exec(t);
+  if (mTitel && typeof mTitel.index === "number") {
+    const idx = mTitel.index === 0 ? 0 : mTitel.index + 1; // +1 damit wir nach dem \n starten
     return { cutIdx: clampIdx(idx, len), method: "anchor-titel-n" };
   }
 
-  // C) XML Marker
-  for (const m of ["<lvpos", "<position", "<pos"]) {
-    const i = lower.indexOf(m);
+  // 3) XML Marker
+  const xml = ["<lvpos", "<position", "<pos"];
+  for (const x of xml) {
+    const i = lower.indexOf(x);
     if (i > 300) return { cutIdx: clampIdx(i, len), method: "xml-marker" };
   }
 
-  // D) Dangl/WebGAEB Positions-Pattern: Titelzeile + No + Menge + Einheit + No + No
-  const unit = "(St|Std|h|min|m|m2|m²|m3|m³|kg|t|l|psch)";
-  const danglRe = new RegExp(
-    String.raw`(?:^|\n)(?<title>[^\n]{3,180})\nNo\s*\n(?<qty>\d{1,7})\s*\n(?<unit>${unit})\s*\nNo\s*\nNo\s*\n`,
-    "gi"
-  );
-
-  const badTitle = (s: string) => {
-    const x = s.trim();
-    if (!x) return true;
-    if (/^no$/i.test(x)) return true;
-    if (/^\d+(\.\d+)*$/.test(x)) return true;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(x)) return true;
-    if (/^\d{2}:\d{2}:\d{2}$/.test(x)) return true;
-    if (/^(alltxt|boqlevel|item|index|hls|eur|euro|californiax|version|stand)$/i.test(x)) return true;
-    if (/^[a-f0-9-]{16,}$/i.test(x)) return true;
-    if (x.length < 4) return true;
-    return false;
-  };
-
-  let bestIdx = -1;
-  let bestScore = -1;
-  let mm: RegExpExecArray | null;
-
-  while ((mm = danglRe.exec(t)) !== null) {
-    const idx = mm.index;
-    const title = (mm.groups?.title ?? "").trim();
-    if (badTitle(title)) continue;
-
-    const window = t.slice(idx, Math.min(len, idx + 2000)).toLowerCase();
-    const score =
-      (window.includes("bestehend aus") ? 3 : 0) +
-      (window.includes("liefern und montieren") ? 3 : 0) +
-      (window.includes("hersteller") ? 2 : 0) +
-      (window.includes("modell") ? 1 : 0);
-
-    const before = t.slice(Math.max(0, idx - 15000), idx).toLowerCase();
-    const bonus = before.includes("allgemeine vorbemerkungen") ? 3 : 0;
-
-    const total = score + bonus;
-    if (total > bestScore) {
-      bestScore = total;
-      bestIdx = idx;
-    }
-  }
-
-  if (bestIdx !== -1) {
-    return { cutIdx: clampIdx(bestIdx, len), method: `dangl-title+no-qty-unit score=${bestScore}` };
-  }
-
-  // E) CaliforniaX Positions-Pattern: Menge (z.B. 40.000) + Einheit (m/St/...) + optional Yes/No
-  // Beispiel: "40.000\nm\nYes\nschallgedämmte Abwasserleitung DN 56"
+  // 4) Mengenblock-Fallback (CaliforniaX-Positionen)
+  // Beispiel:
+  // 40.000
+  // m
+  // Yes
+  // schallgedämmte Abwasserleitung DN 56
+  //
+  // Tolerant: optional Yes/No-Zeile, optional Leerzeilen
   const qtyUnitRe = new RegExp(
-    String.raw`(?:^|\n)\d{1,6}\.\d{3}\s*\n(?:m|st|kg|t|l|h|std|psch|m2|m²|m3|m³)\s*\n(?:yes|no)?\s*\n`,
+    String.raw`(?:^|\n)\s*\d{1,6}\.\d{3}\s*\n\s*(m|st|kg|t|l|h|std|psch|m2|m²|m3|m³)\s*\n(?:\s*(yes|no)\s*\n)?`,
     "i"
   );
-  const mq = qtyUnitRe.exec(lower);
-  if (mq && typeof mq.index === "number" && mq.index > 0) {
+  const mq = qtyUnitRe.exec(t);
+  if (mq && typeof mq.index === "number") {
     const idx = mq.index === 0 ? 0 : mq.index + 1;
-    return { cutIdx: clampIdx(idx, len), method: "californiax-qty-unit" };
+    return { cutIdx: clampIdx(idx, len), method: "fallback-qty-unit" };
   }
 
-  // F) Fallback: keine Trennung
+  // 5) letzter Fallback: keine Trennung
   return { cutIdx: len, method: "fallback-no-cut-found" };
 }
 
@@ -176,9 +139,8 @@ export async function POST(req: Request) {
         cutIdx,
         method: g.method,
         vortextFullChars: vortextFullRaw.length,
-        vortextPreviewChars: vortextGuessRaw.length,
         positionsFullChars: positionsFullRaw.length,
-        positionsStartsWith: stripHtml(positionsFullRaw).slice(0, 220),
+        positionsStartsWith: stripHtml(positionsFullRaw).slice(0, 260),
       },
     });
   } catch (e: any) {
