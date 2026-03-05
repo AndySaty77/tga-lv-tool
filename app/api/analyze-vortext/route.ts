@@ -22,7 +22,6 @@ function clampText(s: string, maxChars: number) {
 
 /**
  * Entfernt HTML/Inline-Markup aus importierten Texten (Word/PDF/GAEB Exporte).
- * Ziel: KeyFacts sollen lesbar sein, ohne <span ...>.
  */
 function stripHtml(s: string) {
   return (s ?? "")
@@ -51,7 +50,6 @@ function extractVortext(full: string) {
   const raw = (full ?? "").toString();
   if (!raw.trim()) return "";
 
-  // WICHTIG: erst HTML/Markup entfernen, dann Marker suchen
   const t = stripHtml(raw);
 
   const HARD_MAX_CHARS = 12_000;
@@ -79,87 +77,174 @@ function extractVortext(full: string) {
   }
 
   const candidate = cutIdx > 300 ? t.slice(0, cutIdx) : t;
-  const trimmed = candidate.trim();
-
-  return clampText(trimmed, HARD_MAX_CHARS);
+  return clampText(candidate.trim(), HARD_MAX_CHARS);
 }
 
 /**
- * Extrahiert "harte Fakten" aus Vortext/Vertragsklauseln (regex-basiert).
- * Ziel: gezielt anzeigen, ohne LLM-Kosten.
+ * Pickt eine Zeile (kurz) um einen Treffer herum.
+ */
+function pickLine(t: string, pattern: RegExp, maxLen = 240) {
+  const m = t.match(pattern);
+  if (!m) return null;
+
+  const idx = m.index ?? 0;
+  const start = t.lastIndexOf("\n", idx);
+  const end = t.indexOf("\n", idx);
+  const line = t
+    .slice(start === -1 ? 0 : start + 1, end === -1 ? t.length : end)
+    .trim();
+
+  const out = (line || m[0].trim()).trim();
+  return clampText(out, maxLen);
+}
+
+/**
+ * Pickt einen Abschnitt/Block anhand einer Überschrift.
+ * Beispiel: "1.4 Zahlungsbedingungen" -> nimmt ab dieser Zeile bis zur nächsten "1.x" / "2.x" / etc.
+ */
+function pickSectionByHeading(t: string, headingPattern: RegExp, maxChars = 900) {
+  const lines = t.split("\n");
+  let startIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (headingPattern.test(lines[i])) {
+      startIdx = i;
+      break;
+    }
+  }
+  if (startIdx === -1) return null;
+
+  const sectionLines: string[] = [];
+  sectionLines.push(lines[startIdx]);
+
+  // nächste nummerierte Überschrift beenden: z.B. "1.5", "2.1", "3.", "2)"
+  const nextHeading = /^\s*(\d{1,2}(\.\d{1,2})+|\d{1,2}\.)\s+/;
+
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+
+    // leerzeilen begrenzen wir nicht hart, aber stop wenn nächste Überschrift startet
+    if (nextHeading.test(line) && sectionLines.length > 1) break;
+
+    sectionLines.push(line);
+    const joined = sectionLines.join("\n").trim();
+    if (joined.length >= maxChars) {
+      return clampText(joined, maxChars);
+    }
+  }
+
+  const out = sectionLines.join("\n").trim();
+  return out ? clampText(out, maxChars) : null;
+}
+
+/**
+ * Extrahiert "harte Fakten" aus Vortext/Vertragsklauseln (regex/section-basiert).
  */
 function extractKeyFacts(text: string) {
-  // nochmal strippen, weil hier auch einzelne Zeilen HTML enthalten können
-  const src = stripHtml((text ?? "").toString());
-  const t = src.replace(/\r/g, "");
-
-  const pickLine = (pattern: RegExp) => {
-    const m = t.match(pattern);
-    if (!m) return null;
-
-    const idx = m.index ?? 0;
-    const start = t.lastIndexOf("\n", idx);
-    const end = t.indexOf("\n", idx);
-    const line = t
-      .slice(start === -1 ? 0 : start + 1, end === -1 ? t.length : end)
-      .trim();
-
-    // final clean + clamp, damit keine Monster-Zeilen im UI landen
-    const out = (line || m[0].trim()).trim();
-    return clampText(out, 240);
-  };
+  const t = stripHtml((text ?? "").toString()).replace(/\r/g, "");
 
   const keyFacts: Record<string, string | null> = {
+    // Termine
     baubeginn: null,
     bauzeit: null,
     fertigstellung: null,
     ausfuehrungsfrist: null,
+
+    // Angebot/Vertrag
     fristAngebot: null,
     bindefrist: null,
     vertragsstrafe: null,
     gewaerhleistung: null,
+
+    // Zahlung/Preis
+    zahlungsbedingungen: null,
+    abschlagszahlung: null,
+    schlussrechnung: null,
+    zahlungsziel: null,
+    preisgleitung: null,
+
+    // Vertragsgrundlagen (nice)
+    vob_b: null,
+    bgb: null,
+    rangfolge: null,
   };
 
+  // --- Abschnitt-basierte Facts (besser als einzelne Zeile) ---
+  keyFacts.zahlungsbedingungen =
+    pickSectionByHeading(t, /^\s*1\.4\.\s+zahlungsbedingungen\b/i) ||
+    pickSectionByHeading(t, /^\s*zahlungsbedingungen\b/i) ||
+    pickSectionByHeading(t, /^\s*zahlung\b/i);
+
+  // Falls Abschnitt nicht vorhanden, fallbacks als Zeilen
+  keyFacts.abschlagszahlung =
+    pickLine(t, /(?:abschlagszahlung|abschlag|anzahlung)[^\n]{0,220}/i) ||
+    pickLine(t, /\b\d{1,3}\s*%\b[^\n]{0,200}(?:abschlag|anzahlung|materialanlieferung|lieferung)/i);
+
+  keyFacts.schlussrechnung =
+    pickLine(t, /(?:schlussrechnung|endabrechnung)[^\n]{0,220}/i) ||
+    pickLine(t, /(?:rechnung)\s*(?:erfolgt|erfolgen|stellt)\s*(?:nach|bei)\s*(?:abnahme|übergabe)[^\n]{0,180}/i);
+
+  keyFacts.zahlungsziel =
+    pickLine(t, /(?:zahlbar|zahlung)\s*(?:innerhalb|binnen)\s*\d{1,3}\s*(?:tagen|tage)\b[^\n]{0,120}/i) ||
+    pickLine(t, /\b\d{1,3}\s*(?:tage|tagen)\s*rein\s*netto\b[^\n]{0,120}/i) ||
+    pickLine(t, /\bskonto\b[^\n]{0,160}/i);
+
+  keyFacts.preisgleitung =
+    pickSectionByHeading(t, /^\s*1\.3\.\s+gültigkeit\s+des\s+angebots\b/i) ||
+    pickLine(t, /(?:rohstoffpreise|materialpreise|preis(?:e)?\s*anpassung|preisvorbehalt|preisgleitung)[^\n]{0,220}/i);
+
+  // Termine
   keyFacts.baubeginn =
-    pickLine(/(?:bau|ausführungs)\s*beginn[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i) ||
-    pickLine(/(?:beginn)\s*(?:der)?\s*(?:arbeiten|ausführung)[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i);
+    pickLine(t, /(?:bau|ausführungs)\s*beginn[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i) ||
+    pickLine(t, /(?:beginn)\s*(?:der)?\s*(?:arbeiten|ausführung)[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i);
 
   keyFacts.bauzeit =
-    pickLine(/(?:bauzeit|ausführungsdauer|ausführungszeit)[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i) ||
-    pickLine(/(?:dauer)\s*(?:der)?\s*(?:ausführung|arbeiten)[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i) ||
-    pickLine(/\b\d{1,3}\s*(?:wochen|woche|tage|tag|monate|monat)\b/i);
+    pickLine(t, /(?:bauzeit|ausführungsdauer|ausführungszeit)[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i) ||
+    pickLine(t, /(?:dauer)\s*(?:der)?\s*(?:ausführung|arbeiten)[^:\n]{0,40}[:\-]?\s*[^\n]{0,160}/i) ||
+    pickLine(t, /\b\d{1,3}\s*(?:wochen|woche|tage|tag|monate|monat)\b/i);
 
   keyFacts.fertigstellung =
-    pickLine(/(?:fertigstellung|übergabe|abnahme)\s*(?:bis|spätestens|termin)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i) ||
-    pickLine(/spätestens\s+bis\s+[^\n]{0,180}/i);
+    pickLine(t, /(?:fertigstellung|übergabe|abnahme)\s*(?:bis|spätestens|termin)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i) ||
+    pickLine(t, /spätestens\s+bis\s+[^\n]{0,180}/i);
 
   keyFacts.ausfuehrungsfrist =
-    pickLine(/(?:ausführungsfrist|fristenplan|terminplan)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i) ||
-    pickLine(/(?:frist)\s*(?:für)?\s*(?:ausführung|arbeiten)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i);
+    pickSectionByHeading(t, /^\s*1\.2\.\s+ausführungsfrist\b/i) ||
+    pickLine(t, /(?:ausführungsfrist|fristenplan|terminplan)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i) ||
+    pickLine(t, /(?:frist)\s*(?:für)?\s*(?:ausführung|arbeiten)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i);
 
+  // Angebot/Bindung
   keyFacts.fristAngebot =
-    pickLine(/(?:angebotsfrist|abgabefrist|abgabe\s*frist)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i) ||
-    pickLine(/(?:angebot)\s*(?:abgabe|einreichung)\s*(?:bis|spätestens)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i);
+    pickLine(t, /(?:angebotsfrist|abgabefrist|abgabe\s*frist)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i) ||
+    pickLine(t, /(?:angebot)\s*(?:abgabe|einreichung)\s*(?:bis|spätestens)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i);
 
   keyFacts.bindefrist =
-    pickLine(/(?:bindefrist|angebot\s*bindefrist|bindend\s*bis)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i);
+    pickLine(t, /(?:bindefrist|angebot\s*bindefrist|bindend\s*bis)[^:\n]{0,40}[:\-]?\s*[^\n]{0,180}/i);
 
+  // Vertragsstrafe/Gewährleistung
   keyFacts.vertragsstrafe =
-    pickLine(/(?:vertragsstrafe|pönale|konventionalstrafe)[^:\n]{0,40}[:\-]?\s*[^\n]{0,220}/i);
+    pickLine(t, /(?:vertragsstrafe|pönale|konventionalstrafe)[^:\n]{0,40}[:\-]?\s*[^\n]{0,220}/i);
 
   keyFacts.gewaerhleistung =
-    pickLine(/(?:gewährleistung|mängelhaftung|verjährung)\s*(?:frist|dauer)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,220}/i) ||
-    pickLine(/\b(?:4|5)\s*(?:jahre|jahr)\b/i);
+    pickLine(t, /(?:gewährleistung|mängelhaftung|verjährung)\s*(?:frist|dauer)?[^:\n]{0,40}[:\-]?\s*[^\n]{0,220}/i) ||
+    pickLine(t, /\b(?:4|5)\s*(?:jahre|jahr)\b/i);
 
-  // dedupe: gleiche Zeile nicht in 2 Feldern ausgeben
+  // Vertragsgrundlagen / Rangfolge
+  keyFacts.vob_b = pickLine(t, /\bvob\/b\b[^\n]{0,180}/i);
+  keyFacts.bgb = pickLine(t, /\bbgb\b[^\n]{0,180}/i);
+  keyFacts.rangfolge = pickLine(t, /rangfolge\s+der\s+vertragsunterlagen[^\n]{0,220}/i);
+
+  // Dedupe + remove nulls
   const seen = new Set<string>();
   const cleaned: Record<string, string> = {};
+
   for (const [k, v] of Object.entries(keyFacts)) {
     const vv = (v ?? "").trim();
     if (!vv) continue;
+
     const norm = vv.toLowerCase();
     if (seen.has(norm)) continue;
     seen.add(norm);
+
     cleaned[k] = vv;
   }
 
@@ -175,13 +260,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ riskClauses: [], keyFacts: {}, error: "No text provided" }, { status: 400 });
     }
 
-    // 1) Vortext extrahieren (damit LLM nicht das ganze LV bekommt)
+    // 1) Vortext extrahieren
     const vortext = extractVortext(text);
 
-    // 2) KeyFacts aus Vortext ziehen (regex-basiert)
+    // 2) KeyFacts extrahieren (regex/section)
     const keyFacts = extractKeyFacts(vortext);
 
-    // 3) Server-seitige Sicherheitsbremse für LLM
+    // 3) Sicherheitsbremse fürs LLM (Char Limit)
     const MAX_CHARS = 10_000;
     const safeText = clampText(vortext, MAX_CHARS);
 
@@ -192,16 +277,16 @@ Aufgabe:
 Finde in den Vorbemerkungen/Vortexten Risikoformulierungen, die Kosten-, Haftungs- oder Nachtragsrisiken auf den Auftragnehmer verlagern.
 
 Suche nach:
-- pauschalen Nebenleistungen / "mit abgegolten"
+- pauschalen Nebenleistungen / "mit abgegolten" / "ohne gesonderte Vergütung"
 - unbegrenztem Leistungsumfang / Funktionsfähigkeit / Vollständigkeit
-- unklarer Abgrenzung / "alle erforderlichen Leistungen"
-- Koordinations-/GU-Pflichten
+- unklarer Abgrenzung / "alle erforderlichen Leistungen" / "auch wenn nicht ausdrücklich beschrieben"
+- Koordinations-/Schnittstellen-/Fremdgewerke-Verantwortung
 - Normenpflicht ohne konkrete Norm oder ohne Vergütung
 - Material-/Montagepauschalen
-- Dokumentations-/Inbetriebnahme-/Prüfpflichten ohne klare Leistung/Abrechnung
+- Dokumentations-/Inbetriebnahme-/Prüfpflichten ohne klare Abrechnung
 
 Regeln:
-- Wenn du eine plausible Risiko-Klausel siehst, gib sie aus. Lieber 1–5 gute Treffer als 0.
+- Lieber 1–8 gute Treffer als 0.
 - "text" muss ein exakter Auszug aus dem Input sein (max. 300 Zeichen).
 - Maximal 12 riskClauses.
 
