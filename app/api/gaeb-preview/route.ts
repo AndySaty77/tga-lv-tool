@@ -1,15 +1,19 @@
 // app/api/gaeb-preview/route.ts
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs"; // wichtig für File/Buffer
+export const runtime = "nodejs";
 
-const HARD_MAX_CHARS = 200_000; // Preview-Limit (roh)
-const VORTEXT_PREVIEW_MAX_CHARS = 20_000; // nur UI/Preview
-const VORTEXT_EXTRACT_MAX_CHARS = HARD_MAX_CHARS; // Verarbeitung/Analyse
+const HARD_MAX_CHARS = 200_000;          // Roh-Preview (gesamt)
+const VORTEXT_PREVIEW_MAX_CHARS = 20_000; // UI-Preview für Vortext
 
 function hardCut(s: string, max: number) {
   const t = (s ?? "").toString();
   return t.length > max ? t.slice(0, max) : t;
+}
+
+function normalizeNewlines(s: string) {
+  // macht \r\n und \r zu \n
+  return (s ?? "").toString().replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
 function stripHtml(input: string) {
@@ -31,39 +35,38 @@ function stripHtml(input: string) {
 }
 
 type VortextGuess = {
-  vortextRawFull: string; // <- FULL (nicht gekappt)
-  cutIdx: number; // <- INDEX in rawPreview
+  cutIdx: number;        // Index im rawPreview
   method: string;
 };
 
-/**
- * Robust für Dangl/WebGAEB Text-Export:
- * - Header enthält viele "No" -> darf NICHT triggern
- * - Echter Positionsstart ist: TITELZEILE + No + Menge + Einheit + No + No
- * - Fallback: "Einrichtungsgegenstände"
- *
- * WICHTIG:
- * - vortextRawFull ist absichtlich NICHT auf 20k gekappt, damit der Schnitt nicht "falsch" aussieht.
- * - Kürzung passiert erst im Response (Preview).
- */
-function guessVortext(raw: string): VortextGuess {
-  const t = raw ?? "";
-  const lower = t.toLowerCase();
+function clampIdx(idx: number, len: number) {
+  if (!Number.isFinite(idx)) return 0;
+  return Math.max(0, Math.min(idx, len));
+}
 
-  // 1) XML Marker (falls doch mal XML)
-  for (const m of ["<lvpos", "<position", "<pos"]) {
-    const i = lower.indexOf(m);
-    if (i > 300) {
-      const full = t.slice(0, i).trim();
-      return {
-        vortextRawFull: hardCut(full, VORTEXT_EXTRACT_MAX_CHARS),
-        cutIdx: i,
-        method: "xml-marker",
-      };
-    }
+/**
+ * Ziel: exakt dort schneiden, wo bei dir die Positionen anfangen:
+ * "Einrichtungsgegenstände" + danach No/Menge/Einheit/No/No
+ */
+function findCutIdx(rawPreview: string): VortextGuess {
+  const t = normalizeNewlines(rawPreview);
+  const lower = t.toLowerCase();
+  const len = t.length;
+
+  // 1) HARDCODED: wenn "Einrichtungsgegenstände" existiert -> DAS ist bei dir der richtige Schnitt
+  // (ohne \n-Anker, damit es nicht an CRLF/Spaces scheitert)
+  const eg = lower.indexOf("einrichtungsgegenstände");
+  if (eg > 0) {
+    return { cutIdx: clampIdx(eg, len), method: "anchor-einrichtungsgegenstaende" };
   }
 
-  // 2) Dangl/WebGAEB: Titel + No + Menge + Einheit + No + No
+  // 2) XML Marker (falls echtes XML)
+  for (const m of ["<lvpos", "<position", "<pos"]) {
+    const i = lower.indexOf(m);
+    if (i > 300) return { cutIdx: clampIdx(i, len), method: "xml-marker" };
+  }
+
+  // 3) Generisch: Titelzeile + No + Menge + Einheit + No + No
   const unit = "(St|Std|h|min|m|m2|m²|m3|m³|kg|t|l|psch)";
   const re = new RegExp(
     String.raw`(?:^|\n)(?<title>[^\n]{3,180})\nNo\s*\n(?<qty>\d{1,7})\s*\n(?<unit>${unit})\s*\nNo\s*\nNo\s*\n`,
@@ -74,78 +77,48 @@ function guessVortext(raw: string): VortextGuess {
     const x = s.trim();
     if (!x) return true;
     if (/^no$/i.test(x)) return true;
-    if (/^\d+(\.\d+)*$/.test(x)) return true; // 3.3, 19.2, etc.
-    if (/^\d{4}-\d{2}-\d{2}$/.test(x)) return true; // Datum
-    if (/^\d{2}:\d{2}:\d{2}$/.test(x)) return true; // Uhrzeit
-    if (
-      /^(alltxt|boqlevel|item|index|hls|eur|euro|webgaeb|dangl|version|stand)$/i.test(
-        x
-      )
-    )
-      return true;
-    if (/^[a-f0-9-]{16,}$/i.test(x)) return true; // GUID/Hash
+    if (/^\d+(\.\d+)*$/.test(x)) return true;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(x)) return true;
+    if (/^\d{2}:\d{2}:\d{2}$/.test(x)) return true;
+    if (/^(alltxt|boqlevel|item|index|hls|eur|euro|webgaeb|dangl|version|stand)$/i.test(x)) return true;
+    if (/^[a-f0-9-]{16,}$/i.test(x)) return true;
     if (x.length < 4) return true;
     return false;
   };
 
   let bestIdx = -1;
   let bestScore = -1;
-  let bestTitle = "";
 
   let m: RegExpExecArray | null;
   while ((m = re.exec(t)) !== null) {
-    const idx = m.index; // Start der Titelzeile
+    const idx = m.index;
     const title = (m.groups?.title ?? "").trim();
     if (badTitle(title)) continue;
 
-    // Score: echtes LV hat kurz danach typische Phrasen
-    const window = t.slice(idx, Math.min(t.length, idx + 1800)).toLowerCase();
+    const window = t.slice(idx, Math.min(len, idx + 2000)).toLowerCase();
     const score =
       (window.includes("bestehend aus") ? 3 : 0) +
       (window.includes("liefern und montieren") ? 3 : 0) +
       (window.includes("hersteller") ? 2 : 0) +
       (window.includes("modell") ? 1 : 0);
 
-    // Bonus, wenn vor dem Treffer "Allgemeine Vorbemerkungen" vorkommt
-    const before = t.slice(Math.max(0, idx - 12000), idx).toLowerCase();
+    // Bonus wenn kurz vorher Vorbemerkungen vorkommen
+    const before = t.slice(Math.max(0, idx - 15000), idx).toLowerCase();
     const bonus = before.includes("allgemeine vorbemerkungen") ? 3 : 0;
 
     const total = score + bonus;
-
     if (total > bestScore) {
       bestScore = total;
       bestIdx = idx;
-      bestTitle = title;
     }
   }
 
   if (bestIdx !== -1) {
-    const full = t.slice(0, bestIdx).trim();
-    return {
-      vortextRawFull: hardCut(full, VORTEXT_EXTRACT_MAX_CHARS),
-      cutIdx: bestIdx,
-      method: `title+no-qty-unit bestScore=${bestScore} title="${bestTitle}"`,
-    };
+    return { cutIdx: clampIdx(bestIdx, len), method: `title+no-qty-unit score=${bestScore}` };
   }
 
-  // 3) Fallback: bei "Einrichtungsgegenstände" schneiden (bei dir exakt der Start)
-  const i2 = lower.indexOf("\neinrichtungsgegenstände\n");
-  if (i2 > 0) {
-    const full = t.slice(0, i2).trim();
-    return {
-      vortextRawFull: hardCut(full, VORTEXT_EXTRACT_MAX_CHARS),
-      cutIdx: i2 + 1,
-      method: "fallback-einrichtungsgegenstaende",
-    };
-  }
-
-  // 4) Letzter Fallback
-  const cut = Math.min(t.length, VORTEXT_EXTRACT_MAX_CHARS);
-  return {
-    vortextRawFull: t.slice(0, cut).trim(),
-    cutIdx: cut,
-    method: "fallback-top-chunk",
-  };
+  // 4) Letzter Fallback: NICHT 200k setzen. Wenn wir nix finden -> keine Trennung.
+  return { cutIdx: len, method: "fallback-no-cut-found" };
 }
 
 export async function POST(req: Request) {
@@ -154,64 +127,50 @@ export async function POST(req: Request) {
     const file = form.get("file");
 
     if (!file || typeof file === "string") {
-      return NextResponse.json(
-        { error: "No file provided (field name: file)" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No file provided (field name: file)" }, { status: 400 });
     }
 
     const f = file as File;
     const raw = await f.text();
 
-    const rawPreview = hardCut(raw, HARD_MAX_CHARS);
+    const rawPreview = normalizeNewlines(hardCut(raw, HARD_MAX_CHARS));
     const cleanPreview = stripHtml(rawPreview);
 
-    const g = guessVortext(rawPreview);
+    const g = findCutIdx(rawPreview);
+    const cutIdx = clampIdx(g.cutIdx, rawPreview.length);
 
-    // FULL (für Analyse/Weitergabe an Risk-Engine)
-    const vortextFullRaw = g.vortextRawFull;
-    const vortextFullClean = stripHtml(vortextFullRaw);
+    const vortextFullRaw = rawPreview.slice(0, cutIdx);
+    const positionsFullRaw = rawPreview.slice(cutIdx);
 
-    // PREVIEW (nur UI)
+    // UI-Preview fürs Vortext-Feld (damit die Ausgabe nicht riesig wird)
     const vortextGuessRaw = hardCut(vortextFullRaw, VORTEXT_PREVIEW_MAX_CHARS);
-    const vortextGuessClean = stripHtml(vortextGuessRaw);
-
-    // WICHTIG: stumpf ab cutIdx slicen – kein startsWith/trim-Quatsch
-    const positionsGuessRawFull = rawPreview.slice(Math.max(0, g.cutIdx));
-    const positionsGuessRaw = hardCut(positionsGuessRawFull, HARD_MAX_CHARS);
-    const positionsGuessClean = stripHtml(positionsGuessRaw);
 
     return NextResponse.json({
       filename: f.name,
       size: f.size,
 
-      // Gesamt-Preview
+      // Gesamt
       rawPreview,
       cleanPreview,
 
-      // Vortext Preview (UI)
+      // Vortext
       vortextGuessRaw,
-      vortextGuessClean,
-
-      // Vortext FULL (für Analyse)
+      vortextGuessClean: stripHtml(vortextGuessRaw),
       vortextFullRaw,
-      vortextFullClean,
+      vortextFullClean: stripHtml(vortextFullRaw),
 
-      // Positions (ab Cut)
-      positionsGuessRaw,
-      positionsGuessClean,
+      // Positionen
+      positionsGuessRaw: positionsFullRaw, // (hier NICHT noch mal hardCutten – sonst verfälschst du)
+      positionsGuessClean: stripHtml(positionsFullRaw),
 
       debug: {
         rawChars: raw.length,
         previewChars: rawPreview.length,
-        cutIdx: g.cutIdx,
+        cutIdx,
         method: g.method,
-
         vortextFullChars: vortextFullRaw.length,
-        vortextPreviewChars: vortextGuessRaw.length,
-
-        // damit du sofort siehst ob er richtig ab "Einrichtungsgegenstände" startet
-        positionsStartsWith: positionsGuessClean.slice(0, 200),
+        positionsFullChars: positionsFullRaw.length,
+        positionsStartsWith: stripHtml(positionsFullRaw).slice(0, 200),
       },
     });
   } catch (e: any) {
