@@ -1,9 +1,9 @@
 // app/api/gaeb-preview/route.ts
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs";
+export const runtime = "nodejs"; // wichtig für File/Buffer
 
-const HARD_MAX_CHARS = 200_000;
+const HARD_MAX_CHARS = 200_000; // Preview-Limit (roh)
 const VORTEXT_MAX_CHARS = 20_000;
 
 function hardCut(s: string, max: number) {
@@ -31,56 +31,115 @@ function stripHtml(input: string) {
 
 type VortextGuess = {
   vortextRaw: string;
-  cutIdx: number;          // <- entscheidend
+  cutIdx: number;
   method: string;
 };
 
+/**
+ * Robust für deinen Dangl/WebGAEB-Text-Export:
+ * - Header enthält viele "No" -> darf NICHT triggern
+ * - Echter Positionsstart ist: TITELZEILE + No + Menge + Einheit + No + No
+ * - Wenn wir keinen guten Treffer finden: fallback auf "Einrichtungsgegenstände"
+ */
 function guessVortext(raw: string): VortextGuess {
   const t = raw ?? "";
   const lower = t.toLowerCase();
 
-  // 1) XML echte Positions-Tags (wenn GAEB-XML)
-  const xmlMarkers = ["<lvpos", "<position", "<pos"];
-  let cutIdx = -1;
-  for (const m of xmlMarkers) {
+  // 1) XML Marker (falls doch mal XML)
+  for (const m of ["<lvpos", "<position", "<pos"]) {
     const i = lower.indexOf(m);
-    if (i !== -1) cutIdx = cutIdx === -1 ? i : Math.min(cutIdx, i);
-  }
-  if (cutIdx !== -1 && cutIdx > 300) {
-    const vt = hardCut(t.slice(0, cutIdx).trim(), VORTEXT_MAX_CHARS);
-    return { vortextRaw: vt, cutIdx, method: "xml-marker" };
-  }
-
-  // 2) TEXT-EXPORT (wie bei dir): Position-Row Muster "No / <zahl> / <Einheit> / No / No"
-  // Wichtig: Einheit-Liste bewusst kurz halten, sonst false positives.
-  const unit = "(St|Std|h|min|m|m2|m²|m3|m³|kg|t|l)";
-  const posRowRe = new RegExp(
-    String.raw`(?:^|\n)No\s*\n\d{1,7}\s*\n${unit}\s*\nNo\s*\nNo\s*\n`,
-    "i"
-  );
-  const m = posRowRe.exec(t);
-  if (m && typeof m.index === "number") {
-    // cut am Beginn der Tabellenzeile "No..."
-    cutIdx = m.index === 0 ? 0 : m.index; 
-    // Optional: noch 1-2 Zeilen nach oben ziehen, wenn davor ein Positionskurztext steht.
-    // Heuristik: schau 1 Zeile nach oben.
-    const before = t.slice(0, cutIdx);
-    const lastNl = before.lastIndexOf("\n");
-    const prevLineStart = before.lastIndexOf("\n", lastNl - 1);
-    const prevLine = before.slice(prevLineStart + 1, lastNl).trim();
-
-    // Wenn die vorherige Zeile NICHT leer ist, ist das wahrscheinlich der Kurztext -> mitnehmen
-    if (prevLine && prevLine.length < 120) {
-      cutIdx = prevLineStart + 1;
+    if (i > 300) {
+      return {
+        vortextRaw: hardCut(t.slice(0, i).trim(), VORTEXT_MAX_CHARS),
+        cutIdx: i,
+        method: "xml-marker",
+      };
     }
-
-    const vt = hardCut(t.slice(0, cutIdx).trim(), VORTEXT_MAX_CHARS);
-    return { vortextRaw: vt, cutIdx, method: "no-qty-unit-pattern" };
   }
 
-  // 3) Fallback: nix gefunden -> einfach Top-Chunk
-  const fallbackCut = Math.min(t.length, VORTEXT_MAX_CHARS);
-  return { vortextRaw: hardCut(t.slice(0, fallbackCut).trim(), VORTEXT_MAX_CHARS), cutIdx: fallbackCut, method: "fallback-top-chunk" };
+  // 2) Dangl/WebGAEB Textexport: Titel + No + Menge + Einheit + No + No
+  const unit = "(St|Std|h|min|m|m2|m²|m3|m³|kg|t|l|psch)";
+  const re = new RegExp(
+    String.raw`(?:^|\n)(?<title>[^\n]{3,180})\nNo\s*\n(?<qty>\d{1,7})\s*\n(?<unit>${unit})\s*\nNo\s*\nNo\s*\n`,
+    "gi"
+  );
+
+  const badTitle = (s: string) => {
+    const x = s.trim();
+    if (!x) return true;
+    if (/^no$/i.test(x)) return true;
+    if (/^\d+(\.\d+)*$/.test(x)) return true; // 3.3, 19.2, etc.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(x)) return true; // Datum
+    if (/^\d{2}:\d{2}:\d{2}$/.test(x)) return true; // Uhrzeit
+    if (
+      /^(alltxt|boqlevel|item|index|hls|eur|euro|webgaeb|dangl|version|stand)$/i.test(
+        x
+      )
+    )
+      return true;
+    if (/^[a-f0-9-]{16,}$/i.test(x)) return true; // GUID/Hash
+    if (x.length < 4) return true;
+    return false;
+  };
+
+  let bestIdx = -1;
+  let bestScore = -1;
+  let bestTitle = "";
+
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(t)) !== null) {
+    const idx = m.index; // Start der Titelzeile
+    const title = (m.groups?.title ?? "").trim();
+    if (badTitle(title)) continue;
+
+    // Score: echtes LV hat kurz danach typische Phrasen
+    const window = t.slice(idx, Math.min(t.length, idx + 1800)).toLowerCase();
+    const score =
+      (window.includes("bestehend aus") ? 3 : 0) +
+      (window.includes("liefern und montieren") ? 3 : 0) +
+      (window.includes("hersteller") ? 2 : 0) +
+      (window.includes("modell") ? 1 : 0);
+
+    // Bonus, wenn vor dem Treffer "Allgemeine Vorbemerkungen" vorkommt
+    const before = t
+      .slice(Math.max(0, idx - 12000), idx)
+      .toLowerCase();
+    const bonus = before.includes("allgemeine vorbemerkungen") ? 3 : 0;
+
+    const total = score + bonus;
+
+    if (total > bestScore) {
+      bestScore = total;
+      bestIdx = idx;
+      bestTitle = title;
+    }
+  }
+
+  if (bestIdx !== -1) {
+    return {
+      vortextRaw: hardCut(t.slice(0, bestIdx).trim(), VORTEXT_MAX_CHARS),
+      cutIdx: bestIdx,
+      method: `title+no-qty-unit bestScore=${bestScore} title="${bestTitle}"`,
+    };
+  }
+
+  // 3) Fallback: bei "Einrichtungsgegenstände" schneiden (bei dir exakt der Start)
+  const i2 = lower.indexOf("\neinrichtungsgegenstände\n");
+  if (i2 > 0) {
+    return {
+      vortextRaw: hardCut(t.slice(0, i2).trim(), VORTEXT_MAX_CHARS),
+      cutIdx: i2 + 1,
+      method: "fallback-einrichtungsgegenstaende",
+    };
+  }
+
+  // 4) Letzter Fallback
+  const cut = Math.min(t.length, VORTEXT_MAX_CHARS);
+  return {
+    vortextRaw: hardCut(t.slice(0, cut).trim(), VORTEXT_MAX_CHARS),
+    cutIdx: cut,
+    method: "fallback-top-chunk",
+  };
 }
 
 export async function POST(req: Request) {
@@ -89,7 +148,10 @@ export async function POST(req: Request) {
     const file = form.get("file");
 
     if (!file || typeof file === "string") {
-      return NextResponse.json({ error: "No file provided (field name: file)" }, { status: 400 });
+      return NextResponse.json(
+        { error: "No file provided (field name: file)" },
+        { status: 400 }
+      );
     }
 
     const f = file as File;
@@ -99,10 +161,11 @@ export async function POST(req: Request) {
     const cleanPreview = stripHtml(rawPreview);
 
     const g = guessVortext(rawPreview);
+
     const vortextGuessRaw = g.vortextRaw;
     const vortextGuessClean = stripHtml(vortextGuessRaw);
 
-    // Positions = ab cutIdx (nicht startsWith/trim-Spielchen)
+    // WICHTIG: stumpf ab cutIdx slicen – kein startsWith/trim-Quatsch
     const positionsGuessRaw = rawPreview.slice(Math.max(0, g.cutIdx));
     const positionsGuessClean = stripHtml(hardCut(positionsGuessRaw, HARD_MAX_CHARS));
 
@@ -121,6 +184,7 @@ export async function POST(req: Request) {
         vortextChars: vortextGuessRaw.length,
         cutIdx: g.cutIdx,
         method: g.method,
+        positionsStartsWith: stripHtml(positionsGuessRaw).slice(0, 120),
       },
     });
   } catch (e: any) {
