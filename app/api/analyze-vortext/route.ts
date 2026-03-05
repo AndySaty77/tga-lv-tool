@@ -30,16 +30,13 @@ function normVal(v: any) {
 
 function mergeKeyFactsPreferRegex(regexFacts: KeyFacts, llmFacts: KeyFacts): KeyFacts {
   const out: KeyFacts = { ...(regexFacts ?? {}) };
-
   for (const [k, v] of Object.entries(llmFacts ?? {})) {
     const vv = normVal(v);
     if (!vv) continue;
     if (!out[k] || !out[k].trim()) out[k] = vv; // nur Lücken füllen
   }
-
   for (const k of Object.keys(out)) out[k] = normVal(out[k]);
   for (const [k, v] of Object.entries(out)) if (!v) delete out[k];
-
   return out;
 }
 
@@ -151,10 +148,9 @@ function extractKeyFactsRegex(input: string): KeyFacts {
   return out;
 }
 
-// ========= OpenAI Setup =========
+// ========= OpenAI =========
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Responses JSON Schema
 const JSON_SCHEMA = {
   name: "vortext_analysis",
   schema: {
@@ -184,8 +180,8 @@ const JSON_SCHEMA = {
   },
 } as const;
 
-// WICHTIG: kein `as const` beim Return -> sonst readonly TypeError
-function buildPrompt(vortext: string, missingKeys: string[]): OpenAI.ResponseInput {
+// Kein OpenAI-Typ hier. Kein readonly. TS-safe.
+function buildPrompt(vortext: string, missingKeys: string[]) {
   return [
     {
       role: "system",
@@ -208,7 +204,7 @@ function buildPrompt(vortext: string, missingKeys: string[]): OpenAI.ResponseInp
 }
 
 function cleanRiskClauses(list: any[]): RiskClause[] {
-  const out: RiskClause[] = (Array.isArray(list) ? list : [])
+  return (Array.isArray(list) ? list : [])
     .slice(0, MAX_RISK_CLAUSES)
     .map((r: any) => ({
       type: normVal(r?.type) || "Risiko",
@@ -217,11 +213,8 @@ function cleanRiskClauses(list: any[]): RiskClause[] {
       interpretation: (r?.interpretation ?? "").toString().trim().slice(0, 500),
     }))
     .filter((r) => r.text.length > 0);
-
-  return out;
 }
 
-// ========= Route =========
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -235,7 +228,7 @@ export async function POST(req: Request) {
     // 1) Regex zuerst
     const regexFacts = extractKeyFactsRegex(vortext);
 
-    // 2) Missing Keys bestimmen
+    // 2) Missing bestimmen
     const KEYSET = [
       "baubeginn",
       "bauzeit",
@@ -255,18 +248,19 @@ export async function POST(req: Request) {
 
     const missing = KEYSET.filter((k) => !(regexFacts[k] && regexFacts[k].trim().length > 0));
 
-    // 3) LLM (RiskClauses + nur fehlende KeyFacts)
+    // 3) LLM call
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
     const resp = await openai.responses.create({
       model,
-      input: buildPrompt(vortext, missing),
+      // TS: erzwinge mutables Array (keine readonly tuples)
+      input: buildPrompt(vortext, missing) as any,
       response_format: { type: "json_schema", json_schema: JSON_SCHEMA as any },
       temperature: 0.2,
       max_output_tokens: 900,
     });
 
-    const raw = resp.output_text || "{}";
+    const raw = (resp as any).output_text || "{}";
 
     let parsed: any = {};
     try {
@@ -278,21 +272,18 @@ export async function POST(req: Request) {
     const llmRisk = cleanRiskClauses(parsed?.riskClauses);
     const llmFacts: KeyFacts = parsed?.keyFacts && typeof parsed.keyFacts === "object" ? parsed.keyFacts : {};
 
-    // 4) Merge (Regex gewinnt, LLM füllt nur Lücken)
+    // 4) Merge
     const keyFacts = mergeKeyFactsPreferRegex(regexFacts, llmFacts);
-
-    // optional debug (UI ignoriert’s, stört nicht)
-    const keyFactsDebug = {
-      regexFound: Object.keys(regexFacts),
-      llmFilled: Object.keys(llmFacts || {}).filter((k) => !!normVal((llmFacts as any)[k])),
-      missingKeysRequested: missing,
-    };
 
     return NextResponse.json(
       {
         riskClauses: llmRisk,
         keyFacts,
-        keyFactsDebug,
+        keyFactsDebug: {
+          regexFound: Object.keys(regexFacts),
+          llmFilled: Object.keys(llmFacts || {}).filter((k) => !!normVal((llmFacts as any)[k])),
+          missingKeysRequested: missing,
+        },
       },
       { status: 200 }
     );
