@@ -233,6 +233,9 @@ function extractVortextUI(full: string) {
     "\n ep",
     "\ngp",
     "\n€",
+    "<position",
+    "<pos",
+    "<lvpos",
   ];
 
   const lower = t.toLowerCase();
@@ -290,6 +293,12 @@ export default function ScorePage() {
 
   const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
 
+  // ===== GAEB PREVIEW STATE =====
+  const [gaebPreviewLoading, setGaebPreviewLoading] = useState(false);
+  const [gaebPreviewError, setGaebPreviewError] = useState<string | null>(null);
+  const [gaebPreview, setGaebPreview] = useState<any>(null);
+  const [gaebTab, setGaebTab] = useState<"vortext" | "positions" | "raw" | "clean">("vortext");
+
   // ===== VORTEXT (LLM) STATE =====
   const [vortextLoading, setVortextLoading] = useState(false);
   const [vortextError, setVortextError] = useState<string | null>(null);
@@ -312,6 +321,13 @@ export default function ScorePage() {
     setRiskClauses([]);
     setKeyFacts({});
     setVortextLoading(false);
+  };
+
+  const resetGaebPreview = () => {
+    setGaebPreview(null);
+    setGaebPreviewError(null);
+    setGaebPreviewLoading(false);
+    setGaebTab("vortext");
   };
 
   const analyze = async (textOverride?: string) => {
@@ -381,10 +397,29 @@ export default function ScorePage() {
     }
   };
 
+  const runGaebPreview = async (file: File) => {
+    resetGaebPreview();
+    setGaebPreviewLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch("/api/gaeb-preview", { method: "POST", body: fd });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.message || j?.error || "gaeb-preview failed");
+      setGaebPreview(j);
+    } catch (e: any) {
+      setGaebPreviewError(e?.message || "gaeb-preview failed");
+      setGaebPreview(null);
+    } finally {
+      setGaebPreviewLoading(false);
+    }
+  };
+
   const loadFile = async (file: File) => {
     setError(null);
     setResult(null);
     resetVortext();
+    resetGaebPreview();
 
     if (file.size > MAX_FILE_BYTES) {
       setFileMeta({ name: file.name, size: file.size });
@@ -393,9 +428,18 @@ export default function ScorePage() {
       return;
     }
 
+    // Preview call zuerst (damit wir "sehen" können, was wirklich im File steckt)
+    await runGaebPreview(file);
+
     const text = await file.text();
     setFileMeta({ name: file.name, size: file.size });
+
+    // Default: originaler Text
     setLvText(text);
+
+    // Optional besser: wenn Preview Vortext liefert, setze Textfeld direkt auf VortextGuessClean
+    // (du kannst das wieder auskommentieren, wenn du es nicht willst)
+    // if (gaebPreview?.vortextGuessClean) setLvText(gaebPreview.vortextGuessClean);
 
     if (autoAnalyze) await analyze(text);
   };
@@ -478,18 +522,28 @@ export default function ScorePage() {
     entries.sort(([a], [b]) => {
       const la = KEYFACT_LABELS[a] ? 0 : 1;
       const lb = KEYFACT_LABELS[b] ? 0 : 1;
-      if (la !== lb) return la - lb; // bekannte zuerst
+      if (la !== lb) return la - lb;
       return a.localeCompare(b);
     });
     return entries;
   }, [keyFacts]);
+
+  const gaebTextForTab = useMemo(() => {
+    if (!gaebPreview) return "";
+    if (gaebTab === "vortext") return gaebPreview.vortextGuessClean ?? "";
+    if (gaebTab === "positions") return gaebPreview.positionsGuessClean ?? "";
+    if (gaebTab === "raw") return gaebPreview.rawPreview ?? "";
+    return gaebPreview.cleanPreview ?? "";
+  }, [gaebPreview, gaebTab]);
 
   return (
     <div style={{ padding: 28, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 26 }}>TGA LV Score</h1>
-          <div style={{ color: "#666", marginTop: 6 }}>Upload oder Text rein, Score raus. Filter machen’s nutzbar.</div>
+          <div style={{ color: "#666", marginTop: 6 }}>
+            Upload oder Text rein, Score raus. Und jetzt: GAEB-Preview, damit wir Vortext/Positionen sauber sehen.
+          </div>
         </div>
         <a href="/admin/triggers" style={{ color: "#111", textDecoration: "underline" }}>
           Trigger-Admin
@@ -528,7 +582,9 @@ export default function ScorePage() {
         >
           <div>
             <div style={{ fontWeight: 900 }}>Drag & Drop Datei hier rein</div>
-            <div style={{ color: "#666", marginTop: 4 }}>MVP: TXT/XML wird als Text eingelesen. GAEB/XML Parsing kommt später.</div>
+            <div style={{ color: "#666", marginTop: 4 }}>
+              MVP: Datei wird als Text eingelesen. Zusätzlich GAEB-Preview (Raw/Clean/Vortext/Positionen).
+            </div>
             {fileMeta && (
               <div style={{ marginTop: 8, color: "#111", fontWeight: 700 }}>
                 Geladen: {fileMeta.name}{" "}
@@ -610,6 +666,7 @@ export default function ScorePage() {
               setError(null);
               setFileMeta(null);
               resetVortext();
+              resetGaebPreview();
             }}
             style={{
               padding: "10px 14px",
@@ -627,6 +684,77 @@ export default function ScorePage() {
         </div>
 
         {error && <div style={{ marginTop: 12, color: "#b00020", fontWeight: 800 }}>{error}</div>}
+      </div>
+
+      {/* GAEB Preview Card */}
+      <div style={{ marginTop: 14, border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+          <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>GAEB PREVIEW</div>
+          <div style={{ color: "#666", fontWeight: 700 }}>
+            {gaebPreviewLoading ? "Lade…" : gaebPreview ? `${gaebPreview.filename} (${fmtKB(gaebPreview.size)})` : "—"}
+          </div>
+        </div>
+
+        {gaebPreviewError && <div style={{ marginTop: 10, color: "#b00020", fontWeight: 800 }}>{gaebPreviewError}</div>}
+
+        {!gaebPreviewLoading && gaebPreview && (
+          <>
+            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {(["vortext", "positions", "raw", "clean"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setGaebTab(t)}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    border: "1px solid #ddd",
+                    background: gaebTab === t ? "#111" : "#fff",
+                    color: gaebTab === t ? "#fff" : "#111",
+                    cursor: "pointer",
+                    fontWeight: 800,
+                  }}
+                >
+                  {t === "vortext" ? "Vortext (guess)" : t === "positions" ? "Positionen (guess)" : t === "raw" ? "Raw" : "Clean"}
+                </button>
+              ))}
+
+              <button
+                onClick={() => setLvText(gaebTextForTab || "")}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #111",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 900,
+                }}
+              >
+                In Textfeld übernehmen
+              </button>
+            </div>
+
+            <pre
+              style={{
+                marginTop: 10,
+                padding: 12,
+                borderRadius: 12,
+                border: "1px solid #eee",
+                background: "#fafafa",
+                fontSize: 12,
+                whiteSpace: "pre-wrap",
+                maxHeight: 260,
+                overflow: "auto",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              }}
+            >
+              {gaebTextForTab}
+            </pre>
+
+            <div style={{ marginTop: 8, color: "#666", fontSize: 12, fontWeight: 700 }}>
+              Debug: raw {gaebPreview.debug?.rawChars} chars • preview {gaebPreview.debug?.previewChars} • vortext {gaebPreview.debug?.vortextChars}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Results */}
@@ -700,7 +828,7 @@ export default function ScorePage() {
             )}
 
             <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
-              Hinweis: Key Facts sind regex-basiert (schnell/stabil). Wenn dir etwas fehlt, ergänzen wir gezielt Muster.
+              Hinweis: Key Facts bleiben erstmal “Best Effort”. Erst GAEB sauber splitten, dann werden sie stabil.
             </div>
           </div>
 
@@ -714,14 +842,24 @@ export default function ScorePage() {
             </div>
 
             {vortextError && (
-              <div style={{ marginTop: 10, border: "1px solid #f2c2c7", background: "#fdecef", padding: 12, borderRadius: 12 }}>
+              <div
+                style={{
+                  marginTop: 10,
+                  border: "1px solid #f2c2c7",
+                  background: "#fdecef",
+                  padding: 12,
+                  borderRadius: 12,
+                }}
+              >
                 <div style={{ fontWeight: 900, color: "#b00020" }}>Fehler</div>
                 <div style={{ marginTop: 6, color: "#8a0010", fontWeight: 700 }}>{vortextError}</div>
               </div>
             )}
 
             {!vortextLoading && !vortextError && riskClauses.length === 0 && (
-              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>Keine auffälligen Risikoformulierungen erkannt.</div>
+              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>
+                Keine auffälligen Risikoformulierungen erkannt. (Wenn GAEB-Vortext leer ist, ist das normal.)
+              </div>
             )}
 
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
@@ -759,7 +897,7 @@ export default function ScorePage() {
             </div>
 
             <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
-              Hinweis: Vortext wird aus dem LV-Anfang extrahiert und begrenzt (Token/Rate-Limits vermeiden).
+              Hinweis: Im nächsten Schritt ersetzen wir “guess” durch echtes GAEB-Parsing (XML-Struktur).
             </div>
           </div>
 
