@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const HARD_MAX_CHARS = 200_000;            // Roh-Preview (gesamt)
-const VORTEXT_PREVIEW_MAX_CHARS = 120_000; // UI-Preview für Vortext (hochgesetzt!)
+const HARD_MAX_CHARS = 200_000;
+const VORTEXT_PREVIEW_MAX_CHARS = 120_000;
 
 function hardCut(s: string, max: number) {
   const t = (s ?? "").toString();
@@ -33,39 +33,40 @@ function stripHtml(input: string) {
   return s.trim();
 }
 
-type VortextGuess = {
-  cutIdx: number; // Index im rawPreview
-  method: string;
-};
+type CutResult = { cutIdx: number; method: string };
 
 function clampIdx(idx: number, len: number) {
   if (!Number.isFinite(idx)) return 0;
   return Math.max(0, Math.min(idx, len));
 }
 
-/**
- * Ziel: genau dort schneiden, wo bei dir die Positionen anfangen:
- * - bevorzugt: "Einrichtungsgegenstände"
- * - sonst: Titelzeile + No + Menge + Einheit + No + No
- */
-function findCutIdx(rawPreview: string): VortextGuess {
+function findCutIdx(rawPreview: string): CutResult {
   const t = normalizeNewlines(rawPreview);
   const lower = t.toLowerCase();
   const len = t.length;
 
-  // 1) Harte Ankerstelle (bei deinem Export 100% richtig)
+  // A) Dangl-Export: "Einrichtungsgegenstände" = sicherer Start Positionsblock
   const eg = lower.indexOf("einrichtungsgegenstände");
   if (eg > 0) return { cutIdx: clampIdx(eg, len), method: "anchor-einrichtungsgegenstaende" };
 
-  // 2) XML Marker (falls echtes XML)
+  // B) CaliforniaX / GAEB-Text: TITEL <nr>: <name>
+  // Schneide am Beginn der Zeile "TITEL ..."
+  const titelRe = /(?:^|\n)(titel\s+\d+\s*:\s*[^\n]+)/i;
+  const mt = titelRe.exec(t);
+  if (mt && typeof mt.index === "number") {
+    const idx = mt.index === 0 ? 0 : mt.index + 1; // +1 weil match kann mit \n starten
+    return { cutIdx: clampIdx(idx, len), method: "anchor-titel-n" };
+  }
+
+  // C) XML Marker
   for (const m of ["<lvpos", "<position", "<pos"]) {
     const i = lower.indexOf(m);
     if (i > 300) return { cutIdx: clampIdx(i, len), method: "xml-marker" };
   }
 
-  // 3) Generisch: Titelzeile + No + Menge + Einheit + No + No
+  // D) Dangl/WebGAEB Positions-Pattern: Titelzeile + No + Menge + Einheit + No + No
   const unit = "(St|Std|h|min|m|m2|m²|m3|m³|kg|t|l|psch)";
-  const re = new RegExp(
+  const danglRe = new RegExp(
     String.raw`(?:^|\n)(?<title>[^\n]{3,180})\nNo\s*\n(?<qty>\d{1,7})\s*\n(?<unit>${unit})\s*\nNo\s*\nNo\s*\n`,
     "gi"
   );
@@ -77,7 +78,7 @@ function findCutIdx(rawPreview: string): VortextGuess {
     if (/^\d+(\.\d+)*$/.test(x)) return true;
     if (/^\d{4}-\d{2}-\d{2}$/.test(x)) return true;
     if (/^\d{2}:\d{2}:\d{2}$/.test(x)) return true;
-    if (/^(alltxt|boqlevel|item|index|hls|eur|euro|webgaeb|dangl|version|stand)$/i.test(x)) return true;
+    if (/^(alltxt|boqlevel|item|index|hls|eur|euro|californiax|version|stand)$/i.test(x)) return true;
     if (/^[a-f0-9-]{16,}$/i.test(x)) return true;
     if (x.length < 4) return true;
     return false;
@@ -85,11 +86,11 @@ function findCutIdx(rawPreview: string): VortextGuess {
 
   let bestIdx = -1;
   let bestScore = -1;
+  let mm: RegExpExecArray | null;
 
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(t)) !== null) {
-    const idx = m.index;
-    const title = (m.groups?.title ?? "").trim();
+  while ((mm = danglRe.exec(t)) !== null) {
+    const idx = mm.index;
+    const title = (mm.groups?.title ?? "").trim();
     if (badTitle(title)) continue;
 
     const window = t.slice(idx, Math.min(len, idx + 2000)).toLowerCase();
@@ -110,10 +111,22 @@ function findCutIdx(rawPreview: string): VortextGuess {
   }
 
   if (bestIdx !== -1) {
-    return { cutIdx: clampIdx(bestIdx, len), method: `title+no-qty-unit score=${bestScore}` };
+    return { cutIdx: clampIdx(bestIdx, len), method: `dangl-title+no-qty-unit score=${bestScore}` };
   }
 
-  // 4) Letzter Fallback: keine Trennung
+  // E) CaliforniaX Positions-Pattern: Menge (z.B. 40.000) + Einheit (m/St/...) + optional Yes/No
+  // Beispiel: "40.000\nm\nYes\nschallgedämmte Abwasserleitung DN 56"
+  const qtyUnitRe = new RegExp(
+    String.raw`(?:^|\n)\d{1,6}\.\d{3}\s*\n(?:m|st|kg|t|l|h|std|psch|m2|m²|m3|m³)\s*\n(?:yes|no)?\s*\n`,
+    "i"
+  );
+  const mq = qtyUnitRe.exec(lower);
+  if (mq && typeof mq.index === "number" && mq.index > 0) {
+    const idx = mq.index === 0 ? 0 : mq.index + 1;
+    return { cutIdx: clampIdx(idx, len), method: "californiax-qty-unit" };
+  }
+
+  // F) Fallback: keine Trennung
   return { cutIdx: len, method: "fallback-no-cut-found" };
 }
 
@@ -138,7 +151,6 @@ export async function POST(req: Request) {
     const vortextFullRaw = rawPreview.slice(0, cutIdx);
     const positionsFullRaw = rawPreview.slice(cutIdx);
 
-    // UI-Preview fürs Vortext-Feld
     const vortextGuessRaw = hardCut(vortextFullRaw, VORTEXT_PREVIEW_MAX_CHARS);
     const vortextWasTruncated = vortextFullRaw.length > VORTEXT_PREVIEW_MAX_CHARS;
 
@@ -146,30 +158,27 @@ export async function POST(req: Request) {
       filename: f.name,
       size: f.size,
 
-      // Gesamt
       rawPreview,
       cleanPreview,
 
-      // Vortext (Preview + Full)
       vortextGuessRaw,
       vortextGuessClean: stripHtml(vortextGuessRaw),
       vortextWasTruncated,
+
       vortextFullRaw,
       vortextFullClean: stripHtml(vortextFullRaw),
 
-      // Positionen (Full)
       positionsGuessRaw: positionsFullRaw,
       positionsGuessClean: stripHtml(positionsFullRaw),
 
       debug: {
-        rawChars: raw.length,
         previewChars: rawPreview.length,
         cutIdx,
         method: g.method,
         vortextFullChars: vortextFullRaw.length,
         vortextPreviewChars: vortextGuessRaw.length,
         positionsFullChars: positionsFullRaw.length,
-        positionsStartsWith: stripHtml(positionsFullRaw).slice(0, 200),
+        positionsStartsWith: stripHtml(positionsFullRaw).slice(0, 220),
       },
     });
   } catch (e: any) {
