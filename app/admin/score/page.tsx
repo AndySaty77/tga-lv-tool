@@ -208,7 +208,44 @@ function riskTone(level: "low" | "medium" | "high") {
   if (level === "medium") return "#a36b00";
   return "#0a7a2f";
 }
+function extractVortext(full: string) {
+  const t = (full ?? "").toString();
+  if (!t.trim()) return "";
 
+  // 1) harte Begrenzung als Fallback (wichtig!)
+  const HARD_MAX_CHARS = 12000; // ~ 2k–4k Tokens, safe
+  const hardCut = (s: string) => (s.length > HARD_MAX_CHARS ? s.slice(0, HARD_MAX_CHARS) : s);
+
+  // 2) typische Marker: ab hier beginnen Positionen / LV-Textkörper
+  const markers = [
+    "\nposition",
+    "\npos.",
+    "\npos ",
+    "\nleistungstext",
+    "\nleistungsverzeichnis",
+    "\nkurztext",
+    "\nlangtext",
+    "\nmenge",
+    "\neinheit",
+    "\n ep",
+    "\ngp",
+    "\n€",
+  ];
+
+  const lower = t.toLowerCase();
+  let cutIdx = -1;
+
+  for (const m of markers) {
+    const i = lower.indexOf(m);
+    if (i !== -1) cutIdx = cutIdx === -1 ? i : Math.min(cutIdx, i);
+  }
+
+  // 3) nimm bis Marker, sonst nimm ersten Chunk
+  const candidate = cutIdx > 300 ? t.slice(0, cutIdx) : t;
+
+  // 4) Vorbemerkungen sind oft am Anfang -> final hard cut
+  return hardCut(candidate.trim());
+}
 export default function ScorePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -284,7 +321,7 @@ export default function ScorePage() {
         const vRes = await fetch("/api/analyze-vortext", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: textToUse }),
+          body: JSON.stringify({ text: extractVortext(textToUse) }),
         });
 
         const vData = await vRes.json();
