@@ -281,6 +281,37 @@ function prettyKey(k: string) {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+// ===== UI KeyFacts Cleaning (Fix) =====
+const KEYFACT_HARD_MAX_VALUE = 260;
+
+function normKeyFactValue(v: any) {
+  let s = (v ?? "").toString();
+  s = s.replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  if (s.length > KEYFACT_HARD_MAX_VALUE) s = s.slice(0, KEYFACT_HARD_MAX_VALUE) + "…";
+  return s;
+}
+
+function isGarbageKeyFactValue(v: string) {
+  const s = (v ?? "").trim();
+  if (!s) return true;
+  if (s.length < 5) return true;
+
+  // reine Satzzeichen / Tokens
+  if (/^[\W_]+$/.test(s)) return true;
+
+  // nur Zahl / Mini-Fragmente (führt bei dir zu ":11", ":30", ", d" etc.)
+  if (/^[:;,\.\-–—\s]*\d{1,3}\s*$/.test(s)) return true;
+  if (/^,\s*[a-z]$/i.test(s)) return true;
+  if (/^en:$/i.test(s)) return true;
+  if (/^sfrist$/i.test(s)) return true;
+
+  // Kein echtes Wort drin (mind. 3 Buchstaben)
+  if (!/[a-zA-ZÄÖÜäöüß]{3,}/.test(s)) return true;
+
+  return false;
+}
+
 // ===== SPLIT RESULT =====
 type SplitResult = {
   vortext: string;
@@ -307,9 +338,9 @@ export default function ScorePage() {
   const [gaebPreviewLoading, setGaebPreviewLoading] = useState(false);
   const [gaebPreviewError, setGaebPreviewError] = useState<string | null>(null);
   const [gaebPreview, setGaebPreview] = useState<any>(null);
-  const [gaebTab, setGaebTab] = useState<"vortext" | "positions" | "raw" | "clean" | "llm_vortext" | "llm_positions">(
-    "vortext"
-  );
+  const [gaebTab, setGaebTab] = useState<
+    "vortext" | "positions" | "raw" | "clean" | "llm_vortext" | "llm_positions"
+  >("vortext");
 
   // ===== SPLIT (LLM) STATE =====
   const [splitLoading, setSplitLoading] = useState(false);
@@ -321,6 +352,8 @@ export default function ScorePage() {
   const [vortextError, setVortextError] = useState<string | null>(null);
   const [riskClauses, setRiskClauses] = useState<RiskClause[]>([]);
   const [keyFacts, setKeyFacts] = useState<Record<string, string>>({});
+  // optional: falls Route später confidence liefert
+  const [keyFactConfidence, setKeyFactConfidence] = useState<Record<string, number>>({});
 
   // Filters
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("both");
@@ -337,6 +370,7 @@ export default function ScorePage() {
     setVortextError(null);
     setRiskClauses([]);
     setKeyFacts({});
+    setKeyFactConfidence({});
     setVortextLoading(false);
   };
 
@@ -399,6 +433,7 @@ export default function ScorePage() {
     setVortextError(null);
     setRiskClauses([]);
     setKeyFacts({});
+    setKeyFactConfidence({});
 
     try {
       const vRes = await fetch("/api/analyze-vortext", {
@@ -413,17 +448,23 @@ export default function ScorePage() {
         setVortextError(vData?.message || vData?.error || "Vortext Analyse fehlgeschlagen");
         setRiskClauses([]);
         setKeyFacts({});
+        setKeyFactConfidence({});
       } else {
         const clauses = Array.isArray(vData?.riskClauses) ? vData.riskClauses : [];
         setRiskClauses(clauses);
 
         const facts = vData?.keyFacts && typeof vData.keyFacts === "object" ? vData.keyFacts : {};
         setKeyFacts(facts);
+
+        const conf =
+          vData?.keyFactConfidence && typeof vData.keyFactConfidence === "object" ? vData.keyFactConfidence : {};
+        setKeyFactConfidence(conf);
       }
     } catch (e: any) {
       setVortextError(e?.message || "Vortext Analyse fehlgeschlagen");
       setRiskClauses([]);
       setKeyFacts({});
+      setKeyFactConfidence({});
     } finally {
       setVortextLoading(false);
     }
@@ -585,16 +626,31 @@ export default function ScorePage() {
     setTop10(false);
   };
 
+  // ✅ Fix: KeyFacts filtern/normalisieren, damit kein Müll mehr angezeigt wird
   const keyFactsEntries = useMemo(() => {
-    const entries = Object.entries(keyFacts ?? {}).filter(([, v]) => typeof v === "string" && v.trim().length > 0);
+    const conf = keyFactConfidence ?? {};
+    const entries = Object.entries(keyFacts ?? {})
+      .map(([k, v]) => [k, normKeyFactValue(v)] as const)
+      .filter(([k, v]) => {
+        if (!v) return false;
+        if (isGarbageKeyFactValue(v)) return false;
+
+        // optional confidence filter (falls vorhanden)
+        const c = Number(conf[k]);
+        if (Number.isFinite(c) && c > 0 && c < 0.55) return false;
+
+        return true;
+      });
+
     entries.sort(([a], [b]) => {
       const la = KEYFACT_LABELS[a] ? 0 : 1;
       const lb = KEYFACT_LABELS[b] ? 0 : 1;
       if (la !== lb) return la - lb;
       return a.localeCompare(b);
     });
+
     return entries;
-  }, [keyFacts]);
+  }, [keyFacts, keyFactConfidence]);
 
   const gaebTextForTab = useMemo(() => {
     if (gaebTab === "llm_vortext") return (split?.vortext ?? "").toString();
@@ -735,7 +791,6 @@ export default function ScorePage() {
 
           <button
             onClick={async () => {
-              // Manual re-split wenn Datei vorhanden
               if (!lastFile) {
                 setSplitError("Kein File vorhanden (nur Text im Feld). Re-Split geht nur mit Datei.");
                 return;
@@ -805,14 +860,7 @@ export default function ScorePage() {
         {!gaebPreviewLoading && (gaebPreview || split) && (
           <>
             <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {([
-                "llm_vortext",
-                "llm_positions",
-                "vortext",
-                "positions",
-                "raw",
-                "clean",
-              ] as const).map((t) => (
+              {(["llm_vortext", "llm_positions", "vortext", "positions", "raw", "clean"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setGaebTab(t)}
@@ -829,14 +877,14 @@ export default function ScorePage() {
                   {t === "llm_vortext"
                     ? "LLM Vortext"
                     : t === "llm_positions"
-                    ? "LLM Positionen"
-                    : t === "vortext"
-                    ? "Vortext (guess)"
-                    : t === "positions"
-                    ? "Positionen (guess)"
-                    : t === "raw"
-                    ? "Raw"
-                    : "Clean"}
+                      ? "LLM Positionen"
+                      : t === "vortext"
+                        ? "Vortext (guess)"
+                        : t === "positions"
+                          ? "Positionen (guess)"
+                          : t === "raw"
+                            ? "Raw"
+                            : "Clean"}
                 </button>
               ))}
 
@@ -947,14 +995,25 @@ export default function ScorePage() {
 
             {!vortextError && keyFactsEntries.length > 0 && (
               <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {keyFactsEntries.map(([k, v]) => (
-                  <div key={k} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
-                    <div style={{ fontSize: 12, color: "#666", fontWeight: 900 }}>
-                      {KEYFACT_LABELS[k] ?? prettyKey(k)}
+                {keyFactsEntries.map(([k, v]) => {
+                  const c = Number(keyFactConfidence?.[k]);
+                  const hasC = Number.isFinite(c) && c > 0;
+                  return (
+                    <div key={k} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                      <div style={{ fontSize: 12, color: "#666", fontWeight: 900 }}>
+                        {KEYFACT_LABELS[k] ?? prettyKey(k)}
+                      </div>
+
+                      {hasC && (
+                        <div style={{ marginTop: 4, fontSize: 11, color: "#999", fontWeight: 800 }}>
+                          Confidence: {Math.round(c * 100)}%
+                        </div>
+                      )}
+
+                      <div style={{ marginTop: 6, fontWeight: 800, color: "#111", whiteSpace: "pre-wrap" }}>{v}</div>
                     </div>
-                    <div style={{ marginTop: 6, fontWeight: 800, color: "#111", whiteSpace: "pre-wrap" }}>{v}</div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -988,9 +1047,7 @@ export default function ScorePage() {
             )}
 
             {!vortextLoading && !vortextError && riskClauses.length === 0 && (
-              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>
-                Keine auffälligen Risikoformulierungen erkannt.
-              </div>
+              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>Keine auffälligen Risikoformulierungen erkannt.</div>
             )}
 
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
