@@ -4,7 +4,8 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs"; // wichtig für File/Buffer
 
 const HARD_MAX_CHARS = 200_000; // Preview-Limit (roh)
-const VORTEXT_MAX_CHARS = 20_000;
+const VORTEXT_PREVIEW_MAX_CHARS = 20_000; // nur UI/Preview
+const VORTEXT_EXTRACT_MAX_CHARS = HARD_MAX_CHARS; // Verarbeitung/Analyse
 
 function hardCut(s: string, max: number) {
   const t = (s ?? "").toString();
@@ -30,16 +31,20 @@ function stripHtml(input: string) {
 }
 
 type VortextGuess = {
-  vortextRaw: string;
-  cutIdx: number;
+  vortextRawFull: string; // <- FULL (nicht gekappt)
+  cutIdx: number; // <- INDEX in rawPreview
   method: string;
 };
 
 /**
- * Robust für deinen Dangl/WebGAEB-Text-Export:
+ * Robust für Dangl/WebGAEB Text-Export:
  * - Header enthält viele "No" -> darf NICHT triggern
  * - Echter Positionsstart ist: TITELZEILE + No + Menge + Einheit + No + No
- * - Wenn wir keinen guten Treffer finden: fallback auf "Einrichtungsgegenstände"
+ * - Fallback: "Einrichtungsgegenstände"
+ *
+ * WICHTIG:
+ * - vortextRawFull ist absichtlich NICHT auf 20k gekappt, damit der Schnitt nicht "falsch" aussieht.
+ * - Kürzung passiert erst im Response (Preview).
  */
 function guessVortext(raw: string): VortextGuess {
   const t = raw ?? "";
@@ -49,15 +54,16 @@ function guessVortext(raw: string): VortextGuess {
   for (const m of ["<lvpos", "<position", "<pos"]) {
     const i = lower.indexOf(m);
     if (i > 300) {
+      const full = t.slice(0, i).trim();
       return {
-        vortextRaw: hardCut(t.slice(0, i).trim(), VORTEXT_MAX_CHARS),
+        vortextRawFull: hardCut(full, VORTEXT_EXTRACT_MAX_CHARS),
         cutIdx: i,
         method: "xml-marker",
       };
     }
   }
 
-  // 2) Dangl/WebGAEB Textexport: Titel + No + Menge + Einheit + No + No
+  // 2) Dangl/WebGAEB: Titel + No + Menge + Einheit + No + No
   const unit = "(St|Std|h|min|m|m2|m²|m3|m³|kg|t|l|psch)";
   const re = new RegExp(
     String.raw`(?:^|\n)(?<title>[^\n]{3,180})\nNo\s*\n(?<qty>\d{1,7})\s*\n(?<unit>${unit})\s*\nNo\s*\nNo\s*\n`,
@@ -101,9 +107,7 @@ function guessVortext(raw: string): VortextGuess {
       (window.includes("modell") ? 1 : 0);
 
     // Bonus, wenn vor dem Treffer "Allgemeine Vorbemerkungen" vorkommt
-    const before = t
-      .slice(Math.max(0, idx - 12000), idx)
-      .toLowerCase();
+    const before = t.slice(Math.max(0, idx - 12000), idx).toLowerCase();
     const bonus = before.includes("allgemeine vorbemerkungen") ? 3 : 0;
 
     const total = score + bonus;
@@ -116,8 +120,9 @@ function guessVortext(raw: string): VortextGuess {
   }
 
   if (bestIdx !== -1) {
+    const full = t.slice(0, bestIdx).trim();
     return {
-      vortextRaw: hardCut(t.slice(0, bestIdx).trim(), VORTEXT_MAX_CHARS),
+      vortextRawFull: hardCut(full, VORTEXT_EXTRACT_MAX_CHARS),
       cutIdx: bestIdx,
       method: `title+no-qty-unit bestScore=${bestScore} title="${bestTitle}"`,
     };
@@ -126,17 +131,18 @@ function guessVortext(raw: string): VortextGuess {
   // 3) Fallback: bei "Einrichtungsgegenstände" schneiden (bei dir exakt der Start)
   const i2 = lower.indexOf("\neinrichtungsgegenstände\n");
   if (i2 > 0) {
+    const full = t.slice(0, i2).trim();
     return {
-      vortextRaw: hardCut(t.slice(0, i2).trim(), VORTEXT_MAX_CHARS),
+      vortextRawFull: hardCut(full, VORTEXT_EXTRACT_MAX_CHARS),
       cutIdx: i2 + 1,
       method: "fallback-einrichtungsgegenstaende",
     };
   }
 
   // 4) Letzter Fallback
-  const cut = Math.min(t.length, VORTEXT_MAX_CHARS);
+  const cut = Math.min(t.length, VORTEXT_EXTRACT_MAX_CHARS);
   return {
-    vortextRaw: hardCut(t.slice(0, cut).trim(), VORTEXT_MAX_CHARS),
+    vortextRawFull: t.slice(0, cut).trim(),
     cutIdx: cut,
     method: "fallback-top-chunk",
   };
@@ -162,29 +168,50 @@ export async function POST(req: Request) {
 
     const g = guessVortext(rawPreview);
 
-    const vortextGuessRaw = g.vortextRaw;
+    // FULL (für Analyse/Weitergabe an Risk-Engine)
+    const vortextFullRaw = g.vortextRawFull;
+    const vortextFullClean = stripHtml(vortextFullRaw);
+
+    // PREVIEW (nur UI)
+    const vortextGuessRaw = hardCut(vortextFullRaw, VORTEXT_PREVIEW_MAX_CHARS);
     const vortextGuessClean = stripHtml(vortextGuessRaw);
 
     // WICHTIG: stumpf ab cutIdx slicen – kein startsWith/trim-Quatsch
-    const positionsGuessRaw = rawPreview.slice(Math.max(0, g.cutIdx));
-    const positionsGuessClean = stripHtml(hardCut(positionsGuessRaw, HARD_MAX_CHARS));
+    const positionsGuessRawFull = rawPreview.slice(Math.max(0, g.cutIdx));
+    const positionsGuessRaw = hardCut(positionsGuessRawFull, HARD_MAX_CHARS);
+    const positionsGuessClean = stripHtml(positionsGuessRaw);
 
     return NextResponse.json({
       filename: f.name,
       size: f.size,
+
+      // Gesamt-Preview
       rawPreview,
       cleanPreview,
+
+      // Vortext Preview (UI)
       vortextGuessRaw,
       vortextGuessClean,
-      positionsGuessRaw: hardCut(positionsGuessRaw, HARD_MAX_CHARS),
+
+      // Vortext FULL (für Analyse)
+      vortextFullRaw,
+      vortextFullClean,
+
+      // Positions (ab Cut)
+      positionsGuessRaw,
       positionsGuessClean,
+
       debug: {
         rawChars: raw.length,
         previewChars: rawPreview.length,
-        vortextChars: vortextGuessRaw.length,
         cutIdx: g.cutIdx,
         method: g.method,
-        positionsStartsWith: stripHtml(positionsGuessRaw).slice(0, 120),
+
+        vortextFullChars: vortextFullRaw.length,
+        vortextPreviewChars: vortextGuessRaw.length,
+
+        // damit du sofort siehst ob er richtig ab "Einrichtungsgegenstände" startet
+        positionsStartsWith: positionsGuessClean.slice(0, 200),
       },
     });
   } catch (e: any) {
