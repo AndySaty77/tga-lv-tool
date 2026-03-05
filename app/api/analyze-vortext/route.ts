@@ -30,11 +30,13 @@ function normVal(v: any) {
 
 function mergeKeyFactsPreferRegex(regexFacts: KeyFacts, llmFacts: KeyFacts): KeyFacts {
   const out: KeyFacts = { ...(regexFacts ?? {}) };
+
   for (const [k, v] of Object.entries(llmFacts ?? {})) {
     const vv = normVal(v);
     if (!vv) continue;
     if (!out[k] || !out[k].trim()) out[k] = vv; // nur Lücken füllen
   }
+
   for (const k of Object.keys(out)) out[k] = normVal(out[k]);
   for (const [k, v] of Object.entries(out)) if (!v) delete out[k];
   return out;
@@ -141,7 +143,6 @@ function extractKeyFactsRegex(input: string): KeyFacts {
     if (!out.preisgleitung) out.preisgleitung = "Hinweis auf Preisgleitung/Stoffpreisregelung erkannt";
   }
 
-  // normalize + remove empties
   for (const k of Object.keys(out)) out[k] = normVal(out[k]);
   for (const [k, v] of Object.entries(out)) if (!v) delete out[k];
 
@@ -151,56 +152,31 @@ function extractKeyFactsRegex(input: string): KeyFacts {
 // ========= OpenAI =========
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const JSON_SCHEMA = {
-  name: "vortext_analysis",
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      riskClauses: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            type: { type: "string" },
-            riskLevel: { type: "string", enum: ["low", "medium", "high"] },
-            text: { type: "string" },
-            interpretation: { type: "string" },
-          },
-          required: ["type", "riskLevel", "text", "interpretation"],
-        },
-      },
-      keyFacts: {
-        type: "object",
-        additionalProperties: { type: "string" },
-      },
-    },
-    required: ["riskClauses", "keyFacts"],
-  },
-} as const;
-
-// Kein OpenAI-Typ hier. Kein readonly. TS-safe.
-function buildPrompt(vortext: string, missingKeys: string[]) {
-  return [
-    {
-      role: "system",
-      content:
-        "Du extrahierst aus deutschem Ausschreibungs-Vortext (TGA LV) zwei Dinge: (1) riskClauses, (2) keyFacts. " +
-        "Wichtig: keyFacts nur für die geforderten missingKeys befüllen. Wenn nicht eindeutig: leer lassen. " +
-        "Keine Erfindungen. Kurz, präzise. Werte maximal 1–2 Sätze, keine Romane.",
-    },
-    {
-      role: "user",
-      content:
-        `VORTEXT:\n${vortext}\n\n` +
-        `missingKeys (nur diese befüllen): ${missingKeys.join(", ") || "(keine)"}\n\n` +
-        `Regeln:\n` +
-        `- keyFacts: nur missingKeys liefern; wenn nicht klar -> "".\n` +
-        `- riskClauses: max. ${MAX_RISK_CLAUSES} Treffer; text = Originalsatz/Passage; interpretation = 1 Satz.\n` +
-        `- Output muss JSON gemäß Schema sein.`,
-    },
-  ];
+function buildJsonOnlyPrompt(vortext: string, missingKeys: string[]) {
+  // Wir erzwingen JSON-ONLY über Prompt (ohne response_format)
+  return {
+    system:
+      "Du bist ein Extraktor für deutsche Ausschreibungs-Vortexte (TGA). " +
+      "Du gibst AUSSCHLIESSLICH gültiges JSON zurück. Kein Fließtext, keine Markdown-Zeichen.",
+    user:
+      `VORTEXT:\n${vortext}\n\n` +
+      `missingKeys (nur diese KeyFacts befüllen): ${missingKeys.join(", ") || "(keine)"}\n\n` +
+      `Gib GENAU dieses JSON-Format zurück:\n` +
+      `{\n` +
+      `  "riskClauses": [\n` +
+      `    { "type": "…", "riskLevel": "low|medium|high", "text": "Originalpassage", "interpretation": "1 Satz" }\n` +
+      `  ],\n` +
+      `  "keyFacts": {\n` +
+      `    "baubeginn": "", "bauzeit": "", "fertigstellung": "", "ausfuehrungsfrist": "", "fristAngebot": "", "bindefrist": "",\n` +
+      `    "vertragsstrafe": "", "gewaerhleistung": "", "vob_bgb": "", "rangfolge": "",\n` +
+      `    "zahlungsbedingungen": "", "abschlagszahlung": "", "schlussrechnung": "", "preisgleitung": ""\n` +
+      `  }\n` +
+      `}\n\n` +
+      `Regeln:\n` +
+      `- keyFacts: NUR missingKeys füllen, alle anderen leer lassen.\n` +
+      `- Keine Erfindungen. Wenn unklar: leerer String.\n` +
+      `- riskClauses: max. ${MAX_RISK_CLAUSES} Einträge.\n`,
+  };
 }
 
 function cleanRiskClauses(list: any[]): RiskClause[] {
@@ -213,6 +189,22 @@ function cleanRiskClauses(list: any[]): RiskClause[] {
       interpretation: (r?.interpretation ?? "").toString().trim().slice(0, 500),
     }))
     .filter((r) => r.text.length > 0);
+}
+
+function safeJsonParse(s: string) {
+  const t = (s ?? "").toString().trim();
+  if (!t) return null;
+
+  // Falls Modell doch drumrum labert: schnapp dir den ersten JSON-Block
+  const firstBrace = t.indexOf("{");
+  const lastBrace = t.lastIndexOf("}");
+  const candidate = firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace ? t.slice(firstBrace, lastBrace + 1) : t;
+
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
 }
 
 export async function POST(req: Request) {
@@ -248,26 +240,22 @@ export async function POST(req: Request) {
 
     const missing = KEYSET.filter((k) => !(regexFacts[k] && regexFacts[k].trim().length > 0));
 
-    // 3) LLM call
+    // 3) LLM (Risks + fehlende Facts)
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const p = buildJsonOnlyPrompt(vortext, missing);
 
-    const resp = await openai.responses.create({
+    const completion = await openai.chat.completions.create({
       model,
-      // TS: erzwinge mutables Array (keine readonly tuples)
-      input: buildPrompt(vortext, missing) as any,
-      response_format: { type: "json_schema", json_schema: JSON_SCHEMA as any },
       temperature: 0.2,
-      max_output_tokens: 900,
+      max_tokens: 900,
+      messages: [
+        { role: "system", content: p.system },
+        { role: "user", content: p.user },
+      ],
     });
 
-    const raw = (resp as any).output_text || "{}";
-
-    let parsed: any = {};
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = { riskClauses: [], keyFacts: {} };
-    }
+    const raw = completion.choices?.[0]?.message?.content ?? "";
+    const parsed = safeJsonParse(raw) ?? { riskClauses: [], keyFacts: {} };
 
     const llmRisk = cleanRiskClauses(parsed?.riskClauses);
     const llmFacts: KeyFacts = parsed?.keyFacts && typeof parsed.keyFacts === "object" ? parsed.keyFacts : {};
