@@ -208,15 +208,14 @@ function riskTone(level: "low" | "medium" | "high") {
   if (level === "medium") return "#a36b00";
   return "#0a7a2f";
 }
+
 function extractVortext(full: string) {
   const t = (full ?? "").toString();
   if (!t.trim()) return "";
 
-  // 1) harte Begrenzung als Fallback (wichtig!)
-  const HARD_MAX_CHARS = 12000; // ~ 2k–4k Tokens, safe
+  const HARD_MAX_CHARS = 12000;
   const hardCut = (s: string) => (s.length > HARD_MAX_CHARS ? s.slice(0, HARD_MAX_CHARS) : s);
 
-  // 2) typische Marker: ab hier beginnen Positionen / LV-Textkörper
   const markers = [
     "\nposition",
     "\npos.",
@@ -240,12 +239,10 @@ function extractVortext(full: string) {
     if (i !== -1) cutIdx = cutIdx === -1 ? i : Math.min(cutIdx, i);
   }
 
-  // 3) nimm bis Marker, sonst nimm ersten Chunk
   const candidate = cutIdx > 300 ? t.slice(0, cutIdx) : t;
-
-  // 4) Vorbemerkungen sind oft am Anfang -> final hard cut
   return hardCut(candidate.trim());
 }
+
 export default function ScorePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -264,6 +261,7 @@ export default function ScorePage() {
   const [vortextLoading, setVortextLoading] = useState(false);
   const [vortextError, setVortextError] = useState<string | null>(null);
   const [riskClauses, setRiskClauses] = useState<RiskClause[]>([]);
+  const [keyFacts, setKeyFacts] = useState<Record<string, string>>({});
 
   // Filters
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("both");
@@ -287,10 +285,10 @@ export default function ScorePage() {
     // vortext reset
     setVortextError(null);
     setRiskClauses([]);
+    setKeyFacts({});
     setVortextLoading(false);
 
     try {
-      // ✅ Debug-Flag aus URL lesen und an API durchreichen
       const debug =
         typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
       const apiUrl = debug ? "/api/score?debug=1" : "/api/score";
@@ -309,7 +307,6 @@ export default function ScorePage() {
       const data = (await res.json()) as ScoreResult;
       setResult(data);
 
-      // Filter reset/auto-adjust: wenn Kategorie nicht existiert, zurücksetzen
       const cats = new Set((data.findingsSorted ?? []).map((f) => f.category));
       if (categoryFilter !== "all" && !cats.has(categoryFilter)) {
         setCategoryFilter("all");
@@ -329,13 +326,18 @@ export default function ScorePage() {
         if (!vRes.ok) {
           setVortextError(vData?.message || vData?.error || "Vortext Analyse fehlgeschlagen");
           setRiskClauses([]);
+          setKeyFacts({});
         } else {
           const clauses = Array.isArray(vData?.riskClauses) ? vData.riskClauses : [];
           setRiskClauses(clauses);
+
+          const facts = vData?.keyFacts && typeof vData.keyFacts === "object" ? vData.keyFacts : {};
+          setKeyFacts(facts);
         }
       } catch (e: any) {
         setVortextError(e?.message || "Vortext Analyse fehlgeschlagen");
         setRiskClauses([]);
+        setKeyFacts({});
       } finally {
         setVortextLoading(false);
       }
@@ -353,6 +355,7 @@ export default function ScorePage() {
     // vortext reset
     setVortextError(null);
     setRiskClauses([]);
+    setKeyFacts({});
     setVortextLoading(false);
 
     if (file.size > MAX_FILE_BYTES) {
@@ -391,7 +394,6 @@ export default function ScorePage() {
     for (const f of result?.findingsSorted ?? []) set.add(f.category);
     const arr = Array.from(set);
 
-    // sort by our category order first, then alphabetically
     arr.sort((a, b) => {
       const ia = CATEGORY_ORDER.indexOf(a as any);
       const ib = CATEGORY_ORDER.indexOf(b as any);
@@ -577,6 +579,7 @@ export default function ScorePage() {
               setFileMeta(null);
               setVortextError(null);
               setRiskClauses([]);
+              setKeyFacts({});
               setVortextLoading(false);
             }}
             style={{
@@ -635,6 +638,63 @@ export default function ScorePage() {
             <ScoreBarsCard perCategory={result.perCategory ?? {}} total={result.total} />
           </div>
 
+          {/* ===== KEY FACTS CARD ===== */}
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>KEY FACTS (VORTEXT)</div>
+              <div style={{ color: "#666", fontWeight: 700 }}>
+                {vortextLoading ? "Extrahiere…" : `${Object.keys(keyFacts ?? {}).length} Felder`}
+              </div>
+            </div>
+
+            {vortextError && (
+              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>
+                (Key Facts nicht verfügbar, weil Vortext-Analyse fehlgeschlagen ist.)
+              </div>
+            )}
+
+            {!vortextLoading && !vortextError && (!keyFacts || Object.keys(keyFacts).length === 0) && (
+              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>
+                Keine Key Facts gefunden (Baubeginn/Bauzeit/Fristen/etc.).
+              </div>
+            )}
+
+            {!vortextError && keyFacts && Object.keys(keyFacts).length > 0 && (
+              <div
+                style={{
+                  marginTop: 12,
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                }}
+              >
+                {[
+                  ["baubeginn", "Baubeginn"],
+                  ["bauzeit", "Bauzeit / Dauer"],
+                  ["fertigstellung", "Fertigstellung / Abnahme"],
+                  ["ausfuehrungsfrist", "Ausführungsfrist / Terminplan"],
+                  ["fristAngebot", "Angebotsfrist"],
+                  ["bindefrist", "Bindefrist"],
+                  ["vertragsstrafe", "Vertragsstrafe / Pönale"],
+                  ["gewaerhleistung", "Gewährleistung / Mängelhaftung"],
+                ].map(([k, label]) => {
+                  const v = (keyFacts as any)?.[k];
+                  if (!v) return null;
+                  return (
+                    <div key={k} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                      <div style={{ fontSize: 12, color: "#666", fontWeight: 900 }}>{label}</div>
+                      <div style={{ marginTop: 6, fontWeight: 800, color: "#111", whiteSpace: "pre-wrap" }}>{v}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
+              Hinweis: Key Facts sind regex-basiert (schnell/stabil). Wenn dir etwas fehlt, ergänzen wir gezielt Muster.
+            </div>
+          </div>
+
           {/* ===== VORTEXT RISIKO CARD ===== */}
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
@@ -645,7 +705,15 @@ export default function ScorePage() {
             </div>
 
             {vortextError && (
-              <div style={{ marginTop: 10, border: "1px solid #f2c2c7", background: "#fdecef", padding: 12, borderRadius: 12 }}>
+              <div
+                style={{
+                  marginTop: 10,
+                  border: "1px solid #f2c2c7",
+                  background: "#fdecef",
+                  padding: 12,
+                  borderRadius: 12,
+                }}
+              >
                 <div style={{ fontWeight: 900, color: "#b00020" }}>Fehler</div>
                 <div style={{ marginTop: 6, color: "#8a0010", fontWeight: 700 }}>{vortextError}</div>
               </div>
@@ -664,7 +732,9 @@ export default function ScorePage() {
                     <div style={{ fontWeight: 900, color: "#111" }}>
                       {riskIcon(r.riskLevel)} {r.type || "Risiko"}
                     </div>
-                    <div style={{ fontWeight: 900, color: riskTone(r.riskLevel) }}>{String(r.riskLevel).toUpperCase()}</div>
+                    <div style={{ fontWeight: 900, color: riskTone(r.riskLevel) }}>
+                      {String(r.riskLevel).toUpperCase()}
+                    </div>
                   </div>
 
                   <div
@@ -692,7 +762,7 @@ export default function ScorePage() {
             </div>
 
             <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
-              Hinweis: Aktuell wird der gesamte LV-Text analysiert. Nächster Schritt: automatische Vortext-Extraktion (billiger + präziser).
+              Hinweis: Vortext wird aus dem LV-Anfang extrahiert und begrenzt (Token/Rate-Limits vermeiden).
             </div>
           </div>
 
@@ -702,7 +772,8 @@ export default function ScorePage() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
                 <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>DEBUG</div>
                 <div style={{ color: "#666", fontWeight: 700 }}>
-                  Config: {String(result.debug.scoringConfigVersion ?? "-")} • Easing: {String(result.debug.easing ?? "-")}
+                  Config: {String(result.debug.scoringConfigVersion ?? "-")} • Easing:{" "}
+                  {String(result.debug.easing ?? "-")}
                 </div>
               </div>
 
@@ -714,7 +785,8 @@ export default function ScorePage() {
                   </span>
                 </div>
                 <div style={{ fontWeight: 800 }}>
-                  triggersUsed: <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.triggersUsed ?? "-"}</span>
+                  triggersUsed:{" "}
+                  <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.triggersUsed ?? "-"}</span>
                 </div>
                 <div style={{ fontWeight: 800 }}>
                   sizeF: <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.sizeF ?? "-"}</span>
@@ -754,7 +826,14 @@ export default function ScorePage() {
               <div style={{ color: "#666", fontWeight: 700 }}>Treffer nach Filter: {filteredFindings.length}</div>
             </div>
 
-            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr 1fr auto", gap: 10 }}>
+            <div
+              style={{
+                marginTop: 10,
+                display: "grid",
+                gridTemplateColumns: "1.5fr 1fr 1fr 1fr 1fr auto",
+                gap: 10,
+              }}
+            >
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -862,7 +941,9 @@ export default function ScorePage() {
                         <div style={{ fontWeight: 900 }}>
                           {severityDot(f.severity)} {f.title}
                         </div>
-                        <div style={{ color: "#666", fontWeight: 900 }}>-{f.penalty} ({catLabel(f.category)})</div>
+                        <div style={{ color: "#666", fontWeight: 900 }}>
+                          -{f.penalty} ({catLabel(f.category)})
+                        </div>
                       </div>
                       {f.detail && <div style={{ marginTop: 6, color: "#444" }}>{f.detail}</div>}
                       <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>id: {stripPrefix(f.id)}</div>
@@ -889,7 +970,9 @@ export default function ScorePage() {
                         <div style={{ fontWeight: 900 }}>
                           {severityDot(f.severity)} {f.title}
                         </div>
-                        <div style={{ color: "#666", fontWeight: 900 }}>-{f.penalty} ({catLabel(f.category)})</div>
+                        <div style={{ color: "#666", fontWeight: 900 }}>
+                          -{f.penalty} ({catLabel(f.category)})
+                        </div>
                       </div>
                       {f.detail && <div style={{ marginTop: 6, color: "#444" }}>{f.detail}</div>}
                       <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>id: {stripPrefix(f.id)}</div>
