@@ -1,3 +1,5 @@
+import { CATEGORY_WEIGHTS_6, LEVEL_THRESHOLDS } from "./scoringConfig";
+
 export type ScoreCategory =
   | "normen"
   | "vollstaendigkeit"
@@ -6,14 +8,8 @@ export type ScoreCategory =
   | "nachtrag"
   | "ausfuehrung";
 
-export const CATEGORY_WEIGHTS: Record<ScoreCategory, number> = {
-  normen: 15,
-  vollstaendigkeit: 20,
-  vortext: 15,
-  mengen_schnittstellen: 15,
-  nachtrag: 20,
-  ausfuehrung: 15,
-};
+/** Aus zentraler Konfiguration (scoringConfig). */
+export const CATEGORY_WEIGHTS: Record<ScoreCategory, number> = CATEGORY_WEIGHTS_6 as Record<ScoreCategory, number>;
 
 export type Severity = "low" | "medium" | "high";
 
@@ -47,9 +43,9 @@ export type ScoreResult = {
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
 const levelFromTotal = (t: number): ScoreResult["level"] => {
-  if (t < 40) return "hochriskant";
-  if (t < 70) return "mittel";
-  if (t < 86) return "solide";
+  if (t < LEVEL_THRESHOLDS.hochriskantMax) return "hochriskant";
+  if (t < LEVEL_THRESHOLDS.mittelMax) return "mittel";
+  if (t < LEVEL_THRESHOLDS.solideMax) return "solide";
   return "sauber";
 };
 

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 import { supabase } from "@/lib/supabaseClient";
+import { CLAIM_LEVELS } from "@/lib/scoringConfig";
 
 type DisciplineKey = "sanitaer" | "heizung" | "lueftung" | "msr" | "elektro" | "kaelte";
 
@@ -10,20 +11,20 @@ type TriggerRow = {
   id: string;
   name: string;
   description?: string | null;
-
-  // DB speichert NUR Kategorie-Keys
   category: string;
-
   trigger_type: string;
   keywords?: string[] | null;
   regex?: string | null;
+  norms?: string[] | null;
+  project_types?: string[] | null;
   weight: number;
   claim_level: string;
   risk_interpretation?: string | null;
+  question_template?: string | null;
+  offer_text_template?: string | null;
   is_active: boolean;
-
-  // ✅ neu: Gewerk/Disziplinen (text[])
   disciplines?: string[] | null;
+  created_at?: string | null;
 };
 
 type TestResult = {
@@ -154,11 +155,154 @@ function disciplinesLabel(list?: string[] | null) {
   return arr.map((x) => (DISC_LABEL as any)[x] ?? x).join(", ");
 }
 
+function arrToStr(a: string[] | null | undefined): string {
+  if (!a || !a.length) return "";
+  return a.join("; ");
+}
+
 export default function TriggersPage() {
   const [rows, setRows] = useState<TriggerRow[]>([]);
   const [msg, setMsg] = useState<string>("");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [createNew, setCreateNew] = useState(false);
+
+  type FormState = {
+    name: string;
+    description: string;
+    category: string;
+    trigger_type: string;
+    keywords: string;
+    regex: string;
+    norms: string;
+    project_types: string;
+    weight: number;
+    claim_level: string;
+    risk_interpretation: string;
+    question_template: string;
+    offer_text_template: string;
+    is_active: boolean;
+    disciplines: string;
+  };
+  const [formData, setFormData] = useState<FormState | null>(null);
+  const [formSaving, setFormSaving] = useState(false);
+
+  const openEdit = () => {
+    if (!selected) return;
+    setFormData({
+      name: selected.name,
+      description: selected.description ?? "",
+      category: selected.category,
+      trigger_type: selected.trigger_type ?? "",
+      keywords: arrToStr(selected.keywords),
+      regex: selected.regex ?? "",
+      norms: arrToStr(selected.norms),
+      project_types: arrToStr(selected.project_types),
+      weight: selected.weight,
+      claim_level: selected.claim_level ?? "",
+      risk_interpretation: selected.risk_interpretation ?? "",
+      question_template: selected.question_template ?? "",
+      offer_text_template: selected.offer_text_template ?? "",
+      is_active: selected.is_active,
+      disciplines: arrToStr(selected.disciplines),
+    });
+    setEditingId(selected.id);
+    setCreateNew(false);
+  };
+
+  const openCreate = () => {
+    setFormData({
+      name: "",
+      description: "",
+      category: "vertrags_lv_risiken",
+      trigger_type: "",
+      keywords: "",
+      regex: "",
+      norms: "",
+      project_types: "",
+      weight: 5,
+      claim_level: "Mittel",
+      risk_interpretation: "",
+      question_template: "",
+      offer_text_template: "",
+      is_active: true,
+      disciplines: "",
+    });
+    setEditingId(null);
+    setCreateNew(true);
+    setSelectedId(null);
+  };
+
+  const closeForm = () => {
+    setFormData(null);
+    setEditingId(null);
+    setCreateNew(false);
+  };
+
+  const handleSaveForm = async () => {
+    if (!formData) return;
+    if (!formData.name.trim()) {
+      setMsg("Trigger-Name ist Pflicht.");
+      return;
+    }
+    const categoryKey = normalizeCategory(formData.category);
+    if (!categoryKey || !ALLOWED_CATEGORY_KEYS.has(categoryKey)) {
+      setMsg("Ungültige Risikokategorie.");
+      return;
+    }
+    const disciplines = normalizeDisciplineList(formData.disciplines);
+    if (!disciplines.length) {
+      setMsg("Mindestens ein Gewerk nötig (z.B. sanitaer; heizung).");
+      return;
+    }
+    if (!CLAIM_LEVELS.includes(formData.claim_level as any)) {
+      setMsg(`Claim-Level: ${CLAIM_LEVELS.join(", ")}.`);
+      return;
+    }
+    const w = Number(formData.weight);
+    if (!(w >= 1 && w <= 10)) {
+      setMsg("Gewichtung 1–10.");
+      return;
+    }
+    if (formData.regex.trim()) {
+      const st = validateRegex(formData.regex.trim());
+      if (!st.ok) {
+        setMsg("Regex ungültig: " + st.msg);
+        return;
+      }
+    }
+    setFormSaving(true);
+    setMsg("");
+    try {
+      const payload = {
+        name: formData.name.trim(),
+        description: formData.description.trim() || null,
+        category: categoryKey,
+        trigger_type: formData.trigger_type.trim() || "",
+        keywords: split(formData.keywords).length ? split(formData.keywords) : null,
+        regex: formData.regex.trim() || null,
+        norms: split(formData.norms).length ? split(formData.norms) : null,
+        project_types: split(formData.project_types).length ? split(formData.project_types) : null,
+        weight: w,
+        claim_level: formData.claim_level,
+        risk_interpretation: formData.risk_interpretation.trim() || null,
+        question_template: formData.question_template.trim() || null,
+        offer_text_template: formData.offer_text_template.trim() || null,
+        is_active: formData.is_active,
+        disciplines,
+      };
+      await saveTrigger(payload, editingId ?? undefined);
+      setMsg(editingId ? "Trigger aktualisiert." : "Trigger angelegt.");
+      await load();
+      closeForm();
+      if (!editingId && rows.length === 0) setSelectedId(null);
+    } catch (e: any) {
+      setMsg("Fehler: " + (e?.message ?? String(e)));
+    } finally {
+      setFormSaving(false);
+    }
+  };
 
   // Test Panel
   const [testText, setTestText] = useState<string>(
@@ -171,7 +315,7 @@ export default function TriggersPage() {
     const { data, error } = await supabase
       .from("triggers")
       .select(
-        "id,name,description,category,trigger_type,keywords,regex,weight,claim_level,risk_interpretation,is_active,disciplines,created_at"
+        "id,name,description,category,trigger_type,keywords,regex,norms,project_types,weight,claim_level,risk_interpretation,question_template,offer_text_template,is_active,disciplines,created_at"
       )
       .order("created_at", { ascending: false });
 
@@ -237,8 +381,8 @@ export default function TriggersPage() {
 
       if (!r.trigger_type) return setMsg(`Fehlende Trigger-Art bei: ${r.name}`);
       if (!(r.weight >= 1 && r.weight <= 10)) return setMsg(`Gewichtung 1–10 bei: ${r.name}`);
-      if (!["Niedrig", "Mittel", "Hoch"].includes(r.claim_level))
-        return setMsg(`Claim-Level (Niedrig/Mittel/Hoch) bei: ${r.name}`);
+      if (!CLAIM_LEVELS.includes(r.claim_level as any))
+        return setMsg(`Claim-Level (${CLAIM_LEVELS.join("/")}) bei: ${r.name}`);
 
       // ✅ Gewerk ist jetzt Pflicht (sonst feuert später wieder alles)
       if (!Array.isArray(r.disciplines) || r.disciplines.length === 0)
@@ -302,6 +446,35 @@ export default function TriggersPage() {
     URL.revokeObjectURL(url);
 
     setMsg(`Export ok: ${exportRows.length} Trigger`);
+  }
+
+  async function saveTrigger(
+    payload: {
+      name: string;
+      description?: string | null;
+      category: string;
+      trigger_type: string;
+      keywords?: string[] | null;
+      regex?: string | null;
+      norms?: string[] | null;
+      project_types?: string[] | null;
+      weight: number;
+      claim_level: string;
+      risk_interpretation?: string | null;
+      question_template?: string | null;
+      offer_text_template?: string | null;
+      is_active: boolean;
+      disciplines?: string[] | null;
+    },
+    existingId?: string | null
+  ) {
+    if (existingId) {
+      const { error } = await supabase.from("triggers").update(payload).eq("id", existingId);
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await supabase.from("triggers").insert(payload);
+      if (error) throw new Error(error.message);
+    }
   }
 
   async function testSelectedTrigger() {
@@ -370,8 +543,8 @@ export default function TriggersPage() {
             Pflicht-Spalte CSV: <span style={{ color: "#111" }}>"Gewerk"</span> (sanitaer/heizung/lueftung/msr/elektro/kaelte)
           </div>
         </div>
-        <a href="/admin/score" style={{ color: "#111", textDecoration: "underline" }}>
-          Zurück zum Score
+        <a href="/admin" style={{ color: "#111", textDecoration: "underline" }}>
+          Zurück zum Admin
         </a>
       </div>
 
@@ -442,6 +615,37 @@ export default function TriggersPage() {
           >
             Refresh
           </button>
+
+          <button
+            onClick={openCreate}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "1px solid #0a7a2f",
+              background: "#fff",
+              color: "#0a7a2f",
+              cursor: "pointer",
+              fontWeight: 800,
+            }}
+          >
+            Neuer Trigger
+          </button>
+
+          {selected && !formData && (
+            <button
+              onClick={openEdit}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 12,
+                border: "1px solid #111",
+                background: "#fff",
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              Bearbeiten
+            </button>
+          )}
         </div>
 
         <div style={{ color: "#666", fontWeight: 700 }}>
@@ -454,6 +658,198 @@ export default function TriggersPage() {
           </div>
         )}
       </div>
+
+      {/* Bearbeiten / Neuer Trigger Formular */}
+      {formData && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: 20,
+            border: "1px solid #e5e5e5",
+            borderRadius: 14,
+            background: "#fff",
+          }}
+        >
+          <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 16 }}>
+            {editingId ? "Trigger bearbeiten" : "Neuer Trigger"}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Trigger-Name *</label>
+              <input
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+                placeholder="z.B. Unklare Bestandsaufnahme"
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Risikokategorie *</label>
+              <select
+                value={formData.category}
+                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+              >
+                {Array.from(ALLOWED_CATEGORY_KEYS).map((k) => (
+                  <option key={k} value={k}>
+                    {CATEGORY_LABEL[k] ?? k}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Trigger-Art</label>
+              <input
+                value={formData.trigger_type}
+                onChange={(e) => setFormData({ ...formData, trigger_type: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+                placeholder="z.B. keyword"
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Gewerk * (z.B. sanitaer; heizung)</label>
+              <input
+                value={formData.disciplines}
+                onChange={(e) => setFormData({ ...formData, disciplines: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+                placeholder="sanitaer; heizung"
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Gewichtung (1–10) *</label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={formData.weight}
+                onChange={(e) => setFormData({ ...formData, weight: Number(e.target.value) || 5 })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Claim-Level *</label>
+              <select
+                value={formData.claim_level}
+                onChange={(e) => setFormData({ ...formData, claim_level: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+              >
+                {CLAIM_LEVELS.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Beschreibung</label>
+              <input
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+                placeholder="Optionale Beschreibung"
+              />
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Keywords (mit ; trennen)</label>
+              <input
+                value={formData.keywords}
+                onChange={(e) => setFormData({ ...formData, keywords: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+                placeholder="bestand; anpassung; integration"
+              />
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Regex</label>
+              <input
+                value={formData.regex}
+                onChange={(e) => setFormData({ ...formData, regex: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd", fontFamily: "ui-monospace, monospace" }}
+                placeholder="Optional, z.B. \b(aufnahme|übernahme)\b"
+              />
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Risiko-Interpretation</label>
+              <input
+                value={formData.risk_interpretation}
+                onChange={(e) => setFormData({ ...formData, risk_interpretation: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Normen (; getrennt)</label>
+              <input
+                value={formData.norms}
+                onChange={(e) => setFormData({ ...formData, norms: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Projekttyp (; getrennt)</label>
+              <input
+                value={formData.project_types}
+                onChange={(e) => setFormData({ ...formData, project_types: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+              />
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Rückfrage-Generator</label>
+              <input
+                value={formData.question_template}
+                onChange={(e) => setFormData({ ...formData, question_template: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+              />
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 4 }}>Angebotstext-Baustein</label>
+              <input
+                value={formData.offer_text_template}
+                onChange={(e) => setFormData({ ...formData, offer_text_template: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #ddd" }}
+              />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={formData.is_active}
+                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                />
+                <span style={{ fontSize: 14, fontWeight: 700 }}>Aktiv</span>
+              </label>
+            </div>
+          </div>
+          <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              onClick={handleSaveForm}
+              disabled={formSaving}
+              style={{
+                padding: "10px 18px",
+                borderRadius: 12,
+                border: "1px solid #0a7a2f",
+                background: formSaving ? "#ccc" : "#0a7a2f",
+                color: "#fff",
+                cursor: formSaving ? "default" : "pointer",
+                fontWeight: 800,
+              }}
+            >
+              {formSaving ? "Speichern…" : "Speichern"}
+            </button>
+            <button
+              onClick={closeForm}
+              style={{
+                padding: "10px 18px",
+                borderRadius: 12,
+                border: "1px solid #ddd",
+                background: "#fff",
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main grid */}
       <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
@@ -577,14 +973,56 @@ export default function TriggersPage() {
                   {selected.weight} • Claim {selected.claim_level} • {selected.is_active ? "Aktiv" : "Inaktiv"}
                 </div>
 
+                {selected.description ? (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 12, color: "#777", fontWeight: 900 }}>Beschreibung</div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#111" }}>{selected.description}</div>
+                  </div>
+                ) : null}
+
                 {selected.keywords?.length ? (
                   <div style={{ marginTop: 10 }}>
                     <div style={{ fontSize: 12, color: "#777", fontWeight: 900 }}>Keywords</div>
-                    <div style={{ marginTop: 4, fontSize: 12, color: "#111" }}>{selected.keywords.join(", ")}</div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#111" }}>{(selected.keywords ?? []).join(", ")}</div>
                   </div>
                 ) : (
                   <div style={{ marginTop: 10, fontSize: 12, color: "#777" }}>Keine Keywords hinterlegt.</div>
                 )}
+
+                {selected.risk_interpretation ? (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 12, color: "#777", fontWeight: 900 }}>Risiko-Interpretation</div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#111" }}>{selected.risk_interpretation}</div>
+                  </div>
+                ) : null}
+
+                {(selected.norms ?? []).length > 0 ? (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 12, color: "#777", fontWeight: 900 }}>Normen</div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#111" }}>{(selected.norms ?? []).join(", ")}</div>
+                  </div>
+                ) : null}
+
+                {(selected.project_types ?? []).length > 0 ? (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 12, color: "#777", fontWeight: 900 }}>Projekttyp</div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#111" }}>{(selected.project_types ?? []).join(", ")}</div>
+                  </div>
+                ) : null}
+
+                {selected.question_template ? (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 12, color: "#777", fontWeight: 900 }}>Rückfrage-Generator</div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#111", wordBreak: "break-word" }}>{selected.question_template}</div>
+                  </div>
+                ) : null}
+
+                {selected.offer_text_template ? (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 12, color: "#777", fontWeight: 900 }}>Angebotstext-Baustein</div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#111", wordBreak: "break-word" }}>{selected.offer_text_template}</div>
+                  </div>
+                ) : null}
 
                 {selected.regex ? (
                   <div style={{ marginTop: 10 }}>

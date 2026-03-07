@@ -2,6 +2,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { AMPEL_THRESHOLDS } from "@/lib/scoringConfig";
+import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
 
 type CategoryKey =
   | "vertrags_lv_risiken"
@@ -18,16 +20,9 @@ const CATEGORY_ORDER: CategoryKey[] = [
   "kalkulationsunsicherheit",
 ];
 
-const CATEGORY_LABEL: Record<CategoryKey, string> = {
-  vertrags_lv_risiken: "Vertrags-/LV-Risiken",
-  mengen_massenermittlung: "Mengen & Massenermittlung",
-  technische_vollstaendigkeit: "Technische Vollständigkeit",
-  schnittstellen_nebenleistungen: "Schnittstellen & Nebenleistungen",
-  kalkulationsunsicherheit: "Kalkulationsunsicherheit",
-};
-
+/** Kategorie-Labels aus zentraler Textkonfiguration (kundenfreundlich). */
 function catLabel(k: string) {
-  return (CATEGORY_LABEL as any)[k] ?? k;
+  return DEFAULT_TEXTS_CONFIG.internal.categoryLabels[k as keyof typeof DEFAULT_TEXTS_CONFIG.internal.categoryLabels] ?? k;
 }
 
 function clamp0_100(n: any) {
@@ -37,9 +32,10 @@ function clamp0_100(n: any) {
 }
 
 function traffic(score: number) {
-  if (score >= 70) return { dot: "🔴", text: "Rot", tone: "#b00020" };
-  if (score >= 40) return { dot: "🟡", text: "Gelb", tone: "#a36b00" };
-  return { dot: "🟢", text: "Grün", tone: "#0a7a2f" };
+  const ampel = DEFAULT_TEXTS_CONFIG.customerUI.ampel;
+  if (score >= AMPEL_THRESHOLDS.redMin) return { dot: "🔴", text: ampel.red, tone: "#b00020" };
+  if (score >= AMPEL_THRESHOLDS.yellowMin) return { dot: "🟡", text: ampel.yellow, tone: "#a36b00" };
+  return { dot: "🟢", text: ampel.green, tone: "#0a7a2f" };
 }
 
 function ScoreBarRow(props: { k: CategoryKey; value: number }) {
@@ -57,7 +53,7 @@ function ScoreBarRow(props: { k: CategoryKey; value: number }) {
         borderBottom: "1px solid #eee",
       }}
     >
-      <div style={{ fontWeight: 900, color: "#111" }}>{CATEGORY_LABEL[props.k]}</div>
+      <div style={{ fontWeight: 900, color: "#111" }}>{catLabel(props.k)}</div>
 
       <div
         style={{
@@ -95,7 +91,7 @@ function ScoreBarsCard(props: { perCategory: Record<string, number>; total: numb
   return (
     <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ fontWeight: 900, fontSize: 16, color: "#111" }}>Risiko-Ampel je Kategorie</div>
+        <div style={{ fontWeight: 900, fontSize: 16, color: "#111" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.riskAmpelJeKategorie}</div>
         <div style={{ fontWeight: 900, color: totalAmp.tone }}>
           Gesamt: {total} {totalAmp.dot} {totalAmp.text}
         </div>
@@ -108,7 +104,7 @@ function ScoreBarsCard(props: { perCategory: Record<string, number>; total: numb
       </div>
 
       <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
-        Ampel: 0–39 Grün • 40–69 Gelb • 70–100 Rot
+        {DEFAULT_TEXTS_CONFIG.customerUI.ampelLegend}
       </div>
     </div>
   );
@@ -167,11 +163,12 @@ function severityDot(sev: string) {
   return "🟡";
 }
 
-/** Risiko-Label für Darstellung (Standardmodus). */
+/** Risiko-Label für Darstellung (aus zentraler Textconfig). */
 function severityLabel(sev: string) {
-  if (sev === "high") return "Hoch";
-  if (sev === "medium") return "Mittel";
-  return "Niedrig";
+  const L = DEFAULT_TEXTS_CONFIG.internal.severityLabels;
+  if (sev === "high") return L.high;
+  if (sev === "medium") return L.medium;
+  return L.low;
 }
 
 function isDbFinding(f: Finding) {
@@ -371,7 +368,8 @@ type SplitResult = {
   meta?: any;
 };
 
-export default function ScorePage() {
+export function ScorePage(props: { customerRoute?: boolean } = {}) {
+  const { customerRoute = false } = props;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [lvText, setLvText] = useState("");
@@ -457,10 +455,25 @@ export default function ScorePage() {
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("penalty_desc");
   const [top10, setTop10] = useState(false);
-  const [useLlmRelevance, setUseLlmRelevance] = useState(false);
+  const [useLlmRelevance, setUseLlmRelevance] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("admin.settings.useLlmRelevanceDefault") === "true";
+    } catch {
+      return false;
+    }
+  });
 
   /** UI-Modus: nur Darstellung (sichtbare Tabs, Detailoptionen). Keine Logik-Änderung, keine Neuberechnung. */
-  const [analysisMode, setAnalysisMode] = useState<"standard" | "expert">("standard");
+  const [analysisMode, setAnalysisMode] = useState<"standard" | "expert">(() => {
+    if (typeof window === "undefined") return "standard";
+    try {
+      const v = localStorage.getItem("admin.settings.analysisModeDefault");
+      return v === "expert" ? "expert" : "standard";
+    } catch {
+      return "standard";
+    }
+  });
   const isExpertMode = analysisMode === "expert";
 
   /** Aktiver Tab der Analyse-Ausgabe (nur Darstellung). */
@@ -1054,7 +1067,7 @@ export default function ScorePage() {
             </span>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 500 }}>Modus</span>
+            <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 500 }}>{customerRoute ? "Ansicht" : "Modus"}</span>
             <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 8, padding: 2 }}>
               <button
                 type="button"
@@ -1091,16 +1104,18 @@ export default function ScorePage() {
                   boxShadow: analysisMode === "expert" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
                 }}
               >
-                Experte
+                {customerRoute ? "Erweiterte Ansicht" : "Experte"}
               </button>
             </div>
           </div>
-          <a
-            href="/admin/triggers"
-            style={{ fontSize: 12, color: "#6b7280", textDecoration: "none", fontWeight: 500 }}
-          >
-            Trigger-Admin
-          </a>
+          {!customerRoute && (
+            <a
+              href="/admin/triggers"
+              style={{ fontSize: 12, color: "#6b7280", textDecoration: "none", fontWeight: 500 }}
+            >
+              Trigger-Admin
+            </a>
+          )}
         </div>
       </header>
 
@@ -1173,7 +1188,7 @@ export default function ScorePage() {
             {isExpertMode && (
               <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
                 <input type="checkbox" checked={autoAnalyze} onChange={(e) => setAutoAnalyze(e.target.checked)} />
-                <span style={{ fontWeight: 700, color: "#111" }}>Auto-Analyse</span>
+                <span style={{ fontWeight: 700, color: "#111" }}>{customerRoute ? "Analyse nach Upload" : "Auto-Analyse"}</span>
               </label>
             )}
           </div>
@@ -1259,7 +1274,7 @@ export default function ScorePage() {
               fontWeight: 700,
             }}
           >
-            Zurücksetzen
+            {customerRoute ? "Eingabe zurücksetzen" : "Zurücksetzen"}
           </button>
 
           {isExpertMode && (
@@ -1270,7 +1285,7 @@ export default function ScorePage() {
                 checked={useLlmRelevance}
                 onChange={(e) => setUseLlmRelevance(e.target.checked)}
               />
-              Relevanzfilter (KI)
+              {customerRoute ? "Erweiterte Filter" : "Relevanzfilter (KI)"}
             </label>
           )}
           <div style={{ color: "#666", display: "flex", alignItems: "center" }}>Limit: {fmtKB(MAX_FILE_BYTES)}</div>
@@ -1279,11 +1294,11 @@ export default function ScorePage() {
         {error && <div style={{ marginTop: 12, color: "#b00020", fontWeight: 800 }}>{error}</div>}
       </div>
 
-      {/* Struktur des Leistungsverzeichnisses (nur Expertenmodus) */}
+      {/* Dateistruktur / Struktur LV (nur in erweiterter Ansicht) */}
       {isExpertMode && (
       <div style={{ marginTop: 14, border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-          <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>Struktur des Leistungsverzeichnisses</div>
+          <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>{customerRoute ? "Dateistruktur" : "Struktur des Leistungsverzeichnisses"}</div>
           <div style={{ color: "#666", fontWeight: 700 }}>
             {gaebPreviewLoading ? "Lade…" : gaebPreview ? `${gaebPreview.filename} (${fmtKB(gaebPreview.size)})` : "—"}
           </div>
@@ -1373,12 +1388,12 @@ export default function ScorePage() {
                     <> • Vorbemerkungen {gaebPreview.structure.vorbemerkungen.length} Zeichen</>
                   ) : null}
                 </>
-              ) : (
+              ) : (!customerRoute && (
                 <>
                   Struktur: Vorschau {gaebPreview?.debug?.previewChars ?? 0} Zeichen • Einleitung{" "}
                   {gaebPreview?.debug?.vortextFullChars ?? 0} • Positionen {gaebPreview?.debug?.positionsFullChars ?? 0}
                 </>
-              )}
+              ))}
             </div>
           </>
         )}
@@ -1401,13 +1416,13 @@ export default function ScorePage() {
           >
             {(
               [
-                ["uebersicht", "Übersicht"],
-                ["risiken", "Risiken"],
-                ["nachtragspotenzial", "Nachtragspotenzial"],
-                ["rueckfragen", "Rückfragen"],
-                ["angebotsklarstellungen", "Angebotsklarstellungen"],
-                ...(analysisMode === "expert" ? [["trigger", "Trigger"] as const] : []),
-                ...(analysisMode === "expert" ? [["transparenz", "Transparenz"] as const] : []),
+                ["uebersicht", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.uebersicht],
+                ["risiken", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.risiken],
+                ["nachtragspotenzial", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial],
+                ["rueckfragen", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.rueckfragen],
+                ["angebotsklarstellungen", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.angebotsklarstellungen],
+                ...(analysisMode === "expert" ? [["trigger", customerRoute ? DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.risikodetails : DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.trigger] as const] : []),
+                ...(analysisMode === "expert" ? [["transparenz", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.transparenz] as const] : []),
               ] as const
             ).map(([id, label]) => (
               <button
@@ -1437,29 +1452,29 @@ export default function ScorePage() {
             {/* Zeile 1: KPI-Karten Komplexität | Gesamt-Risiko | Claim-Potenzial */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
               <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "14px 16px" }}>
-                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>Komplexität</div>
+                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.complexity}</div>
                 <div style={{ marginTop: 4, fontSize: 28, fontWeight: 700, color: "#111" }}>
                   {clamp0_100(result.total)}
                   <span style={{ fontSize: 14, color: "#9ca3af", fontWeight: 500 }}> / 100</span>
                 </div>
               </div>
               <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "14px 16px" }}>
-                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>Gesamt-Risiko</div>
+                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.totalRisk}</div>
                 <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 20 }}>{totalAmp.dot}</span>
                   <span style={{ fontSize: 18, fontWeight: 700, color: totalAmp.tone }}>{totalAmp.text}</span>
                 </div>
               </div>
               <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "14px 16px" }}>
-                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>Claim-Potenzial</div>
+                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.claimPotential}</div>
                 <div style={{ marginTop: 4, fontSize: 16, fontWeight: 700, color: "#111" }}>
                   {result.findingsSorted?.length === 0
-                    ? "Niedrig"
+                    ? DEFAULT_TEXTS_CONFIG.internal.severityLabels.low
                     : (result.total ?? 0) >= 70
-                      ? "Hoch"
+                      ? DEFAULT_TEXTS_CONFIG.internal.severityLabels.high
                       : (result.total ?? 0) >= 40
-                        ? "Mittel"
-                        : "Niedrig"}
+                        ? DEFAULT_TEXTS_CONFIG.internal.severityLabels.medium
+                        : DEFAULT_TEXTS_CONFIG.internal.severityLabels.low}
                 </div>
               </div>
             </div>
@@ -1467,7 +1482,7 @@ export default function ScorePage() {
             {/* Zeile 2: Risiko-Ampel + Top Findings nebeneinander */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, flex: 1, minHeight: 0 }}>
               <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, overflow: "auto" }}>
-                <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700, marginBottom: 10 }}>Risiko-Ampel der Kategorien</div>
+                <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700, marginBottom: 10 }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.riskAmpelCategories}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {CATEGORY_ORDER.map((k) => {
                     const v = clamp0_100(result.perCategory?.[k] ?? 0);
@@ -1485,10 +1500,10 @@ export default function ScorePage() {
                 </div>
               </div>
               <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, overflow: "auto" }}>
-                <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700, marginBottom: 10 }}>Top Findings</div>
+                <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700, marginBottom: 10 }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.topFindings}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {(filteredFindings.slice(0, 8)).length === 0 ? (
-                    <div style={{ color: "#9ca3af", fontSize: 13 }}>Keine Treffer.</div>
+                    <div style={{ color: "#9ca3af", fontSize: 13 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noTreffer}</div>
                   ) : (
                     filteredFindings.slice(0, 8).map((f) => (
                       <div key={f.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0", borderBottom: "1px solid #f3f4f6" }}>
@@ -1516,15 +1531,15 @@ export default function ScorePage() {
             }}
           >
             <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
-              <strong>Risiken</strong> — In diesem Bereich werden mögliche Risiken im Leistungsverzeichnis dargestellt: unklare Leistungsbeschreibungen, fehlende Angaben, widersprüchliche oder mehrdeutige Formulierungen. Dazu zählen automatisch erkannte Projektdaten aus der Einleitung sowie vom System und von der KI identifizierte Risikostellen im Text. Eine systematische Prüfung dieser Punkte hilft, Nachforderungen und Streitigkeiten in der Ausführung zu reduzieren.
+              <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.risiken}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.risiken}
             </p>
           </div>
           {/* ===== Projektdaten aus dem Leistungsverzeichnis ===== */}
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
               <div>
-                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>Projektdaten aus dem Leistungsverzeichnis</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: "#888", fontWeight: 600 }}>Wichtige Angaben aus der Einleitung (z. B. Objekt, Vergabeart), automatisch erkannt.</div>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.projektdaten}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: "#888", fontWeight: 600 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.projektdatenSub}</div>
               </div>
               <div style={{ color: "#666", fontWeight: 700 }}>
                 {vortextLoading ? "Extrahiere…" : `${keyFactsEntries.length} Felder`}
@@ -1538,7 +1553,7 @@ export default function ScorePage() {
             )}
 
             {!vortextLoading && !vortextError && keyFactsEntries.length === 0 && (
-              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>Keine Projektdaten gefunden.</div>
+              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noProjektdaten}</div>
             )}
 
             {!vortextError && keyFactsEntries.length > 0 && (
@@ -1566,7 +1581,9 @@ export default function ScorePage() {
             )}
 
             <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
-              Der Einleitungstext wird per automatischer Textanalyse ermittelt. Ist er leer, prüfen Sie die Datei oder den GAEB-Import.
+              {customerRoute
+                ? "Der Einleitungstext wird automatisch aus Ihrer Datei ermittelt. Ist er leer, prüfen Sie die hochgeladene Datei."
+                : "Der Einleitungstext wird per automatischer Textanalyse ermittelt. Ist er leer, prüfen Sie die Datei oder den GAEB-Import."}
             </div>
           </div>
 
@@ -1574,8 +1591,8 @@ export default function ScorePage() {
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
               <div>
-                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>Risiken im Einleitungstext</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: "#888", fontWeight: 600 }}>Künstliche Intelligenz analysiert den Vortext des Leistungsverzeichnisses und erkennt mögliche Risiken oder unklare Leistungsbeschreibungen.</div>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenVortext}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: "#888", fontWeight: 600 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenVortextSub}</div>
               </div>
               <div style={{ color: "#666", fontWeight: 700 }}>
                 {vortextLoading ? "Analysiere…" : `${riskClauses.length} Treffer`}
@@ -1598,7 +1615,7 @@ export default function ScorePage() {
             )}
 
             {!vortextLoading && !vortextError && riskClauses.length === 0 && (
-              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>Keine auffälligen Risikoformulierungen erkannt.</div>
+              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noRisikoformulierungen}</div>
             )}
 
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
@@ -1669,14 +1686,14 @@ export default function ScorePage() {
                     opacity: changeOrderLoading ? 0.9 : 1,
                   }}
                 >
-                  {changeOrderLoading ? "Analysiere…" : "Nachtragspotenziale ermitteln"}
+                  {changeOrderLoading ? DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmittelnLoading : DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmitteln}
                 </button>
               </div>
             </div>
 
             {changeOrderAnalysis && (
               <>
-                {isExpertMode && (
+                {isExpertMode && !customerRoute && (
                   <div style={{ marginTop: 14, color: "#666", fontSize: 12, fontWeight: 700 }}>
                     {changeOrderAnalysis.debug && (
                       <>Regeln: {changeOrderAnalysis.debug.ruleBasedCount} • KI: {changeOrderAnalysis.debug.llmCount} • Nach Bereinigung: {changeOrderAnalysis.debug.deduplicatedCount}</>
@@ -1685,7 +1702,7 @@ export default function ScorePage() {
                 )}
 
                 {deduplicatedOpportunities.length === 0 ? (
-                  <div style={{ marginTop: 14, color: "#666", fontWeight: 700 }}>Keine Nachtragspotenziale erkannt.</div>
+                  <div style={{ marginTop: 14, color: "#666", fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noNachtragspotenziale}</div>
                 ) : (
                 <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
                   {(["leistungsaenderung", "leistungsmehrung", "schnittstelle", "erschwernis"] as const).map((cluster) => {
@@ -1776,7 +1793,7 @@ export default function ScorePage() {
             }}
           >
             <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
-              <strong>Nachtragspotenzial</strong> — Dieser Bereich zeigt mögliche Ursachen für spätere Nachträge oder zusätzliche Kosten während der Bauausführung. Unklare Leistungsgrenzen, fehlende Schnittstellendefinitionen oder nicht beschriebene Erschwernisse können zu Nachforderungen führen. Die Analyse nutzt die erkannten Risiken und Projektdaten, um solche Treiber zu identifizieren. So können Sie früh gegensteuern oder im Angebot entsprechende Annahmen und Klarstellungen formulieren.
+              <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.nachtragspotenzial}
             </p>
           </div>
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
@@ -1807,7 +1824,7 @@ export default function ScorePage() {
                     opacity: changeOrderLoading ? 0.9 : 1,
                   }}
                 >
-                  {changeOrderLoading ? "Analysiere…" : "Nachtragspotenziale ermitteln"}
+                  {changeOrderLoading ? DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmittelnLoading : DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmitteln}
                 </button>
               </div>
             </div>
@@ -2002,7 +2019,7 @@ export default function ScorePage() {
                   dbFindings.map((f) => (
                     <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
                       <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
-                        <div><span style={{ color: "#666", fontWeight: 700 }}>Trigger-ID:</span> {stripPrefix(f.id)}</div>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>{customerRoute ? "Prüfregel: " : "Trigger-ID: "}</span>{stripPrefix(f.id)}</div>
                         <div><span style={{ color: "#666", fontWeight: 700 }}>Kategorie:</span> {catLabel(f.category)}</div>
                         <div><span style={{ color: "#666", fontWeight: 700 }}>Gewichtung:</span> -{f.penalty}</div>
                         {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Norm:</span> {(f as any).norm}</div>}
@@ -2033,7 +2050,7 @@ export default function ScorePage() {
                   sysFindings.map((f) => (
                     <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
                       <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
-                        <div><span style={{ color: "#666", fontWeight: 700 }}>Trigger-ID:</span> {stripPrefix(f.id)}</div>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>{customerRoute ? "Prüfregel: " : "Trigger-ID: "}</span>{stripPrefix(f.id)}</div>
                         <div><span style={{ color: "#666", fontWeight: 700 }}>Kategorie:</span> {catLabel(f.category)}</div>
                         <div><span style={{ color: "#666", fontWeight: 700 }}>Gewichtung:</span> -{f.penalty}</div>
                         {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Norm:</span> {(f as any).norm}</div>}
@@ -2068,7 +2085,7 @@ export default function ScorePage() {
                   {llmFindings.map((f) => (
                     <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
                       <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
-                        <div><span style={{ color: "#666", fontWeight: 700 }}>Trigger-ID:</span> {stripPrefix(f.id)}</div>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>{customerRoute ? "Prüfregel: " : "Trigger-ID: "}</span>{stripPrefix(f.id)}</div>
                         <div><span style={{ color: "#666", fontWeight: 700 }}>Kategorie:</span> {catLabel(f.category)}</div>
                         <div><span style={{ color: "#666", fontWeight: 700 }}>Gewichtung:</span> -{f.penalty}</div>
                         {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Norm:</span> {(f as any).norm}</div>}
@@ -2102,12 +2119,12 @@ export default function ScorePage() {
             }}
           >
             <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
-              <strong>Rückfragen</strong> — Die hier generierten Fragen sollten vor Angebotsabgabe mit dem Planer oder Auftraggeber geklärt werden. Sie basieren auf den erkannten Risiken, unklaren Formulierungen und fehlenden Projektdaten im Leistungsverzeichnis. Eine rechtzeitige Klärung reduziert das Risiko von Nachträgen und Streitigkeiten und ermöglicht ein kalkuliertes, abgesichertes Angebot.
+              <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.rueckfragen}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.rueckfragen}
             </p>
           </div>
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>RÜCKFRAGEN / KLARSTELLUNGEN</div>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.rueckfragenBlock}</div>
               <button
                 onClick={generateClarificationQuestions}
                 disabled={clarificationQuestionsLoading}
@@ -2122,7 +2139,7 @@ export default function ScorePage() {
                   opacity: clarificationQuestionsLoading ? 0.9 : 1,
                 }}
               >
-                {clarificationQuestionsLoading ? "Generiere…" : "Rückfragen generieren"}
+                {clarificationQuestionsLoading ? DEFAULT_TEXTS_CONFIG.rueckfragen.generateButtonLoading : DEFAULT_TEXTS_CONFIG.rueckfragen.generateButton}
               </button>
             </div>
 
@@ -2131,7 +2148,7 @@ export default function ScorePage() {
                 <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
                   {(["technisch", "vertraglich", "terminlich"] as const).map((group) => {
                     const items = clarificationQuestions.byGroup?.[group] ?? [];
-                    const labels = { technisch: "Technische Fragen", vertraglich: "Vertragsfragen", terminlich: "Terminliche Fragen" };
+                    const labels = DEFAULT_TEXTS_CONFIG.rueckfragen.groupLabels;
                     if (items.length === 0) return null;
                     return (
                       <div key={group} style={{ border: "1px solid #eee", borderRadius: 12, padding: 14, background: "#fafafa" }}>
@@ -2162,7 +2179,7 @@ export default function ScorePage() {
                   })}
                 </div>
 
-                {isExpertMode && clarificationQuestions.debug && clarificationQuestions.debug.length > 0 && (
+                {isExpertMode && !customerRoute && clarificationQuestions.debug && clarificationQuestions.debug.length > 0 && (
                   <div style={{ marginTop: 16, border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#f9f9f9" }}>
                     <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 8 }}>Verknüpfung: Quelle → Rückfrage</div>
                     <div style={{ display: "grid", gap: 6, fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
@@ -2181,7 +2198,7 @@ export default function ScorePage() {
 
             {!clarificationQuestions && (
               <div style={{ marginTop: 12, color: "#666", fontSize: 13, fontWeight: 700 }}>
-                Klicke „Rückfragen generieren", um aus erkannten Risiken, Risiken im Einleitungstext und fehlenden Projektdaten strukturierte Bieterfragen zu erzeugen.
+                {DEFAULT_TEXTS_CONFIG.rueckfragen.emptyState}
               </div>
             )}
           </div>
@@ -2201,12 +2218,12 @@ export default function ScorePage() {
             }}
           >
             <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
-              <strong>Angebotsklarstellungen</strong> — Diese Textbausteine können im Angebot verwendet werden, um Leistungsgrenzen, Annahmen oder Auslegungen klar zu stellen. Sie leiten sich aus den erkannten Risiken und Ihren Rückfragen ab und helfen, den Angebotsumfang rechtssicher zu definieren. So können Sie Nachforderungen vermeiden, die aus unklaren oder fehlenden Angaben im Leistungsverzeichnis entstehen.
+              <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.angebotsklarstellungen}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.angebotsklarstellungen}
             </p>
           </div>
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>ANGEBOTS-ANNAHMEN</div>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.angebotsBlock}</div>
               <button
                 onClick={generateOfferAssumptions}
                 disabled={offerAssumptionsLoading}
@@ -2221,7 +2238,7 @@ export default function ScorePage() {
                   opacity: offerAssumptionsLoading ? 0.9 : 1,
                 }}
               >
-                {offerAssumptionsLoading ? "Arbeite…" : "Annahmen generieren"}
+                {offerAssumptionsLoading ? DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.generateButtonLoading : DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.generateButton}
               </button>
             </div>
 
@@ -2230,7 +2247,7 @@ export default function ScorePage() {
                 <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
                   {(["technisch", "vertraglich", "terminlich"] as const).map((group) => {
                     const items = offerAssumptions.byGroup?.[group] ?? [];
-                    const labels = { technisch: "Technische Annahmen", vertraglich: "Vertragliche Annahmen", terminlich: "Terminliche Annahmen" };
+                    const labels = DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.groupLabels;
                     if (items.length === 0) return null;
                     return (
                       <div key={group} style={{ border: "1px solid #eee", borderRadius: 12, padding: 14, background: "#fafafa" }}>
@@ -2258,7 +2275,7 @@ export default function ScorePage() {
                   })}
                 </div>
 
-                {isExpertMode && offerAssumptions.debug && offerAssumptions.debug.length > 0 && (
+                {isExpertMode && !customerRoute && offerAssumptions.debug && offerAssumptions.debug.length > 0 && (
                   <div style={{ marginTop: 16, border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#f9f9f9" }}>
                     <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 8 }}>Verknüpfung: Risiko → Frage → Annahme</div>
                     <div style={{ display: "grid", gap: 6, fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
@@ -2279,7 +2296,7 @@ export default function ScorePage() {
 
             {!offerAssumptions && !offerAssumptionsLoading && (
               <div style={{ marginTop: 12, color: "#666", fontSize: 13, fontWeight: 700 }}>
-                Klicke „Annahmen generieren", um aus erkannten Risiken, Rückfragen und Projektdaten Angebotsannahmen zu erzeugen. Optional: zuerst Rückfragen generieren für bessere Verknüpfung.
+                {DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.emptyState}
               </div>
             )}
 
@@ -2305,33 +2322,41 @@ export default function ScorePage() {
             }}
           >
             <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
-              <strong>Transparenz</strong> — Hier wird erklärt, wie die Bewertung des Leistungsverzeichnisses berechnet wurde. Der Risiko-Score und die Kategorien basieren auf festen Regeln und optional der KI-Auswertung. So können Sie die Aussagekraft der Analyse besser einordnen und bei Bedarf gezielt nachhaken.
+              <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.transparenz}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.transparenz}
             </p>
           </div>
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-            <div style={{ fontSize: 14, color: "#666", fontWeight: 900, marginBottom: 12 }}>Erklärung der Score-Berechnung</div>
+            <div style={{ fontSize: 14, color: "#666", fontWeight: 900, marginBottom: 12 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.scoreErklaerung}</div>
             <p style={{ margin: 0, color: "#333", fontSize: 14, lineHeight: 1.6 }}>
-              So wird Ihr Risiko-Score berechnet: Der Gesamt-Risiko-Score (0–100) ergibt sich aus den fünf Kategorien: Vertrags-/LV-Risiken, Mengen &amp; Massenermittlung,
-              Technische Vollständigkeit, Schnittstellen &amp; Nebenleistungen, Kalkulationsunsicherheit. Je Kategorie werden Abzüge aus
-              erkannten Risiken (Regeln, Systemprüfung, optional KI) angerechnet. Die Ampel bewertet: 0–39 Grün (solide),
-              40–69 Gelb (mittel), 70–100 Rot (hohes Risiko). Größenfaktor und Easing können die Kategorien-Bewertung modulieren.
+              {DEFAULT_TEXTS_CONFIG.explanation.scoreCalculation}
             </p>
           </div>
-          {isExpertMode && result.debug && (
+          {isExpertMode && !customerRoute && result.debug && (
             <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>Technische Details</div>
-                <div style={{ color: "#666", fontWeight: 700 }}>
-                  Config: {String(result.debug.scoringConfigVersion ?? "-")} • Easing: {String(result.debug.easing ?? "-")}
-                </div>
+                <a
+                  href="/admin/debug"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => {
+                    try {
+                      sessionStorage.setItem("admin.debug.lastScoreResponse", JSON.stringify(result));
+                    } catch (_) {}
+                  }}
+                  style={{ fontSize: 13, color: "#111", fontWeight: 700, textDecoration: "underline" }}
+                >
+                  Debug-Ansicht öffnen
+                </a>
               </div>
 
               <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
                 <div style={{ fontWeight: 800 }}>
-                  detectedDisciplines:{" "}
-                  <span style={{ fontWeight: 700, color: "#111" }}>
-                    {(result.debug.detectedDisciplines ?? []).join(", ") || "(leer)"}
-                  </span>
+                  Config: <span style={{ fontWeight: 700, color: "#111" }}>{String(result.debug.scoringConfigVersion ?? "-")}</span>
+                  {" • "}Easing: <span style={{ fontWeight: 700, color: "#111" }}>{String(result.debug.easing ?? "-")}</span>
+                </div>
+                <div style={{ fontWeight: 800 }}>
+                  detectedDisciplines: <span style={{ fontWeight: 700, color: "#111" }}>{(result.debug.detectedDisciplines ?? []).join(", ") || "(leer)"}</span>
                 </div>
                 <div style={{ fontWeight: 800 }}>
                   triggersUsed: <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.triggersUsed ?? "-"}</span>
@@ -2374,4 +2399,9 @@ export default function ScorePage() {
       )}
     </div>
   );
+}
+
+/** Admin-Route /admin/score: volle Analyse-UI inkl. Expertenmodus und Debug-Ansicht (customerRoute=false). */
+export default function AdminScorePage() {
+  return <ScorePage customerRoute={false} />;
 }

@@ -1,5 +1,6 @@
 import { PRESET_FINDINGS } from "./findingsPresets";
 import { Finding, Severity, ScoreCategory } from "./scoring";
+import { NACHTRAG_SCHWELLEN, NACHTRAG_WEICHWOERTER } from "./scoringConfig";
 
 // ===== DB Trigger Typ (entspricht deiner Supabase-Tabelle) =====
 export type DbTrigger = {
@@ -398,24 +399,33 @@ export function analyzeLvText(
       penalty: 6,
     });
 
-  // Nachtrag-/Weichwörter (auch hier capped)
-  const nachtragWorte = ["bauseits", "nach aufwand", "optional", "bedarfsweise", "pauschal"];
+  // Nachtrag-/Weichwörter (aus zentraler Konfiguration)
   const lower = text.toLowerCase();
-  const countNachtrag = nachtragWorte.reduce((acc, w) => acc + (lower.split(w).length - 1), 0);
+  const countNachtrag = NACHTRAG_WEICHWOERTER.reduce(
+    (acc, w) => acc + (lower.split(w).length - 1),
+    0
+  );
 
-  if (countNachtrag >= 3) {
+  if (countNachtrag >= NACHTRAG_SCHWELLEN.minFindings) {
     const mult = frequencyMultiplier(countNachtrag);
-    const penalty = clamp(Math.round(6 * mult), 0, 12);
+    const penalty = clamp(
+      Math.round(NACHTRAG_SCHWELLEN.basePenalty * mult),
+      0,
+      NACHTRAG_SCHWELLEN.penaltyMax
+    );
 
     findings.push({
-      id: countNachtrag >= 6 ? "SYS_VIELE_WEICHE_FORMULIERUNGEN" : "SYS_EINIGE_WEICHE_FORMULIERUNGEN",
+      id:
+        countNachtrag >= NACHTRAG_SCHWELLEN.highSeverityMin
+          ? "SYS_VIELE_WEICHE_FORMULIERUNGEN"
+          : "SYS_EINIGE_WEICHE_FORMULIERUNGEN",
       category: "nachtrag",
       title:
-        countNachtrag >= 6
+        countNachtrag >= NACHTRAG_SCHWELLEN.highSeverityMin
           ? "Viele weiche Formulierungen (bauseits/optional/nach Aufwand) → hohes Nachtragspotenzial"
           : "Mehrere weiche Formulierungen → Nachtragspotenzial",
       detail: `Trefferanzahl: ${countNachtrag} | Faktor: ${mult.toFixed(2)} | Penalty: ${penalty}`,
-      severity: countNachtrag >= 6 ? "high" : "medium",
+      severity: countNachtrag >= NACHTRAG_SCHWELLEN.highSeverityMin ? "high" : "medium",
       penalty,
     });
   }

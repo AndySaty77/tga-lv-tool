@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { analyzeLvText, DbTrigger } from "../../../lib/analyzeLvText";
 import { computeScore } from "../../../lib/scoring";
 import { analyzeLvTextWithLLM } from "../../../lib/llmRelevanceFilter";
+import { FALLBACK_SCORING_CONFIG } from "../../../lib/scoringConfig";
 
 type CategoryKey =
   | "vertrags_lv_risiken"
@@ -72,19 +73,7 @@ type ScoringConfig = {
   total: { method: "mean" };
 };
 
-const FALLBACK_CONFIG: ScoringConfig = {
-  version: 1,
-  catMax: {
-    vertrags_lv_risiken: 70,
-    mengen_massenermittlung: 60,
-    technische_vollstaendigkeit: 80,
-    schnittstellen_nebenleistungen: 70,
-    kalkulationsunsicherheit: 60,
-  },
-  lvSize: { baseDivisor: 2000, maxBoost: 0.6 },
-  easing: { type: "sqrt" },
-  total: { method: "mean" },
-};
+const FALLBACK_CONFIG: ScoringConfig = FALLBACK_SCORING_CONFIG as ScoringConfig;
 
 async function getScoringConfig(supabase: ReturnType<typeof supabaseServer>): Promise<ScoringConfig> {
   const { data, error } = await supabase
