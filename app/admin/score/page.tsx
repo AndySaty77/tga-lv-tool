@@ -1,7 +1,7 @@
 // app/admin/score/page.tsx
 "use client";
 
-import { useMemo, useRef, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 
 type CategoryKey =
   | "vertrags_lv_risiken"
@@ -165,6 +165,13 @@ function severityDot(sev: string) {
   if (sev === "high") return "🔴";
   if (sev === "medium") return "🟠";
   return "🟡";
+}
+
+/** Risiko-Label für Darstellung (Standardmodus). */
+function severityLabel(sev: string) {
+  if (sev === "high") return "Hoch";
+  if (sev === "medium") return "Mittel";
+  return "Niedrig";
 }
 
 function isDbFinding(f: Finding) {
@@ -370,6 +377,8 @@ export default function ScorePage() {
   const [lvText, setLvText] = useState("");
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [loading, setLoading] = useState(false);
+  /** Fortschritts-Schritt für die Analyse-Warteanzeige (0–5), zeitbasiert. */
+  const [analysisStep, setAnalysisStep] = useState(0);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -416,6 +425,7 @@ export default function ScorePage() {
   } | null>(null);
 
   // ===== NACHTRAGSANALYSE =====
+  const [clarificationQuestionsLoading, setClarificationQuestionsLoading] = useState(false);
   const [changeOrderLoading, setChangeOrderLoading] = useState(false);
   const [changeOrderUseLlm, setChangeOrderUseLlm] = useState(false);
   const [changeOrderAnalysis, setChangeOrderAnalysis] = useState<{
@@ -449,7 +459,14 @@ export default function ScorePage() {
   const [top10, setTop10] = useState(false);
   const [useLlmRelevance, setUseLlmRelevance] = useState(false);
 
-  const meta = levelMeta(result?.level);
+  /** UI-Modus: nur Darstellung (sichtbare Tabs, Detailoptionen). Keine Logik-Änderung, keine Neuberechnung. */
+  const [analysisMode, setAnalysisMode] = useState<"standard" | "expert">("standard");
+  const isExpertMode = analysisMode === "expert";
+
+  /** Aktiver Tab der Analyse-Ausgabe (nur Darstellung). */
+  type ResultTabId = "uebersicht" | "risiken" | "nachtragspotenzial" | "rueckfragen" | "angebotsklarstellungen" | "trigger" | "transparenz";
+  const [resultTab, setResultTab] = useState<ResultTabId>("uebersicht");
+
   const totalAmp = traffic(clamp0_100(result?.total ?? 0));
 
   const resetVortext = () => {
@@ -480,6 +497,7 @@ export default function ScorePage() {
   const generateClarificationQuestions = async () => {
     const findings = result?.findingsSorted ?? [];
     if (findings.length === 0 && riskClauses.length === 0 && Object.keys(keyFacts).length === 0) return;
+    setClarificationQuestionsLoading(true);
     try {
       const res = await fetch("/api/clarification-questions", {
         method: "POST",
@@ -496,6 +514,8 @@ export default function ScorePage() {
     } catch (e: unknown) {
       console.error("Clarification questions:", e);
       setClarificationQuestions(null);
+    } finally {
+      setClarificationQuestionsLoading(false);
     }
   };
 
@@ -721,6 +741,19 @@ export default function ScorePage() {
     }
   };
 
+  // Fortschritts-Schritte für die Warteanzeige (alle ~2 s weiter)
+  useEffect(() => {
+    if (!loading) {
+      setAnalysisStep(0);
+      return;
+    }
+    setAnalysisStep(0);
+    const interval = setInterval(() => {
+      setAnalysisStep((s) => Math.min(s + 1, 5));
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [loading]);
+
   const loadFile = async (file: File) => {
     setError(null);
     setResult(null);
@@ -817,6 +850,18 @@ export default function ScorePage() {
     [filteredFindings]
   );
 
+  /** Nachtragspotenziale nach Titel dedupliziert (nur erste Nennung pro Titel). */
+  const deduplicatedOpportunities = useMemo(() => {
+    const opps = changeOrderAnalysis?.opportunities ?? [];
+    const seen = new Set<string>();
+    return opps.filter((o) => {
+      const k = (o.title ?? "").trim().toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [changeOrderAnalysis?.opportunities]);
+
   const resetFilters = () => {
     setSourceFilter("both");
     setSeverityFilter("all");
@@ -876,24 +921,193 @@ export default function ScorePage() {
   const effectiveVortextLen = (split?.vortext ?? structureVortext ?? "").trim().length;
   const effectivePositionsLen = (split?.positions ?? structurePositions ?? "").trim().length;
 
+  const analysisStatus = loading ? "Analysiere…" : result ? "Abgeschlossen" : "Bereit";
+
+  const analysisSteps = [
+    "Leistungsverzeichnis wird verarbeitet",
+    "Vorbemerkungen werden analysiert",
+    "Risiken werden erkannt",
+    "Score wird berechnet",
+    "Nachtragspotenziale werden ermittelt",
+    "KI erstellt Zusammenfassung",
+  ];
+
   return (
     <div style={{ padding: 28, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 26 }}>TGA LV Score</h1>
-          <div style={{ color: "#666", marginTop: 6 }}>
-            Upload oder Text rein, Score raus. Jetzt mit LLM-Split (Vortext/Positionen) statt Guess-Heuristik.
+      {/* Analyse-Warteanzeige: Overlay, abdunkeln, Tabs/Inhalt ausgeblendet über result && !loading */}
+      {loading && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "auto",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 16,
+              padding: "28px 32px",
+              maxWidth: 420,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#111", marginBottom: 20 }}>
+              Analyse läuft
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {analysisSteps.map((label, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, color: i < analysisStep ? "#0a7a2f" : i === analysisStep ? "#111" : "#999", fontWeight: i === analysisStep ? 700 : 500 }}>
+                  <span style={{ width: 20, textAlign: "center" }}>
+                    {i < analysisStep ? "✓" : i === analysisStep ? "→" : "•"}
+                  </span>
+                  <span>{label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-        <a href="/admin/triggers" style={{ color: "#111", textDecoration: "underline" }}>
-          Trigger-Admin
-        </a>
-      </div>
+      )}
 
-      {/* Upload + Input Card */}
+      {/* Warteanzeige: Nachtragspotenzial, Rückfragen, Annahmen */}
+      {(changeOrderLoading || clarificationQuestionsLoading || offerAssumptionsLoading) && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "auto",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 16,
+              padding: "28px 32px",
+              maxWidth: 380,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#111", marginBottom: 12 }}>
+              {changeOrderLoading && "Nachtragspotenziale werden ermittelt…"}
+              {!changeOrderLoading && clarificationQuestionsLoading && "Rückfragen werden generiert…"}
+              {!changeOrderLoading && !clarificationQuestionsLoading && offerAssumptionsLoading && "Annahmen werden generiert…"}
+            </div>
+            <div style={{ color: "#666", fontSize: 14 }}>
+              Bitte einen Moment warten.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header: horizontale Leiste, klar vom Inhalt getrennt, SaaS-Optik */}
+      <header
+        style={{
+          marginBottom: 0,
+          padding: "0 28px",
+          height: 64,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 24,
+          background: "#fff",
+          borderBottom: "1px solid #e5e7eb",
+          flexWrap: "wrap",
+        }}
+      >
+        {/* Linke Seite: Titel, optional Dateiname */}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 16, minWidth: 0 }}>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "#111", letterSpacing: "-0.02em" }}>
+            LV Analyse
+          </h1>
+          {fileMeta?.name && (
+            <span style={{ fontSize: 13, color: "#6b7280", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {fileMeta.name}
+              {fileMeta.size ? ` · ${fmtKB(fileMeta.size)}` : ""}
+            </span>
+          )}
+        </div>
+
+        {/* Rechte Seite: Status (optional), Modus-Toggle */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {analysisStatus && (
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 500,
+                color: loading ? "#b45309" : result ? "#047857" : "#6b7280",
+                padding: "6px 12px",
+                borderRadius: 8,
+                background: loading ? "#fffbeb" : result ? "#ecfdf5" : "#f3f4f6",
+              }}
+            >
+              {loading ? "Analyse läuft" : result ? "Analyse abgeschlossen" : "Bereit"}
+            </span>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 500 }}>Modus</span>
+            <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 8, padding: 2 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setAnalysisMode("standard");
+                  if (resultTab === "trigger" || resultTab === "transparenz") setResultTab("uebersicht");
+                }}
+                style={{
+                  padding: "6px 14px",
+                  border: "none",
+                  borderRadius: 6,
+                  background: analysisMode === "standard" ? "#fff" : "transparent",
+                  color: analysisMode === "standard" ? "#111" : "#6b7280",
+                  fontWeight: 500,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  boxShadow: analysisMode === "standard" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+                }}
+              >
+                Standard
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnalysisMode("expert")}
+                style={{
+                  padding: "6px 14px",
+                  border: "none",
+                  borderRadius: 6,
+                  background: analysisMode === "expert" ? "#fff" : "transparent",
+                  color: analysisMode === "expert" ? "#111" : "#6b7280",
+                  fontWeight: 500,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  boxShadow: analysisMode === "expert" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+                }}
+              >
+                Experte
+              </button>
+            </div>
+          </div>
+          <a
+            href="/admin/triggers"
+            style={{ fontSize: 12, color: "#6b7280", textDecoration: "none", fontWeight: 500 }}
+          >
+            Trigger-Admin
+          </a>
+        </div>
+      </header>
+
+      {/* Analysebereich: Upload + Tabs, klar unter dem Header */}
       <div
         style={{
-          marginTop: 18,
+          marginTop: 24,
           padding: 16,
           border: "1px solid #e5e5e5",
           borderRadius: 14,
@@ -923,7 +1137,7 @@ export default function ScorePage() {
           <div>
             <div style={{ fontWeight: 900 }}>Drag & Drop Datei hier rein</div>
             <div style={{ color: "#666", marginTop: 4 }}>
-              GAEB-Preview (Debug) + LLM-Split (Produktiv): trennt Vortext/Positionen robust.
+              Struktur des Leistungsverzeichnisses und automatische Textanalyse trennen Einleitung und Positionen.
             </div>
             {fileMeta && (
               <div style={{ marginTop: 8, color: "#111", fontWeight: 700 }}>
@@ -956,10 +1170,12 @@ export default function ScorePage() {
               Datei wählen
             </button>
 
-            <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
-              <input type="checkbox" checked={autoAnalyze} onChange={(e) => setAutoAnalyze(e.target.checked)} />
-              <span style={{ fontWeight: 700, color: "#111" }}>Auto-Analyse</span>
-            </label>
+            {isExpertMode && (
+              <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={autoAnalyze} onChange={(e) => setAutoAnalyze(e.target.checked)} />
+                <span style={{ fontWeight: 700, color: "#111" }}>Auto-Analyse</span>
+              </label>
+            )}
           </div>
         </div>
 
@@ -999,27 +1215,29 @@ export default function ScorePage() {
             {loading ? "Analysiere..." : "Analysieren"}
           </button>
 
-          <button
-            onClick={async () => {
-              if (!lastFile) {
-                setSplitError("Kein File vorhanden (nur Text im Feld). Re-Split geht nur mit Datei.");
-                return;
-              }
-              await runGaebSplitLLM(lastFile);
-            }}
-            disabled={splitLoading || !lastFile}
-            style={{
-              padding: "10px 14px",
-              borderRadius: 12,
-              border: "1px solid #ddd",
-              background: "#fff",
-              cursor: splitLoading || !lastFile ? "default" : "pointer",
-              fontWeight: 800,
-            }}
-            title={!lastFile ? "Nur möglich, wenn eine Datei geladen wurde." : ""}
-          >
-            {splitLoading ? "Splitte..." : "LLM-Split neu ausführen"}
-          </button>
+          {isExpertMode && (
+            <button
+              onClick={async () => {
+                if (!lastFile) {
+                  setSplitError("Kein File vorhanden (nur Text im Feld). Re-Split geht nur mit Datei.");
+                  return;
+                }
+                await runGaebSplitLLM(lastFile);
+              }}
+              disabled={splitLoading || !lastFile}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 12,
+                border: "1px solid #ddd",
+                background: "#fff",
+                cursor: splitLoading || !lastFile ? "default" : "pointer",
+                fontWeight: 800,
+              }}
+              title={!lastFile ? "Nur möglich, wenn eine Datei geladen wurde." : ""}
+            >
+              {splitLoading ? "Analysiere…" : "Automatische Textanalyse erneut ausführen"}
+            </button>
+          )}
 
           <button
             onClick={() => {
@@ -1041,28 +1259,31 @@ export default function ScorePage() {
               fontWeight: 700,
             }}
           >
-            Reset
+            Zurücksetzen
           </button>
 
-          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
-            color: "#666", fontWeight: 600 }}>
-            <input
-              type="checkbox"
-              checked={useLlmRelevance}
-              onChange={(e) => setUseLlmRelevance(e.target.checked)}
-            />
-            LLM-Relevanzfilter
-          </label>
+          {isExpertMode && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+              color: "#666", fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={useLlmRelevance}
+                onChange={(e) => setUseLlmRelevance(e.target.checked)}
+              />
+              Relevanzfilter (KI)
+            </label>
+          )}
           <div style={{ color: "#666", display: "flex", alignItems: "center" }}>Limit: {fmtKB(MAX_FILE_BYTES)}</div>
         </div>
 
         {error && <div style={{ marginTop: 12, color: "#b00020", fontWeight: 800 }}>{error}</div>}
       </div>
 
-      {/* GAEB Preview Card */}
+      {/* Struktur des Leistungsverzeichnisses (nur Expertenmodus) */}
+      {isExpertMode && (
       <div style={{ marginTop: 14, border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-          <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>GAEB PREVIEW + SPLIT</div>
+          <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>Struktur des Leistungsverzeichnisses</div>
           <div style={{ color: "#666", fontWeight: 700 }}>
             {gaebPreviewLoading ? "Lade…" : gaebPreview ? `${gaebPreview.filename} (${fmtKB(gaebPreview.size)})` : "—"}
           </div>
@@ -1070,9 +1291,9 @@ export default function ScorePage() {
 
         {(gaebPreviewError || splitError) && (
           <div style={{ marginTop: 10, color: "#b00020", fontWeight: 800 }}>
-            {gaebPreviewError ? `Preview: ${gaebPreviewError}` : ""}
+            {gaebPreviewError ? `Struktur: ${gaebPreviewError}` : ""}
             {gaebPreviewError && splitError ? " • " : ""}
-            {splitError ? `Split: ${splitError}` : ""}
+            {splitError ? `Textanalyse: ${splitError}` : ""}
           </div>
         )}
 
@@ -1094,16 +1315,16 @@ export default function ScorePage() {
                   }}
                 >
                   {t === "llm_vortext"
-                    ? "LLM Vortext"
+                    ? "KI: Einleitungstext"
                     : t === "llm_positions"
-                      ? "LLM Positionen"
+                      ? "KI: Positionen"
                       : t === "vortext"
-                        ? "Vortext (guess)"
+                        ? "Einleitung (Struktur)"
                         : t === "positions"
-                          ? "Positionen (guess)"
+                          ? "Positionen (Struktur)"
                           : t === "raw"
-                            ? "Raw"
-                            : "Clean"}
+                            ? "Rohdaten"
+                            : "Bereinigt"}
                 </button>
               ))}
 
@@ -1142,69 +1363,169 @@ export default function ScorePage() {
             <div style={{ marginTop: 8, color: "#666", fontSize: 12, fontWeight: 700 }}>
               {split ? (
                 <>
-                  Split(LLM): vortext {effectiveVortextLen} chars • positions {effectivePositionsLen} chars
+                  Automatische Textanalyse: Einleitung {effectiveVortextLen} Zeichen • Positionen {effectivePositionsLen} Zeichen
                 </>
               ) : gaebPreview?.structure ? (
                 <>
-                  Struktur: {gaebPreview.structure.raw.cutMethod} • vortext {effectiveVortextLen} chars • positionen{" "}
-                  {effectivePositionsLen} chars
+                  Struktur: {gaebPreview.structure.raw.cutMethod} • Einleitung {effectiveVortextLen} Zeichen • Positionen{" "}
+                  {effectivePositionsLen} Zeichen
                   {gaebPreview.structure.vorbemerkungen ? (
-                    <> • vorbemerkungen {gaebPreview.structure.vorbemerkungen.length} chars</>
+                    <> • Vorbemerkungen {gaebPreview.structure.vorbemerkungen.length} Zeichen</>
                   ) : null}
                 </>
               ) : (
                 <>
-                  Debug: preview {gaebPreview?.debug?.previewChars ?? 0} chars • vortext{" "}
-                  {gaebPreview?.debug?.vortextFullChars ?? 0} • positionen {gaebPreview?.debug?.positionsFullChars ?? 0}
+                  Struktur: Vorschau {gaebPreview?.debug?.previewChars ?? 0} Zeichen • Einleitung{" "}
+                  {gaebPreview?.debug?.vortextFullChars ?? 0} • Positionen {gaebPreview?.debug?.positionsFullChars ?? 0}
                 </>
               )}
             </div>
           </>
         )}
       </div>
+      )}
 
-      {/* Results */}
-      {result && (
-        <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
-          {/* Top Cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 16 }}>
-            {/* Score Card */}
-            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ fontSize: 14, color: "#666", fontWeight: 800 }}>GESAMT</div>
-                <div style={{ fontSize: 14, fontWeight: 900 }}>
-                  {meta.dot} {meta.label}
+      {/* Results mit Tab-Struktur (während Analyse ausgeblendet) */}
+      {result && !loading && (
+        <div style={{ marginTop: 18 }}>
+          {/* Tab-Leiste */}
+          <div
+            style={{
+              display: "flex",
+              gap: 4,
+              marginBottom: 16,
+              padding: "6px 0",
+              borderBottom: "2px solid #e5e5e5",
+              flexWrap: "wrap",
+            }}
+          >
+            {(
+              [
+                ["uebersicht", "Übersicht"],
+                ["risiken", "Risiken"],
+                ["nachtragspotenzial", "Nachtragspotenzial"],
+                ["rueckfragen", "Rückfragen"],
+                ["angebotsklarstellungen", "Angebotsklarstellungen"],
+                ...(analysisMode === "expert" ? [["trigger", "Trigger"] as const] : []),
+                ...(analysisMode === "expert" ? [["transparenz", "Transparenz"] as const] : []),
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setResultTab(id)}
+                style={{
+                  padding: "10px 16px",
+                  border: "none",
+                  borderBottom: resultTab === id ? "2px solid #111" : "2px solid transparent",
+                  marginBottom: -8,
+                  background: "none",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  color: resultTab === id ? "#111" : "#666",
+                  cursor: "pointer",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab-Inhalt: Übersicht – Entscheidungs-Dashboard (nur Darstellung) */}
+          {resultTab === "uebersicht" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "calc(100vh - 280px)", minHeight: 0 }}>
+            {/* Zeile 1: KPI-Karten Komplexität | Gesamt-Risiko | Claim-Potenzial */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "14px 16px" }}>
+                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>Komplexität</div>
+                <div style={{ marginTop: 4, fontSize: 28, fontWeight: 700, color: "#111" }}>
+                  {clamp0_100(result.total)}
+                  <span style={{ fontSize: 14, color: "#9ca3af", fontWeight: 500 }}> / 100</span>
                 </div>
               </div>
-
-              <div style={{ fontSize: 44, fontWeight: 900, marginTop: 10, color: totalAmp.tone }}>
-                {clamp0_100(result.total)}
-                <span style={{ fontSize: 16, color: "#666", marginLeft: 8 }}>/ 100</span>
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "14px 16px" }}>
+                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>Gesamt-Risiko</div>
+                <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 20 }}>{totalAmp.dot}</span>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: totalAmp.tone }}>{totalAmp.text}</span>
+                </div>
               </div>
-
-              <div style={{ marginTop: 10, height: 12, background: "#eee", borderRadius: 999 }}>
-                <div
-                  style={{
-                    width: `${clamp0_100(result.total)}%`,
-                    height: 12,
-                    background: totalAmp.tone,
-                    borderRadius: 999,
-                  }}
-                />
-              </div>
-              <div style={{ marginTop: 10, color: "#666", fontWeight: 700, fontSize: 12 }}>
-                Ampel: 0–39 Grün • 40–69 Gelb • 70–100 Rot
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "14px 16px" }}>
+                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>Claim-Potenzial</div>
+                <div style={{ marginTop: 4, fontSize: 16, fontWeight: 700, color: "#111" }}>
+                  {result.findingsSorted?.length === 0
+                    ? "Niedrig"
+                    : (result.total ?? 0) >= 70
+                      ? "Hoch"
+                      : (result.total ?? 0) >= 40
+                        ? "Mittel"
+                        : "Niedrig"}
+                </div>
               </div>
             </div>
 
-            {/* Category Bars */}
-            <ScoreBarsCard perCategory={result.perCategory ?? {}} total={result.total} />
+            {/* Zeile 2: Risiko-Ampel + Top Findings nebeneinander */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, flex: 1, minHeight: 0 }}>
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, overflow: "auto" }}>
+                <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700, marginBottom: 10 }}>Risiko-Ampel der Kategorien</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {CATEGORY_ORDER.map((k) => {
+                    const v = clamp0_100(result.perCategory?.[k] ?? 0);
+                    const amp = traffic(v);
+                    return (
+                      <div key={k} style={{ display: "grid", gridTemplateColumns: "140px 1fr 28px", gap: 8, alignItems: "center", fontSize: 12 }}>
+                        <span style={{ color: "#374151", fontWeight: 500 }}>{catLabel(k)}</span>
+                        <div style={{ height: 8, background: "#f3f4f6", borderRadius: 4, overflow: "hidden" }}>
+                          <div style={{ width: `${v}%`, height: "100%", background: amp.tone, borderRadius: 4 }} />
+                        </div>
+                        <span style={{ fontWeight: 700, color: amp.tone }}>{amp.dot}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, overflow: "auto" }}>
+                <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700, marginBottom: 10 }}>Top Findings</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {(filteredFindings.slice(0, 8)).length === 0 ? (
+                    <div style={{ color: "#9ca3af", fontSize: 13 }}>Keine Treffer.</div>
+                  ) : (
+                    filteredFindings.slice(0, 8).map((f) => (
+                      <div key={f.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0", borderBottom: "1px solid #f3f4f6" }}>
+                        <span style={{ flexShrink: 0 }}>{severityDot(f.severity)}</span>
+                        <span style={{ fontSize: 13, color: "#111", fontWeight: 500, lineHeight: 1.35 }}>{f.title}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
+          )}
 
-          {/* ===== KEY FACTS CARD (DYNAMIC) ===== */}
+          {/* Tab-Inhalt: Risiken */}
+          {resultTab === "risiken" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+          <div
+            style={{
+              padding: "14px 18px",
+              borderRadius: 12,
+              background: "#f0f4f8",
+              border: "1px solid #e2e8f0",
+              marginBottom: 4,
+            }}
+          >
+            <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
+              <strong>Risiken</strong> — In diesem Bereich werden mögliche Risiken im Leistungsverzeichnis dargestellt: unklare Leistungsbeschreibungen, fehlende Angaben, widersprüchliche oder mehrdeutige Formulierungen. Dazu zählen automatisch erkannte Projektdaten aus der Einleitung sowie vom System und von der KI identifizierte Risikostellen im Text. Eine systematische Prüfung dieser Punkte hilft, Nachforderungen und Streitigkeiten in der Ausführung zu reduzieren.
+            </p>
+          </div>
+          {/* ===== Projektdaten aus dem Leistungsverzeichnis ===== */}
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>KEY FACTS (VORTEXT)</div>
+              <div>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>Projektdaten aus dem Leistungsverzeichnis</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: "#888", fontWeight: 600 }}>Wichtige Angaben aus der Einleitung (z. B. Objekt, Vergabeart), automatisch erkannt.</div>
+              </div>
               <div style={{ color: "#666", fontWeight: 700 }}>
                 {vortextLoading ? "Extrahiere…" : `${keyFactsEntries.length} Felder`}
               </div>
@@ -1212,12 +1533,12 @@ export default function ScorePage() {
 
             {vortextError && (
               <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>
-                (Key Facts nicht verfügbar, weil Vortext-Analyse fehlgeschlagen ist.)
+                (Projektdaten nicht verfügbar, weil die Analyse des Einleitungstextes fehlgeschlagen ist.)
               </div>
             )}
 
             {!vortextLoading && !vortextError && keyFactsEntries.length === 0 && (
-              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>Keine Key Facts gefunden.</div>
+              <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>Keine Projektdaten gefunden.</div>
             )}
 
             {!vortextError && keyFactsEntries.length > 0 && (
@@ -1233,7 +1554,7 @@ export default function ScorePage() {
 
                       {hasC && (
                         <div style={{ marginTop: 4, fontSize: 11, color: "#999", fontWeight: 800 }}>
-                          Confidence: {Math.round(c * 100)}%
+                          Sicherheit der Angabe: {Math.round(c * 100)}%
                         </div>
                       )}
 
@@ -1245,14 +1566,17 @@ export default function ScorePage() {
             )}
 
             <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
-              Hinweis: Vortext kommt jetzt aus LLM-Split. Wenn der leer ist, stimmt der GAEB-Import oder die Datei nicht.
+              Der Einleitungstext wird per automatischer Textanalyse ermittelt. Ist er leer, prüfen Sie die Datei oder den GAEB-Import.
             </div>
           </div>
 
-          {/* ===== VORTEXT RISIKO CARD ===== */}
+          {/* ===== Risiken im Einleitungstext ===== */}
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>VORTEXT RISIKEN (LLM)</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>Risiken im Einleitungstext</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: "#888", fontWeight: 600 }}>Künstliche Intelligenz analysiert den Vortext des Leistungsverzeichnisses und erkennt mögliche Risiken oder unklare Leistungsbeschreibungen.</div>
+              </div>
               <div style={{ color: "#666", fontWeight: 700 }}>
                 {vortextLoading ? "Analysiere…" : `${riskClauses.length} Treffer`}
               </div>
@@ -1312,190 +1636,25 @@ export default function ScorePage() {
             </div>
 
             <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
-              Hinweis: Das ist jetzt wirklich Vortext (LLM-Split) – nicht mehr “guess bis 6.4”.
+              Einleitungstext aus automatischer Textanalyse.
             </div>
           </div>
 
-          {/* ===== RÜCKFRAGEN / BIETERFRAGEN ===== */}
-          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>RÜCKFRAGEN / KLARSTELLUNGEN</div>
-              <button
-                onClick={generateClarificationQuestions}
-                style={{
-                  padding: "10px 16px",
-                  borderRadius: 12,
-                  border: "1px solid #333",
-                  background: "#111",
-                  color: "#fff",
-                  fontWeight: 800,
-                  cursor: "pointer",
-                }}
-              >
-                Rückfragen generieren
-              </button>
-            </div>
-
-            {clarificationQuestions && (
-              <>
-                <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
-                  {(["technisch", "vertraglich", "terminlich"] as const).map((group) => {
-                    const items = clarificationQuestions.byGroup?.[group] ?? [];
-                    const labels = { technisch: "Technische Fragen", vertraglich: "Vertragsfragen", terminlich: "Terminliche Fragen" };
-                    if (items.length === 0) return null;
-                    return (
-                      <div key={group} style={{ border: "1px solid #eee", borderRadius: 12, padding: 14, background: "#fafafa" }}>
-                        <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 10 }}>
-                          {labels[group]} ({items.length})
-                        </div>
-                        <div style={{ display: "grid", gap: 10 }}>
-                          {items.map((q: any) => (
-                            <div key={q.id} style={{ border: "1px solid #e5e5e5", borderRadius: 10, padding: 12, background: "#fff" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                                <span style={{ fontWeight: 800, color: "#111" }}>{severityDot(q.severity)} {q.severity}</span>
-                                {q.sourceFindingId && (
-                                  <span style={{ fontSize: 11, color: "#999" }}>← {q.sourceFindingId}</span>
-                                )}
-                              </div>
-                              <div style={{ marginTop: 8, fontWeight: 700, color: "#333" }}>{q.question}</div>
-                              <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>{q.reason}</div>
-                              {q.sourceTextSnippet && (
-                                <div style={{ marginTop: 6, fontSize: 11, color: "#999", fontFamily: "monospace" }}>
-                                  &quot;{q.sourceTextSnippet}&quot;
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {clarificationQuestions.debug && clarificationQuestions.debug.length > 0 && (
-                  <div style={{ marginTop: 16, border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#f9f9f9" }}>
-                    <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 8 }}>Debug: Quelle → Rückfrage</div>
-                    <div style={{ display: "grid", gap: 6, fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
-                      {clarificationQuestions.debug.map((d, i) => (
-                        <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                          <span style={{ color: "#666", minWidth: 100 }}>{d.source}{d.sourceId ? ` (${d.sourceId})` : ""}</span>
-                          <span style={{ color: "#333" }}>→</span>
-                          <span style={{ color: "#111", flex: 1 }}>{d.question}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {!clarificationQuestions && (
-              <div style={{ marginTop: 12, color: "#666", fontSize: 13, fontWeight: 700 }}>
-                Klicke „Rückfragen generieren", um aus Findings, Vortext-Risiken und fehlenden KeyFacts strukturierte Bieterfragen zu erzeugen.
-              </div>
-            )}
-          </div>
-
-          {/* ===== ANGEBOTS-ANNAHMEN ===== */}
-          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>ANGEBOTS-ANNAHMEN</div>
-              <button
-                onClick={generateOfferAssumptions}
-                disabled={offerAssumptionsLoading}
-                style={{
-                  padding: "10px 16px",
-                  borderRadius: 12,
-                  border: "1px solid #333",
-                  background: offerAssumptionsLoading ? "#666" : "#111",
-                  color: "#fff",
-                  fontWeight: 800,
-                  cursor: offerAssumptionsLoading ? "wait" : "pointer",
-                  opacity: offerAssumptionsLoading ? 0.9 : 1,
-                }}
-              >
-                {offerAssumptionsLoading ? "Arbeite…" : "Annahmen generieren"}
-              </button>
-            </div>
-
-            {offerAssumptions && (
-              <>
-                <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
-                  {(["technisch", "vertraglich", "terminlich"] as const).map((group) => {
-                    const items = offerAssumptions.byGroup?.[group] ?? [];
-                    const labels = { technisch: "Technische Annahmen", vertraglich: "Vertragliche Annahmen", terminlich: "Terminliche Annahmen" };
-                    if (items.length === 0) return null;
-                    return (
-                      <div key={group} style={{ border: "1px solid #eee", borderRadius: 12, padding: 14, background: "#fafafa" }}>
-                        <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 10 }}>
-                          {labels[group]} ({items.length})
-                        </div>
-                        <div style={{ display: "grid", gap: 10 }}>
-                          {items.map((a: any) => (
-                            <div key={a.id} style={{ border: "1px solid #e5e5e5", borderRadius: 10, padding: 12, background: "#fff" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                                <span style={{ fontWeight: 800, color: "#111" }}>{severityDot(a.severity)} {a.severity}</span>
-                                <span style={{ fontSize: 11, color: "#999" }}>
-                                  {a.sourceFindingId && <>Finding: {a.sourceFindingId}</>}
-                                  {a.sourceFindingId && a.sourceQuestionId && " • "}
-                                  {a.sourceQuestionId && <>Frage: {a.sourceQuestionId}</>}
-                                </span>
-                              </div>
-                              <div style={{ marginTop: 8, fontWeight: 700, color: "#333" }}>{a.assumption}</div>
-                              <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>{a.reason}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {offerAssumptions.debug && offerAssumptions.debug.length > 0 && (
-                  <div style={{ marginTop: 16, border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#f9f9f9" }}>
-                    <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 8 }}>Debug: Finding → Frage → Annahme</div>
-                    <div style={{ display: "grid", gap: 6, fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
-                      {offerAssumptions.debug.map((d, i) => (
-                        <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                          <span style={{ color: "#666", minWidth: 80 }}>{d.findingId ?? "—"}</span>
-                          <span style={{ color: "#333" }}>→</span>
-                          <span style={{ color: "#666", minWidth: 80 }}>{d.questionId ?? "—"}</span>
-                          <span style={{ color: "#333" }}>→</span>
-                          <span style={{ color: "#111", flex: 1 }}>{d.assumption}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {!offerAssumptions && !offerAssumptionsLoading && (
-              <div style={{ marginTop: 12, color: "#666", fontSize: 13, fontWeight: 700 }}>
-                Klicke „Annahmen generieren", um aus Findings, Rückfragen und KeyFacts Angebotsannahmen zu erzeugen. Optional: zuerst Rückfragen generieren für bessere Verknüpfung.
-              </div>
-            )}
-
-            {offerAssumptionsLoading && (
-              <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: "#666", fontWeight: 700 }}>
-                Annahmen werden erzeugt… (LLM-Optimierung kann einige Sekunden dauern)
-              </div>
-            )}
-          </div>
-
-          {/* ===== NACHTRAGSANALYSE ===== */}
+          {/* ===== NACHTRAGSANALYSE (Tab Risiken) ===== */}
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>NACHTRAGSANALYSE</div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 700 }}>
-                  <input
-                    type="checkbox"
-                    checked={changeOrderUseLlm}
-                    onChange={(e) => setChangeOrderUseLlm(e.target.checked)}
-                  />
-                  LLM ergänzen
-                </label>
+                {isExpertMode && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 700 }}>
+                    <input
+                      type="checkbox"
+                      checked={changeOrderUseLlm}
+                      onChange={(e) => setChangeOrderUseLlm(e.target.checked)}
+                    />
+                    KI ergänzen
+                  </label>
+                )}
                 <button
                   onClick={generateChangeOrderAnalysis}
                   disabled={changeOrderLoading}
@@ -1517,18 +1676,27 @@ export default function ScorePage() {
 
             {changeOrderAnalysis && (
               <>
-                <div style={{ marginTop: 14, color: "#666", fontSize: 12, fontWeight: 700 }}>
-                  {changeOrderAnalysis.debug && (
-                    <>Regelbasiert: {changeOrderAnalysis.debug.ruleBasedCount} • LLM: {changeOrderAnalysis.debug.llmCount} • Nach Dedup: {changeOrderAnalysis.debug.deduplicatedCount}</>
-                  )}
-                </div>
+                {isExpertMode && (
+                  <div style={{ marginTop: 14, color: "#666", fontSize: 12, fontWeight: 700 }}>
+                    {changeOrderAnalysis.debug && (
+                      <>Regeln: {changeOrderAnalysis.debug.ruleBasedCount} • KI: {changeOrderAnalysis.debug.llmCount} • Nach Bereinigung: {changeOrderAnalysis.debug.deduplicatedCount}</>
+                    )}
+                  </div>
+                )}
 
-                {changeOrderAnalysis.opportunities.length === 0 ? (
+                {deduplicatedOpportunities.length === 0 ? (
                   <div style={{ marginTop: 14, color: "#666", fontWeight: 700 }}>Keine Nachtragspotenziale erkannt.</div>
                 ) : (
                 <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
                   {(["leistungsaenderung", "leistungsmehrung", "schnittstelle", "erschwernis"] as const).map((cluster) => {
-                    const items = changeOrderAnalysis.byCluster?.[cluster] ?? [];
+                    const rawItems = changeOrderAnalysis.byCluster?.[cluster] ?? [];
+                    const seen = new Set<string>();
+                    const items = rawItems.filter((o) => {
+                      const k = (o.title ?? "").trim().toLowerCase();
+                      if (seen.has(k)) return false;
+                      seen.add(k);
+                      return true;
+                    });
                     const labels: Record<string, string> = {
                       leistungsaenderung: "Leistungsänderung",
                       leistungsmehrung: "Leistungsmehrung",
@@ -1581,7 +1749,7 @@ export default function ScorePage() {
 
             {!changeOrderAnalysis && !changeOrderLoading && (
               <div style={{ marginTop: 12, color: "#666", fontSize: 13, fontWeight: 700 }}>
-                Hybrid: Regelbasierte Baseline aus Findings, Vortext-Risiken und KeyFacts. Optional LLM für komplexe Nachtragshinweise. Klicke „Nachtragspotenziale ermitteln".
+                Kombinierte Analyse aus Regeln und KI (Projektdaten, Risiken im Einleitungstext). Optional KI für komplexere Hinweise. Klicke „Nachtragspotenziale ermitteln".
               </div>
             )}
 
@@ -1592,11 +1760,567 @@ export default function ScorePage() {
             )}
           </div>
 
-          {/* ✅ Debug Card */}
-          {result.debug && (
+          </div>
+          )}
+
+          {/* Tab-Inhalt: Nachtragspotenzial – Darstellung aus vorhandener Nachtragsanalyse, keine neue Logik */}
+          {resultTab === "nachtragspotenzial" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+          <div
+            style={{
+              padding: "14px 18px",
+              borderRadius: 12,
+              background: "#f0f4f8",
+              border: "1px solid #e2e8f0",
+              marginBottom: 4,
+            }}
+          >
+            <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
+              <strong>Nachtragspotenzial</strong> — Dieser Bereich zeigt mögliche Ursachen für spätere Nachträge oder zusätzliche Kosten während der Bauausführung. Unklare Leistungsgrenzen, fehlende Schnittstellendefinitionen oder nicht beschriebene Erschwernisse können zu Nachforderungen führen. Die Analyse nutzt die erkannten Risiken und Projektdaten, um solche Treiber zu identifizieren. So können Sie früh gegensteuern oder im Angebot entsprechende Annahmen und Klarstellungen formulieren.
+            </p>
+          </div>
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>NACHTRAGSPOTENZIAL</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {isExpertMode && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 700 }}>
+                    <input
+                      type="checkbox"
+                      checked={changeOrderUseLlm}
+                      onChange={(e) => setChangeOrderUseLlm(e.target.checked)}
+                    />
+                    KI ergänzen
+                  </label>
+                )}
+                <button
+                  onClick={generateChangeOrderAnalysis}
+                  disabled={changeOrderLoading}
+                  style={{
+                    padding: "10px 16px",
+                    borderRadius: 12,
+                    border: "1px solid #333",
+                    background: changeOrderLoading ? "#666" : "#111",
+                    color: "#fff",
+                    fontWeight: 800,
+                    cursor: changeOrderLoading ? "wait" : "pointer",
+                    opacity: changeOrderLoading ? 0.9 : 1,
+                  }}
+                >
+                  {changeOrderLoading ? "Analysiere…" : "Nachtragspotenziale ermitteln"}
+                </button>
+              </div>
+            </div>
+
+            {changeOrderLoading && (
+              <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: "#666", fontWeight: 700 }}>
+                Analyse läuft…
+              </div>
+            )}
+
+            {!changeOrderLoading && !changeOrderAnalysis && (
+              <div style={{ marginTop: 14, color: "#666", fontSize: 13, fontWeight: 700 }}>
+                Klicke „Nachtragspotenziale ermitteln", um mögliche Nachtragstreiber aus der Analyse abzuleiten. Keine neue Berechnung – es werden die vorhandenen Ergebnisse der Nachtragsanalyse dargestellt.
+              </div>
+            )}
+
+            {!changeOrderLoading && changeOrderAnalysis && (
+              <>
+                {/* Gesamtbewertung: aus deduplizierten opportunities abgeleitet */}
+                {(() => {
+                  const opps = deduplicatedOpportunities;
+                  const hasHigh = opps.some((o) => (o.potential ?? "").toString().toLowerCase() === "high");
+                  const hasMedium = opps.some((o) => (o.potential ?? "").toString().toLowerCase() === "medium");
+                  const level = opps.length === 0 ? "Keine" : hasHigh ? "Hoch" : hasMedium ? "Mittel" : "Gering";
+                  const levelTone = level === "Hoch" ? "#b00020" : level === "Mittel" ? "#a36b00" : level === "Keine" ? "#666" : "#0a7a2f";
+                  return (
+                    <div style={{ marginTop: 14 }}>
+                      <div style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>
+                        Nachtragspotenzial: <span style={{ color: levelTone }}>{level}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {deduplicatedOpportunities.length > 0 && (
+                  <>
+                    <div style={{ marginTop: 14, fontWeight: 800, color: "#333", fontSize: 14 }}>Mögliche Ursachen:</div>
+                    <ul style={{ marginTop: 8, paddingLeft: 20, color: "#333", fontSize: 14, lineHeight: 1.6 }}>
+                      {deduplicatedOpportunities.map((o) => (
+                        <li key={o.id} style={{ marginBottom: 4 }}>{o.title}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+
+                <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #eee", color: "#666", fontSize: 13, lineHeight: 1.5 }}>
+                  Unklare oder fehlende Leistungsbeschreibungen, Schnittstellen und Erschwernisse können zu Nachtragsansprüchen führen. Die Liste zeigt identifizierte Treiber aus der bestehenden Analyse.
+                </div>
+              </>
+            )}
+          </div>
+          </div>
+          )}
+
+          {/* Tab-Inhalt: Trigger */}
+          {resultTab === "trigger" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+          {isExpertMode && (
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>FILTER</div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                {result.llmMode && (
+                  <div style={{ fontSize: 11, color: "#666", fontWeight: 800 }}>
+                    KI-Analyse: {result.findingsBeforeLlm ?? 0} Regeln + {(result.findingsAfterLlm ?? 0) - (result.findingsBeforeLlm ?? 0)} KI = {result.findingsAfterLlm ?? 0} erkannte Risiken
+                  </div>
+                )}
+                <div style={{ color: "#666", fontWeight: 700 }}>Treffer nach Filter: {filteredFindings.length}</div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr 1fr auto", gap: 10 }}>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Suche (Titel, Detail, ID, Kategorie)..."
+                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
+              />
+
+              <select
+                value={sourceFilter}
+                onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
+                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
+              >
+                <option value="both">Quelle: alle</option>
+                <option value="db">Quelle: nur DB</option>
+                <option value="sys">Quelle: nur SYS</option>
+                <option value="llm">Quelle: nur KI</option>
+              </select>
+
+              <select
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value as SeverityFilter)}
+                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
+              >
+                <option value="all">Risiko: alle</option>
+                <option value="high">Risiko: hoch</option>
+                <option value="medium">Risiko: mittel</option>
+                <option value="low">Risiko: niedrig</option>
+              </select>
+
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
+              >
+                <option value="all">Kategorie: alle</option>
+                {availableFindingCategories.map((c) => (
+                  <option key={c} value={c}>
+                    {catLabel(c)}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
+              >
+                <option value="penalty_desc">Sort: Gewichtung ↓</option>
+                <option value="severity_desc">Sort: Risiko ↓</option>
+                <option value="category_az">Sort: Kategorie A–Z</option>
+              </select>
+
+              <button
+                onClick={resetFilters}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid #ddd",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                Filter zurücksetzen
+              </button>
+            </div>
+
+            <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={top10} onChange={(e) => setTop10(e.target.checked)} />
+                <span style={{ fontWeight: 800 }}>Nur die 10 wichtigsten</span>
+              </label>
+
+              <div style={{ color: "#666", fontWeight: 700 }}>
+                Datenbank: {dbFindings.length} | System: {sysFindings.length}
+                {llmFindings.length > 0 ? ` | KI: ${llmFindings.length}` : ""}
+                {otherFindings.length > 0 ? ` | Sonstige: ${otherFindings.length}` : ""}
+              </div>
+            </div>
+          </div>
+          )}
+
+          {/* Findings: Standard = vereinfachte Darstellung (nur Titel, Kategorie, Risiko), Experte = Filter + getrennte Blöcke mit allen Infos */}
+          {!isExpertMode && (
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>TREFFER</div>
+              <div style={{ color: "#666", fontWeight: 700 }}>{filteredFindings.length} Treffer</div>
+            </div>
+            <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+              {filteredFindings.length === 0 ? (
+                <div style={{ color: "#666" }}>Keine Treffer.</div>
+              ) : (
+                filteredFindings.map((f) => (
+                  <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                    <div style={{ fontWeight: 800, color: "#111", marginBottom: 6 }}>{f.title}</div>
+                    <div style={{ fontSize: 13, color: "#666" }}>Kategorie: {catLabel(f.category)}</div>
+                    <div style={{ fontSize: 13, color: "#666", marginTop: 2 }}>Risiko: {severityLabel(f.severity)}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          )}
+
+          {/* Findings Blocks (nur Expertenmodus) */}
+          {isExpertMode && (
+          <div style={{ display: "grid", gap: 16 }}>
+            {/* DB */}
+            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>Erkannte Risiken (Regel-Datenbank)</div>
+                <div style={{ color: "#666" }}>{dbFindings.length} Treffer</div>
+              </div>
+
+              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                {dbFindings.length === 0 ? (
+                  <div style={{ color: "#666" }}>Keine Treffer aus der Regel-Datenbank.</div>
+                ) : (
+                  dbFindings.map((f) => (
+                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                      <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Trigger-ID:</span> {stripPrefix(f.id)}</div>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Kategorie:</span> {catLabel(f.category)}</div>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Gewichtung:</span> -{f.penalty}</div>
+                        {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Norm:</span> {(f as any).norm}</div>}
+                        {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
+                        {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}><span style={{ color: "#666", fontWeight: 700 }}>Regex:</span> {(f as any).regex}</div>}
+                        {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Keywords:</span> {(f as any).keywords}</div>}
+                        <div style={{ marginTop: 4, fontWeight: 800, color: "#111" }}>{f.title}</div>
+                        {f.detail && <div style={{ color: "#444" }}>{f.detail}</div>}
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* SYS */}
+            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>Erkannte Risiken (Systemprüfung)</div>
+                <div style={{ color: "#666" }}>{sysFindings.length} Treffer</div>
+              </div>
+
+              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                {sysFindings.length === 0 ? (
+                  <div style={{ color: "#666" }}>Keine Treffer aus Systemprüfung.</div>
+                ) : (
+                  sysFindings.map((f) => (
+                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                      <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Trigger-ID:</span> {stripPrefix(f.id)}</div>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Kategorie:</span> {catLabel(f.category)}</div>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Gewichtung:</span> -{f.penalty}</div>
+                        {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Norm:</span> {(f as any).norm}</div>}
+                        {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
+                        {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}><span style={{ color: "#666", fontWeight: 700 }}>Regex:</span> {(f as any).regex}</div>}
+                        {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Keywords:</span> {(f as any).keywords}</div>}
+                        <div style={{ marginTop: 4, fontWeight: 800, color: "#111" }}>{f.title}</div>
+                        {f.detail && <div style={{ color: "#444" }}>{f.detail}</div>}
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {otherFindings.length > 0 && (
+                <div style={{ marginTop: 12, color: "#666", fontSize: 12 }}>
+                  Hinweis: {otherFindings.length} erkannte Risiken ohne Zuordnung (Datenbank/System/KI) im Ergebnis.
+                </div>
+              )}
+            </div>
+
+            {/* LLM */}
+            {llmFindings.length > 0 && (
+              <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>Erkannte Risiken (KI-Analyse)</div>
+                  <div style={{ color: "#666" }}>{llmFindings.length} Treffer</div>
+                </div>
+
+                <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                  {llmFindings.map((f) => (
+                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                      <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Trigger-ID:</span> {stripPrefix(f.id)}</div>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Kategorie:</span> {catLabel(f.category)}</div>
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Gewichtung:</span> -{f.penalty}</div>
+                        {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Norm:</span> {(f as any).norm}</div>}
+                        {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
+                        {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}><span style={{ color: "#666", fontWeight: 700 }}>Regex:</span> {(f as any).regex}</div>}
+                        {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Keywords:</span> {(f as any).keywords}</div>}
+                        <div style={{ marginTop: 4, fontWeight: 800, color: "#111" }}>{f.title}</div>
+                        {f.detail && <div style={{ color: "#444" }}>{f.detail}</div>}
+                        <div><span style={{ color: "#666", fontWeight: 700 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          )}
+          </div>
+          )}
+
+          {/* Tab-Inhalt: Rückfragen */}
+          {resultTab === "rueckfragen" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+          <div
+            style={{
+              padding: "14px 18px",
+              borderRadius: 12,
+              background: "#f0f4f8",
+              border: "1px solid #e2e8f0",
+              marginBottom: 4,
+            }}
+          >
+            <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
+              <strong>Rückfragen</strong> — Die hier generierten Fragen sollten vor Angebotsabgabe mit dem Planer oder Auftraggeber geklärt werden. Sie basieren auf den erkannten Risiken, unklaren Formulierungen und fehlenden Projektdaten im Leistungsverzeichnis. Eine rechtzeitige Klärung reduziert das Risiko von Nachträgen und Streitigkeiten und ermöglicht ein kalkuliertes, abgesichertes Angebot.
+            </p>
+          </div>
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>RÜCKFRAGEN / KLARSTELLUNGEN</div>
+              <button
+                onClick={generateClarificationQuestions}
+                disabled={clarificationQuestionsLoading}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 12,
+                  border: "1px solid #333",
+                  background: clarificationQuestionsLoading ? "#666" : "#111",
+                  color: "#fff",
+                  fontWeight: 800,
+                  cursor: clarificationQuestionsLoading ? "wait" : "pointer",
+                  opacity: clarificationQuestionsLoading ? 0.9 : 1,
+                }}
+              >
+                {clarificationQuestionsLoading ? "Generiere…" : "Rückfragen generieren"}
+              </button>
+            </div>
+
+            {clarificationQuestions && (
+              <>
+                <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
+                  {(["technisch", "vertraglich", "terminlich"] as const).map((group) => {
+                    const items = clarificationQuestions.byGroup?.[group] ?? [];
+                    const labels = { technisch: "Technische Fragen", vertraglich: "Vertragsfragen", terminlich: "Terminliche Fragen" };
+                    if (items.length === 0) return null;
+                    return (
+                      <div key={group} style={{ border: "1px solid #eee", borderRadius: 12, padding: 14, background: "#fafafa" }}>
+                        <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 10 }}>
+                          {labels[group]} ({items.length})
+                        </div>
+                        <div style={{ display: "grid", gap: 10 }}>
+                          {items.map((q: any) => (
+                            <div key={q.id} style={{ border: "1px solid #e5e5e5", borderRadius: 10, padding: 12, background: "#fff" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontWeight: 800, color: "#111" }}>{severityDot(q.severity)} {q.severity}</span>
+                                {q.sourceFindingId && (
+                                  <span style={{ fontSize: 11, color: "#999" }}>← {q.sourceFindingId}</span>
+                                )}
+                              </div>
+                              <div style={{ marginTop: 8, fontWeight: 700, color: "#333" }}>{q.question}</div>
+                              <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>{q.reason}</div>
+                              {q.sourceTextSnippet && (
+                                <div style={{ marginTop: 6, fontSize: 11, color: "#999", fontFamily: "monospace" }}>
+                                  &quot;{q.sourceTextSnippet}&quot;
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {isExpertMode && clarificationQuestions.debug && clarificationQuestions.debug.length > 0 && (
+                  <div style={{ marginTop: 16, border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#f9f9f9" }}>
+                    <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 8 }}>Verknüpfung: Quelle → Rückfrage</div>
+                    <div style={{ display: "grid", gap: 6, fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+                      {clarificationQuestions.debug.map((d, i) => (
+                        <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                          <span style={{ color: "#666", minWidth: 100 }}>{d.source}{d.sourceId ? ` (${d.sourceId})` : ""}</span>
+                          <span style={{ color: "#333" }}>→</span>
+                          <span style={{ color: "#111", flex: 1 }}>{d.question}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {!clarificationQuestions && (
+              <div style={{ marginTop: 12, color: "#666", fontSize: 13, fontWeight: 700 }}>
+                Klicke „Rückfragen generieren", um aus erkannten Risiken, Risiken im Einleitungstext und fehlenden Projektdaten strukturierte Bieterfragen zu erzeugen.
+              </div>
+            )}
+          </div>
+          </div>
+          )}
+
+          {/* Tab-Inhalt: Angebotsklarstellungen */}
+          {resultTab === "angebotsklarstellungen" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+          <div
+            style={{
+              padding: "14px 18px",
+              borderRadius: 12,
+              background: "#f0f4f8",
+              border: "1px solid #e2e8f0",
+              marginBottom: 4,
+            }}
+          >
+            <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
+              <strong>Angebotsklarstellungen</strong> — Diese Textbausteine können im Angebot verwendet werden, um Leistungsgrenzen, Annahmen oder Auslegungen klar zu stellen. Sie leiten sich aus den erkannten Risiken und Ihren Rückfragen ab und helfen, den Angebotsumfang rechtssicher zu definieren. So können Sie Nachforderungen vermeiden, die aus unklaren oder fehlenden Angaben im Leistungsverzeichnis entstehen.
+            </p>
+          </div>
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>ANGEBOTS-ANNAHMEN</div>
+              <button
+                onClick={generateOfferAssumptions}
+                disabled={offerAssumptionsLoading}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 12,
+                  border: "1px solid #333",
+                  background: offerAssumptionsLoading ? "#666" : "#111",
+                  color: "#fff",
+                  fontWeight: 800,
+                  cursor: offerAssumptionsLoading ? "wait" : "pointer",
+                  opacity: offerAssumptionsLoading ? 0.9 : 1,
+                }}
+              >
+                {offerAssumptionsLoading ? "Arbeite…" : "Annahmen generieren"}
+              </button>
+            </div>
+
+            {offerAssumptions && (
+              <>
+                <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
+                  {(["technisch", "vertraglich", "terminlich"] as const).map((group) => {
+                    const items = offerAssumptions.byGroup?.[group] ?? [];
+                    const labels = { technisch: "Technische Annahmen", vertraglich: "Vertragliche Annahmen", terminlich: "Terminliche Annahmen" };
+                    if (items.length === 0) return null;
+                    return (
+                      <div key={group} style={{ border: "1px solid #eee", borderRadius: 12, padding: 14, background: "#fafafa" }}>
+                        <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 10 }}>
+                          {labels[group]} ({items.length})
+                        </div>
+                        <div style={{ display: "grid", gap: 10 }}>
+                          {items.map((a: any) => (
+                            <div key={a.id} style={{ border: "1px solid #e5e5e5", borderRadius: 10, padding: 12, background: "#fff" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontWeight: 800, color: "#111" }}>{severityDot(a.severity)} {a.severity}</span>
+                                <span style={{ fontSize: 11, color: "#999" }}>
+                                  {a.sourceFindingId && <>Risiko: {a.sourceFindingId}</>}
+                                  {a.sourceFindingId && a.sourceQuestionId && " • "}
+                                  {a.sourceQuestionId && <>Frage: {a.sourceQuestionId}</>}
+                                </span>
+                              </div>
+                              <div style={{ marginTop: 8, fontWeight: 700, color: "#333" }}>{a.assumption}</div>
+                              <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>{a.reason}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {isExpertMode && offerAssumptions.debug && offerAssumptions.debug.length > 0 && (
+                  <div style={{ marginTop: 16, border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#f9f9f9" }}>
+                    <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 8 }}>Verknüpfung: Risiko → Frage → Annahme</div>
+                    <div style={{ display: "grid", gap: 6, fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+                      {offerAssumptions.debug.map((d, i) => (
+                        <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                          <span style={{ color: "#666", minWidth: 80 }}>{d.findingId ?? "—"}</span>
+                          <span style={{ color: "#333" }}>→</span>
+                          <span style={{ color: "#666", minWidth: 80 }}>{d.questionId ?? "—"}</span>
+                          <span style={{ color: "#333" }}>→</span>
+                          <span style={{ color: "#111", flex: 1 }}>{d.assumption}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {!offerAssumptions && !offerAssumptionsLoading && (
+              <div style={{ marginTop: 12, color: "#666", fontSize: 13, fontWeight: 700 }}>
+                Klicke „Annahmen generieren", um aus erkannten Risiken, Rückfragen und Projektdaten Angebotsannahmen zu erzeugen. Optional: zuerst Rückfragen generieren für bessere Verknüpfung.
+              </div>
+            )}
+
+            {offerAssumptionsLoading && (
+              <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: "#666", fontWeight: 700 }}>
+                Annahmen werden erzeugt… (KI-Optimierung kann einige Sekunden dauern)
+              </div>
+            )}
+          </div>
+          </div>
+          )}
+
+          {/* Tab-Inhalt: Transparenz */}
+          {resultTab === "transparenz" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+          <div
+            style={{
+              padding: "14px 18px",
+              borderRadius: 12,
+              background: "#f0f4f8",
+              border: "1px solid #e2e8f0",
+              marginBottom: 4,
+            }}
+          >
+            <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
+              <strong>Transparenz</strong> — Hier wird erklärt, wie die Bewertung des Leistungsverzeichnisses berechnet wurde. Der Risiko-Score und die Kategorien basieren auf festen Regeln und optional der KI-Auswertung. So können Sie die Aussagekraft der Analyse besser einordnen und bei Bedarf gezielt nachhaken.
+            </p>
+          </div>
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div style={{ fontSize: 14, color: "#666", fontWeight: 900, marginBottom: 12 }}>Erklärung der Score-Berechnung</div>
+            <p style={{ margin: 0, color: "#333", fontSize: 14, lineHeight: 1.6 }}>
+              So wird Ihr Risiko-Score berechnet: Der Gesamt-Risiko-Score (0–100) ergibt sich aus den fünf Kategorien: Vertrags-/LV-Risiken, Mengen &amp; Massenermittlung,
+              Technische Vollständigkeit, Schnittstellen &amp; Nebenleistungen, Kalkulationsunsicherheit. Je Kategorie werden Abzüge aus
+              erkannten Risiken (Regeln, Systemprüfung, optional KI) angerechnet. Die Ampel bewertet: 0–39 Grün (solide),
+              40–69 Gelb (mittel), 70–100 Rot (hohes Risiko). Größenfaktor und Easing können die Kategorien-Bewertung modulieren.
+            </p>
+          </div>
+          {isExpertMode && result.debug && (
             <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>DEBUG</div>
+                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>Technische Details</div>
                 <div style={{ color: "#666", fontWeight: 700 }}>
                   Config: {String(result.debug.scoringConfigVersion ?? "-")} • Easing: {String(result.debug.easing ?? "-")}
                 </div>
@@ -1644,196 +2368,8 @@ export default function ScorePage() {
               </div>
             </div>
           )}
-
-          {/* Filters */}
-          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>FILTER</div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-                {result.llmMode && (
-                  <div style={{ fontSize: 11, color: "#666", fontWeight: 800 }}>
-                    LLM-Analyse: {result.findingsBeforeLlm ?? 0} System + {(result.findingsAfterLlm ?? 0) - (result.findingsBeforeLlm ?? 0)} LLM = {result.findingsAfterLlm ?? 0} Findings
-                  </div>
-                )}
-                <div style={{ color: "#666", fontWeight: 700 }}>Treffer nach Filter: {filteredFindings.length}</div>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr 1fr auto", gap: 10 }}>
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Suche (Titel, Detail, ID, Kategorie)..."
-                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
-              />
-
-              <select
-                value={sourceFilter}
-                onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
-                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
-              >
-                <option value="both">Quelle: alle</option>
-                <option value="db">Quelle: nur DB</option>
-                <option value="sys">Quelle: nur SYS</option>
-                <option value="llm">Quelle: nur LLM</option>
-              </select>
-
-              <select
-                value={severityFilter}
-                onChange={(e) => setSeverityFilter(e.target.value as SeverityFilter)}
-                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
-              >
-                <option value="all">Severity: alle</option>
-                <option value="high">Severity: high</option>
-                <option value="medium">Severity: medium</option>
-                <option value="low">Severity: low</option>
-              </select>
-
-              <select
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
-              >
-                <option value="all">Kategorie: alle</option>
-                {availableFindingCategories.map((c) => (
-                  <option key={c} value={c}>
-                    {catLabel(c)}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={sortMode}
-                onChange={(e) => setSortMode(e.target.value as SortMode)}
-                style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
-              >
-                <option value="penalty_desc">Sort: Penalty ↓</option>
-                <option value="severity_desc">Sort: Severity ↓</option>
-                <option value="category_az">Sort: Kategorie A–Z</option>
-              </select>
-
-              <button
-                onClick={resetFilters}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #ddd",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontWeight: 800,
-                }}
-              >
-                Reset
-              </button>
-            </div>
-
-            <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-              <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
-                <input type="checkbox" checked={top10} onChange={(e) => setTop10(e.target.checked)} />
-                <span style={{ fontWeight: 800 }}>Nur Top 10</span>
-              </label>
-
-              <div style={{ color: "#666", fontWeight: 700 }}>
-                DB: {dbFindings.length} | SYS: {sysFindings.length}
-                {llmFindings.length > 0 ? ` | LLM: ${llmFindings.length}` : ""}
-                {otherFindings.length > 0 ? ` | Other: ${otherFindings.length}` : ""}
-              </div>
-            </div>
           </div>
-
-          {/* Findings Blocks */}
-          <div style={{ display: "grid", gap: 16 }}>
-            {/* DB */}
-            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>SUPABASE TRIGGER</div>
-                <div style={{ color: "#666" }}>{dbFindings.length} Treffer</div>
-              </div>
-
-              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-                {dbFindings.length === 0 ? (
-                  <div style={{ color: "#666" }}>Keine DB-Trigger nach Filter.</div>
-                ) : (
-                  dbFindings.map((f) => (
-                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                        <div style={{ fontWeight: 900 }}>
-                          {severityDot(f.severity)} {f.title}
-                        </div>
-                        <div style={{ color: "#666", fontWeight: 900 }}>
-                          -{f.penalty} ({catLabel(f.category)})
-                        </div>
-                      </div>
-                      {f.detail && <div style={{ marginTop: 6, color: "#444" }}>{f.detail}</div>}
-                      <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>id: {stripPrefix(f.id)}</div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* SYS */}
-            <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>SYSTEM CHECKS</div>
-                <div style={{ color: "#666" }}>{sysFindings.length} Treffer</div>
-              </div>
-
-              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-                {sysFindings.length === 0 ? (
-                  <div style={{ color: "#666" }}>Keine System-Checks nach Filter.</div>
-                ) : (
-                  sysFindings.map((f) => (
-                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                        <div style={{ fontWeight: 900 }}>
-                          {severityDot(f.severity)} {f.title}
-                        </div>
-                        <div style={{ color: "#666", fontWeight: 900 }}>
-                          -{f.penalty} ({catLabel(f.category)})
-                        </div>
-                      </div>
-                      {f.detail && <div style={{ marginTop: 6, color: "#444" }}>{f.detail}</div>}
-                      <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>id: {stripPrefix(f.id)}</div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {otherFindings.length > 0 && (
-                <div style={{ marginTop: 12, color: "#666", fontSize: 12 }}>
-                  Hinweis: {otherFindings.length} Findings ohne Prefix (DB_/SYS_/LLM_) im Ergebnis.
-                </div>
-              )}
-            </div>
-
-            {/* LLM */}
-            {llmFindings.length > 0 && (
-              <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>LLM-ANALYSE</div>
-                  <div style={{ color: "#666" }}>{llmFindings.length} Treffer</div>
-                </div>
-
-                <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-                  {llmFindings.map((f) => (
-                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                        <div style={{ fontWeight: 900 }}>
-                          {severityDot(f.severity)} {f.title}
-                        </div>
-                        <div style={{ color: "#666", fontWeight: 900 }}>
-                          -{f.penalty} ({catLabel(f.category)})
-                        </div>
-                      </div>
-                      {f.detail && <div style={{ marginTop: 6, color: "#444" }}>{f.detail}</div>}
-                      <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>id: {stripPrefix(f.id)}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          )}
         </div>
       )}
     </div>
