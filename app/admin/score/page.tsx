@@ -126,6 +126,9 @@ type Finding = {
 type DebugBlock = {
   detectedDisciplines?: string[];
   triggersUsed?: number;
+  llmMode?: boolean;
+  findingsBeforeLlm?: number;
+  findingsAfterLlm?: number;
   perCategorySum?: Record<string, number>;
   sizeF?: number;
   scoringConfigVersion?: number | string;
@@ -138,6 +141,9 @@ type ScoreResult = {
   perCategory: Record<string, number>; // Keys
   findingsSorted: Finding[];
   debug?: DebugBlock;
+  llmMode?: boolean;
+  findingsBeforeLlm?: number;
+  findingsAfterLlm?: number;
 };
 
 function levelMeta(level?: string) {
@@ -167,8 +173,11 @@ function isDbFinding(f: Finding) {
 function isSysFinding(f: Finding) {
   return (f.id ?? "").startsWith("SYS_");
 }
+function isLlmFinding(f: Finding) {
+  return (f.id ?? "").startsWith("LLM_");
+}
 function stripPrefix(id: string) {
-  return id.replace(/^DB_/, "").replace(/^SYS_/, "");
+  return id.replace(/^DB_/, "").replace(/^SYS_/, "").replace(/^LLM_/, "");
 }
 
 function fmtKB(bytes: number) {
@@ -179,7 +188,7 @@ function fmtKB(bytes: number) {
 
 const MAX_FILE_BYTES = 10_000_000; // 10 MB MVP-Limit
 
-type SourceFilter = "both" | "db" | "sys";
+type SourceFilter = "both" | "db" | "sys" | "llm";
 type SeverityFilter = "all" | "high" | "medium" | "low";
 type SortMode = "penalty_desc" | "severity_desc" | "category_az";
 
@@ -196,6 +205,20 @@ type RiskClause = {
   riskLevel: "low" | "medium" | "high";
   text: string;
   interpretation: string;
+};
+
+type ChangeOrderOpp = {
+  id: string;
+  cluster: string;
+  title: string;
+  description: string;
+  potential: string;
+  riskLevel?: string;
+  assertiveness?: string;
+  reason: string;
+  sourceFindingIds?: string[];
+  sourceTextSnippets?: string[];
+  sourceType?: string[];
 };
 
 function riskIcon(level: "low" | "medium" | "high") {
@@ -254,17 +277,28 @@ function extractVortextUI(full: string) {
 
 // ===== KEY FACT LABELS (optional nice names) =====
 const KEYFACT_LABELS: Record<string, string> = {
+  // Projekt & Beteiligte
+  bauvorhaben: "Bauvorhaben / Objekt",
+  ort: "Ort / Standort",
+  gewerk: "Gewerk",
+  bauherr_ag: "Bauherr / Auftraggeber",
+  planer: "Planer / Architekt",
+
   // Termine/Fristen
   baubeginn: "Baubeginn",
   bauzeit: "Bauzeit / Dauer",
   fertigstellung: "Fertigstellung / Abnahme",
   ausfuehrungsfrist: "Ausführungsfrist / Terminplan",
+  ausfuehrungszeit: "Ausführungszeit",
   fristAngebot: "Angebotsfrist",
   bindefrist: "Bindefrist",
+  submission_einreichung: "Submission / Einreichung",
 
   // Vertrag
+  vertragsgrundlagen: "Vertragsgrundlagen",
   vertragsstrafe: "Vertragsstrafe / Pönale",
   gewaerhleistung: "Gewährleistung / Mängelhaftung",
+  wartung_instandhaltung: "Wartung / Instandhaltung",
   vob_bgb: "VOB/B / BGB",
   rangfolge: "Rangfolge Vertragsunterlagen",
 
@@ -283,11 +317,18 @@ function prettyKey(k: string) {
 
 // ===== UI KeyFacts Cleaning (Fix) =====
 const KEYFACT_HARD_MAX_VALUE = 260;
+const VALID_SHORT_KEYFACTS = new Set(["vob", "bgb", "vob/b", "vob b", "vob/c", "vob c"]);
 
 function normKeyFactValue(v: any) {
   let s = (v ?? "").toString();
+  if (/<\/?[^>]+>/.test(s)) s = s.replace(/<\/?[^>]+>/g, " ");
   s = s.replace(/\s+/g, " ").trim();
   if (!s) return "";
+  // Leading punctuation (z. B. ":6 Wochen" -> "6 Wochen", ", MÄNGELANSPRÜCHE" -> "MÄNGELANSPRÜCHE")
+  s = s.replace(/^[\s.,;:\-–—]+/, "");
+  // Trailing Füllwörter und Satzzeichen
+  s = s.replace(/\s*(,?\s*(und|bzw\.?|sowie|oder)\s*)$/i, "").trim();
+  s = s.replace(/\s*[,;.:\-–—]+\s*$/, "").trim();
   if (s.length > KEYFACT_HARD_MAX_VALUE) s = s.slice(0, KEYFACT_HARD_MAX_VALUE) + "…";
   return s;
 }
@@ -295,20 +336,24 @@ function normKeyFactValue(v: any) {
 function isGarbageKeyFactValue(v: string) {
   const s = (v ?? "").trim();
   if (!s) return true;
-  if (s.length < 5) return true;
+  if (s.length <= 8 && VALID_SHORT_KEYFACTS.has(s.toLowerCase().replace(/\s+/g, " "))) return false;
+  if (s.length < 4) return true;
 
-  // reine Satzzeichen / Tokens
   if (/^[\W_]+$/.test(s)) return true;
-
-  // nur Zahl / Mini-Fragmente (führt bei dir zu ":11", ":30", ", d" etc.)
   if (/^[:;,\.\-–—\s]*\d{1,3}\s*$/.test(s)) return true;
   if (/^,\s*[a-z]$/i.test(s)) return true;
-  if (/^en:$/i.test(s)) return true;
-  if (/^sfrist$/i.test(s)) return true;
+  if (/^(en:|und abnahme:|sfrist|lich|örtlich)$/i.test(s)) return true;
 
-  // Kein echtes Wort drin (mind. 3 Buchstaben)
+  // Prozeduraler Text statt Name (z. B. QNG-Anforderung in Bauherr-Feld)
+  if (/zur\s+Einhaltung\s+der\s+QNG|gemäß\s+beiliegendem\s+QNG-Anforderungskatalog/i.test(s)) return true;
+
+  // offensichtlich abgeschnittene Phrasen (enden mit Artikel/Präposition ohne Fortsetzung)
+  if (/\s(den|der|die|dem|das|sonstige|im)\s*$/i.test(s) && s.length < 80) return true;
+  if (/\s(oder|und)\s*$/i.test(s) && s.length < 50) return true;
+  // einzelne Verben ohne Kontext (z. B. "einzubehalten")
+  if (/^[a-zA-ZÄÖÜäöüß]+$/.test(s) && s.length >= 10 && /(halten|behalten|einhalten)$/i.test(s)) return true;
+
   if (!/[a-zA-ZÄÖÜäöüß]{3,}/.test(s)) return true;
-
   return false;
 }
 
@@ -355,6 +400,46 @@ export default function ScorePage() {
   // optional: falls Route später confidence liefert
   const [keyFactConfidence, setKeyFactConfidence] = useState<Record<string, number>>({});
 
+  // ===== RÜCKFRAGEN (CLARIFICATION QUESTIONS) =====
+  const [clarificationQuestions, setClarificationQuestions] = useState<{
+    questions: Array<{
+      id: string;
+      category: string;
+      severity: string;
+      question: string;
+      reason: string;
+      sourceFindingId?: string;
+      sourceTextSnippet?: string;
+    }>;
+    byGroup: Record<string, Array<unknown>>;
+    debug: Array<{ source: string; sourceId?: string; questionId: string; question: string }>;
+  } | null>(null);
+
+  // ===== NACHTRAGSANALYSE =====
+  const [changeOrderLoading, setChangeOrderLoading] = useState(false);
+  const [changeOrderUseLlm, setChangeOrderUseLlm] = useState(false);
+  const [changeOrderAnalysis, setChangeOrderAnalysis] = useState<{
+    opportunities: ChangeOrderOpp[];
+    byCluster: Record<string, ChangeOrderOpp[]>;
+    debug?: { ruleBasedCount: number; llmCount: number; deduplicatedCount: number };
+  } | null>(null);
+
+  // ===== ANGEBOTS-ANNAHMEN =====
+  const [offerAssumptionsLoading, setOfferAssumptionsLoading] = useState(false);
+  const [offerAssumptions, setOfferAssumptions] = useState<{
+    assumptions: Array<{
+      id: string;
+      category: string;
+      severity: string;
+      assumption: string;
+      reason: string;
+      sourceFindingId?: string;
+      sourceQuestionId?: string;
+    }>;
+    byGroup: Record<string, Array<unknown>>;
+    debug: Array<{ findingId?: string; questionId?: string; assumptionId: string; assumption: string }>;
+  } | null>(null);
+
   // Filters
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("both");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
@@ -362,6 +447,7 @@ export default function ScorePage() {
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("penalty_desc");
   const [top10, setTop10] = useState(false);
+  const [useLlmRelevance, setUseLlmRelevance] = useState(false);
 
   const meta = levelMeta(result?.level);
   const totalAmp = traffic(clamp0_100(result?.total ?? 0));
@@ -372,6 +458,10 @@ export default function ScorePage() {
     setKeyFacts({});
     setKeyFactConfidence({});
     setVortextLoading(false);
+    setClarificationQuestions(null);
+    setOfferAssumptions(null);
+    setChangeOrderAnalysis(null);
+    setOfferAssumptionsLoading(false);
   };
 
   const resetGaebPreview = () => {
@@ -387,7 +477,94 @@ export default function ScorePage() {
     setSplitLoading(false);
   };
 
-  const runGaebPreview = async (file: File) => {
+  const generateClarificationQuestions = async () => {
+    const findings = result?.findingsSorted ?? [];
+    if (findings.length === 0 && riskClauses.length === 0 && Object.keys(keyFacts).length === 0) return;
+    try {
+      const res = await fetch("/api/clarification-questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          findings,
+          riskClauses,
+          keyFacts,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || data?.error || "Rückfragen fehlgeschlagen");
+      setClarificationQuestions(data);
+    } catch (e: unknown) {
+      console.error("Clarification questions:", e);
+      setClarificationQuestions(null);
+    }
+  };
+
+  const generateChangeOrderAnalysis = async () => {
+    const findings = result?.findingsSorted ?? [];
+    if (findings.length === 0 && riskClauses.length === 0 && Object.keys(keyFacts).length === 0) return;
+    setChangeOrderLoading(true);
+    setChangeOrderAnalysis(null);
+    try {
+      const structureVortext = gaebPreview?.structure
+        ? gaebPreview.structure.raw.full.slice(0, gaebPreview.structure.raw.vortextEnd)
+        : "";
+      const structurePositions = gaebPreview?.structure?.positionen?.raw ?? "";
+      const vortextForCo = (split?.vortext ?? structureVortext ?? extractVortextUI(lvText)).trim();
+      const positionsForCo = (split?.positions ?? structurePositions ?? "").trim();
+
+      const res = await fetch("/api/change-order-analysis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          findings,
+          riskClauses,
+          keyFacts,
+          vortext: vortextForCo,
+          lvPositions: positionsForCo,
+          useLlm: changeOrderUseLlm,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || data?.error || "Nachtragsanalyse fehlgeschlagen");
+      setChangeOrderAnalysis(data);
+    } catch (e: unknown) {
+      console.error("Change order analysis:", e);
+      setChangeOrderAnalysis(null);
+    } finally {
+      setChangeOrderLoading(false);
+    }
+  };
+
+  const generateOfferAssumptions = async () => {
+    const findings = result?.findingsSorted ?? [];
+    const questions = clarificationQuestions?.questions ?? [];
+    if (findings.length === 0 && riskClauses.length === 0 && Object.keys(keyFacts).length === 0) return;
+    setOfferAssumptionsLoading(true);
+    setOfferAssumptions(null);
+    try {
+      const res = await fetch("/api/offer-assumptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          findings,
+          riskClauses,
+          keyFacts,
+          clarificationQuestions: questions,
+          useLlm: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || data?.error || "Annahmen fehlgeschlagen");
+      setOfferAssumptions(data);
+    } catch (e: unknown) {
+      console.error("Offer assumptions:", e);
+      setOfferAssumptions(null);
+    } finally {
+      setOfferAssumptionsLoading(false);
+    }
+  };
+
+  const runGaebPreview = async (file: File): Promise<any | null> => {
     resetGaebPreview();
     setGaebPreviewLoading(true);
     try {
@@ -397,15 +574,17 @@ export default function ScorePage() {
       const j = await r.json();
       if (!r.ok) throw new Error(j?.message || j?.error || "gaeb-preview failed");
       setGaebPreview(j);
+      return j;
     } catch (e: any) {
       setGaebPreviewError(e?.message || "gaeb-preview failed");
       setGaebPreview(null);
+      return null;
     } finally {
       setGaebPreviewLoading(false);
     }
   };
 
-  const runGaebSplitLLM = async (file: File) => {
+  const runGaebSplitLLM = async (file: File): Promise<SplitResult | null> => {
     resetSplit();
     setSplitLoading(true);
     try {
@@ -420,9 +599,11 @@ export default function ScorePage() {
         meta: j?.meta ?? j?.debug ?? null,
       };
       setSplit(s);
+      return s;
     } catch (e: any) {
       setSplitError(e?.message || "gaeb-split-llm failed");
       setSplit(null);
+      return null;
     } finally {
       setSplitLoading(false);
     }
@@ -470,7 +651,10 @@ export default function ScorePage() {
     }
   };
 
-  const analyze = async (textOverride?: string) => {
+  const analyze = async (
+    textOverride?: string,
+    options?: { gaebPreviewData?: any; splitData?: SplitResult | null }
+  ) => {
     const textToUse = (textOverride ?? lvText).trim();
     if (!textToUse) return;
 
@@ -484,11 +668,20 @@ export default function ScorePage() {
         typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
       const apiUrl = debug ? "/api/score?debug=1" : "/api/score";
 
-      // Wenn wir einen Split haben: score sauber getrennt schicken
-      const payload: any = { lvText: textToUse };
-      if (split?.vortext || split?.positions) {
-        payload.vortext = split?.vortext ?? "";
-        payload.positions = split?.positions ?? "";
+      // Datenquelle: Override (frisch aus loadFile) oder State
+      const preview = options?.gaebPreviewData ?? gaebPreview;
+      const splitUsed = options?.splitData ?? split;
+
+      // Score-Payload: Split-LLM bevorzugt, sonst GaebStructure (Preview) als Fallback
+      const structureVortext = preview?.structure
+        ? preview.structure.raw.full.slice(0, preview.structure.raw.vortextEnd)
+        : "";
+      const structurePositions = preview?.structure ? preview.structure.positionen.raw : "";
+
+      const payload: any = { lvText: textToUse, useLlmRelevance };
+      if (splitUsed?.vortext || splitUsed?.positions || structureVortext || structurePositions) {
+        payload.vortext = (splitUsed?.vortext ?? structureVortext ?? "").trim();
+        payload.positions = (splitUsed?.positions ?? structurePositions ?? "").trim();
       }
 
       const res = await fetch(apiUrl, {
@@ -504,13 +697,18 @@ export default function ScorePage() {
 
       const data = (await res.json()) as ScoreResult;
       setResult(data);
+      setClarificationQuestions(null);
+      setOfferAssumptions(null);
 
       const cats = new Set((data.findingsSorted ?? []).map((f) => f.category));
       if (categoryFilter !== "all" && !cats.has(categoryFilter)) setCategoryFilter("all");
 
       // ===== VORTEXT ANALYSE =====
-      // Priorität: Split-LLM Vortext -> sonst UI-Fallback
-      const vortextForRisk = (split?.vortext ?? "").trim() || extractVortextUI(textToUse);
+      // Priorität: Split-LLM -> GaebStructure (Preview) -> UI-Fallback
+      const vortextForRisk =
+        (splitUsed?.vortext ?? "").trim() ||
+        structureVortext.trim() ||
+        extractVortextUI(textToUse);
       if (vortextForRisk.trim().length > 0) {
         await analyzeVortextLLM(vortextForRisk);
       } else {
@@ -540,17 +738,17 @@ export default function ScorePage() {
     }
 
     // 1) Preview (Debug)
-    await runGaebPreview(file);
+    const previewData = await runGaebPreview(file);
 
     // 2) LLM Split (Echte Trennung, stabiler als Guess)
-    await runGaebSplitLLM(file);
+    const splitData = await runGaebSplitLLM(file);
 
     // 3) Originaltext in Textarea (Debug/Transparenz)
     const text = await file.text();
     setFileMeta({ name: file.name, size: file.size });
     setLvText(text);
 
-    if (autoAnalyze) await analyze(text);
+    if (autoAnalyze) await analyze(text, { gaebPreviewData: previewData ?? undefined, splitData: splitData ?? undefined });
   };
 
   const onPickFile = async (file: File | null) => {
@@ -589,6 +787,7 @@ export default function ScorePage() {
     let list = all.filter((f) => {
       if (sourceFilter === "db" && !isDbFinding(f)) return false;
       if (sourceFilter === "sys" && !isSysFinding(f)) return false;
+      if (sourceFilter === "llm" && !isLlmFinding(f)) return false;
       if (severityFilter !== "all" && f.severity !== severityFilter) return false;
       if (categoryFilter !== "all" && f.category !== categoryFilter) return false;
 
@@ -612,8 +811,9 @@ export default function ScorePage() {
 
   const dbFindings = useMemo(() => filteredFindings.filter(isDbFinding), [filteredFindings]);
   const sysFindings = useMemo(() => filteredFindings.filter(isSysFinding), [filteredFindings]);
+  const llmFindings = useMemo(() => filteredFindings.filter(isLlmFinding), [filteredFindings]);
   const otherFindings = useMemo(
-    () => filteredFindings.filter((f) => !isDbFinding(f) && !isSysFinding(f)),
+    () => filteredFindings.filter((f) => !isDbFinding(f) && !isSysFinding(f) && !isLlmFinding(f)),
     [filteredFindings]
   );
 
@@ -663,8 +863,18 @@ export default function ScorePage() {
     return gaebPreview.cleanPreview ?? "";
   }, [gaebPreview, gaebTab, split]);
 
-  const effectiveVortextLen = (split?.vortext ?? "").trim().length;
-  const effectivePositionsLen = (split?.positions ?? "").trim().length;
+  const structureVortext = useMemo(() => {
+    const s = gaebPreview?.structure;
+    if (!s?.raw) return "";
+    return s.raw.full.slice(0, s.raw.vortextEnd);
+  }, [gaebPreview?.structure]);
+
+  const structurePositions = useMemo(() => {
+    return gaebPreview?.structure?.positionen?.raw ?? "";
+  }, [gaebPreview?.structure]);
+
+  const effectiveVortextLen = (split?.vortext ?? structureVortext ?? "").trim().length;
+  const effectivePositionsLen = (split?.positions ?? structurePositions ?? "").trim().length;
 
   return (
     <div style={{ padding: 28, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" }}>
@@ -834,6 +1044,15 @@ export default function ScorePage() {
             Reset
           </button>
 
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+            color: "#666", fontWeight: 600 }}>
+            <input
+              type="checkbox"
+              checked={useLlmRelevance}
+              onChange={(e) => setUseLlmRelevance(e.target.checked)}
+            />
+            LLM-Relevanzfilter
+          </label>
           <div style={{ color: "#666", display: "flex", alignItems: "center" }}>Limit: {fmtKB(MAX_FILE_BYTES)}</div>
         </div>
 
@@ -925,10 +1144,18 @@ export default function ScorePage() {
                 <>
                   Split(LLM): vortext {effectiveVortextLen} chars • positions {effectivePositionsLen} chars
                 </>
+              ) : gaebPreview?.structure ? (
+                <>
+                  Struktur: {gaebPreview.structure.raw.cutMethod} • vortext {effectiveVortextLen} chars • positionen{" "}
+                  {effectivePositionsLen} chars
+                  {gaebPreview.structure.vorbemerkungen ? (
+                    <> • vorbemerkungen {gaebPreview.structure.vorbemerkungen.length} chars</>
+                  ) : null}
+                </>
               ) : (
                 <>
-                  Debug: raw {gaebPreview?.debug?.rawChars} chars • preview {gaebPreview?.debug?.previewChars} • vortext{" "}
-                  {gaebPreview?.debug?.vortextChars}
+                  Debug: preview {gaebPreview?.debug?.previewChars ?? 0} chars • vortext{" "}
+                  {gaebPreview?.debug?.vortextFullChars ?? 0} • positionen {gaebPreview?.debug?.positionsFullChars ?? 0}
                 </>
               )}
             </div>
@@ -1089,6 +1316,282 @@ export default function ScorePage() {
             </div>
           </div>
 
+          {/* ===== RÜCKFRAGEN / BIETERFRAGEN ===== */}
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>RÜCKFRAGEN / KLARSTELLUNGEN</div>
+              <button
+                onClick={generateClarificationQuestions}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 12,
+                  border: "1px solid #333",
+                  background: "#111",
+                  color: "#fff",
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >
+                Rückfragen generieren
+              </button>
+            </div>
+
+            {clarificationQuestions && (
+              <>
+                <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
+                  {(["technisch", "vertraglich", "terminlich"] as const).map((group) => {
+                    const items = clarificationQuestions.byGroup?.[group] ?? [];
+                    const labels = { technisch: "Technische Fragen", vertraglich: "Vertragsfragen", terminlich: "Terminliche Fragen" };
+                    if (items.length === 0) return null;
+                    return (
+                      <div key={group} style={{ border: "1px solid #eee", borderRadius: 12, padding: 14, background: "#fafafa" }}>
+                        <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 10 }}>
+                          {labels[group]} ({items.length})
+                        </div>
+                        <div style={{ display: "grid", gap: 10 }}>
+                          {items.map((q: any) => (
+                            <div key={q.id} style={{ border: "1px solid #e5e5e5", borderRadius: 10, padding: 12, background: "#fff" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontWeight: 800, color: "#111" }}>{severityDot(q.severity)} {q.severity}</span>
+                                {q.sourceFindingId && (
+                                  <span style={{ fontSize: 11, color: "#999" }}>← {q.sourceFindingId}</span>
+                                )}
+                              </div>
+                              <div style={{ marginTop: 8, fontWeight: 700, color: "#333" }}>{q.question}</div>
+                              <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>{q.reason}</div>
+                              {q.sourceTextSnippet && (
+                                <div style={{ marginTop: 6, fontSize: 11, color: "#999", fontFamily: "monospace" }}>
+                                  &quot;{q.sourceTextSnippet}&quot;
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {clarificationQuestions.debug && clarificationQuestions.debug.length > 0 && (
+                  <div style={{ marginTop: 16, border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#f9f9f9" }}>
+                    <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 8 }}>Debug: Quelle → Rückfrage</div>
+                    <div style={{ display: "grid", gap: 6, fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+                      {clarificationQuestions.debug.map((d, i) => (
+                        <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                          <span style={{ color: "#666", minWidth: 100 }}>{d.source}{d.sourceId ? ` (${d.sourceId})` : ""}</span>
+                          <span style={{ color: "#333" }}>→</span>
+                          <span style={{ color: "#111", flex: 1 }}>{d.question}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {!clarificationQuestions && (
+              <div style={{ marginTop: 12, color: "#666", fontSize: 13, fontWeight: 700 }}>
+                Klicke „Rückfragen generieren", um aus Findings, Vortext-Risiken und fehlenden KeyFacts strukturierte Bieterfragen zu erzeugen.
+              </div>
+            )}
+          </div>
+
+          {/* ===== ANGEBOTS-ANNAHMEN ===== */}
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>ANGEBOTS-ANNAHMEN</div>
+              <button
+                onClick={generateOfferAssumptions}
+                disabled={offerAssumptionsLoading}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 12,
+                  border: "1px solid #333",
+                  background: offerAssumptionsLoading ? "#666" : "#111",
+                  color: "#fff",
+                  fontWeight: 800,
+                  cursor: offerAssumptionsLoading ? "wait" : "pointer",
+                  opacity: offerAssumptionsLoading ? 0.9 : 1,
+                }}
+              >
+                {offerAssumptionsLoading ? "Arbeite…" : "Annahmen generieren"}
+              </button>
+            </div>
+
+            {offerAssumptions && (
+              <>
+                <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
+                  {(["technisch", "vertraglich", "terminlich"] as const).map((group) => {
+                    const items = offerAssumptions.byGroup?.[group] ?? [];
+                    const labels = { technisch: "Technische Annahmen", vertraglich: "Vertragliche Annahmen", terminlich: "Terminliche Annahmen" };
+                    if (items.length === 0) return null;
+                    return (
+                      <div key={group} style={{ border: "1px solid #eee", borderRadius: 12, padding: 14, background: "#fafafa" }}>
+                        <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 10 }}>
+                          {labels[group]} ({items.length})
+                        </div>
+                        <div style={{ display: "grid", gap: 10 }}>
+                          {items.map((a: any) => (
+                            <div key={a.id} style={{ border: "1px solid #e5e5e5", borderRadius: 10, padding: 12, background: "#fff" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontWeight: 800, color: "#111" }}>{severityDot(a.severity)} {a.severity}</span>
+                                <span style={{ fontSize: 11, color: "#999" }}>
+                                  {a.sourceFindingId && <>Finding: {a.sourceFindingId}</>}
+                                  {a.sourceFindingId && a.sourceQuestionId && " • "}
+                                  {a.sourceQuestionId && <>Frage: {a.sourceQuestionId}</>}
+                                </span>
+                              </div>
+                              <div style={{ marginTop: 8, fontWeight: 700, color: "#333" }}>{a.assumption}</div>
+                              <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>{a.reason}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {offerAssumptions.debug && offerAssumptions.debug.length > 0 && (
+                  <div style={{ marginTop: 16, border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#f9f9f9" }}>
+                    <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 8 }}>Debug: Finding → Frage → Annahme</div>
+                    <div style={{ display: "grid", gap: 6, fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+                      {offerAssumptions.debug.map((d, i) => (
+                        <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                          <span style={{ color: "#666", minWidth: 80 }}>{d.findingId ?? "—"}</span>
+                          <span style={{ color: "#333" }}>→</span>
+                          <span style={{ color: "#666", minWidth: 80 }}>{d.questionId ?? "—"}</span>
+                          <span style={{ color: "#333" }}>→</span>
+                          <span style={{ color: "#111", flex: 1 }}>{d.assumption}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {!offerAssumptions && !offerAssumptionsLoading && (
+              <div style={{ marginTop: 12, color: "#666", fontSize: 13, fontWeight: 700 }}>
+                Klicke „Annahmen generieren", um aus Findings, Rückfragen und KeyFacts Angebotsannahmen zu erzeugen. Optional: zuerst Rückfragen generieren für bessere Verknüpfung.
+              </div>
+            )}
+
+            {offerAssumptionsLoading && (
+              <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: "#666", fontWeight: 700 }}>
+                Annahmen werden erzeugt… (LLM-Optimierung kann einige Sekunden dauern)
+              </div>
+            )}
+          </div>
+
+          {/* ===== NACHTRAGSANALYSE ===== */}
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>NACHTRAGSANALYSE</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 700 }}>
+                  <input
+                    type="checkbox"
+                    checked={changeOrderUseLlm}
+                    onChange={(e) => setChangeOrderUseLlm(e.target.checked)}
+                  />
+                  LLM ergänzen
+                </label>
+                <button
+                  onClick={generateChangeOrderAnalysis}
+                  disabled={changeOrderLoading}
+                  style={{
+                    padding: "10px 16px",
+                    borderRadius: 12,
+                    border: "1px solid #333",
+                    background: changeOrderLoading ? "#666" : "#111",
+                    color: "#fff",
+                    fontWeight: 800,
+                    cursor: changeOrderLoading ? "wait" : "pointer",
+                    opacity: changeOrderLoading ? 0.9 : 1,
+                  }}
+                >
+                  {changeOrderLoading ? "Analysiere…" : "Nachtragspotenziale ermitteln"}
+                </button>
+              </div>
+            </div>
+
+            {changeOrderAnalysis && (
+              <>
+                <div style={{ marginTop: 14, color: "#666", fontSize: 12, fontWeight: 700 }}>
+                  {changeOrderAnalysis.debug && (
+                    <>Regelbasiert: {changeOrderAnalysis.debug.ruleBasedCount} • LLM: {changeOrderAnalysis.debug.llmCount} • Nach Dedup: {changeOrderAnalysis.debug.deduplicatedCount}</>
+                  )}
+                </div>
+
+                {changeOrderAnalysis.opportunities.length === 0 ? (
+                  <div style={{ marginTop: 14, color: "#666", fontWeight: 700 }}>Keine Nachtragspotenziale erkannt.</div>
+                ) : (
+                <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
+                  {(["leistungsaenderung", "leistungsmehrung", "schnittstelle", "erschwernis"] as const).map((cluster) => {
+                    const items = changeOrderAnalysis.byCluster?.[cluster] ?? [];
+                    const labels: Record<string, string> = {
+                      leistungsaenderung: "Leistungsänderung",
+                      leistungsmehrung: "Leistungsmehrung",
+                      schnittstelle: "Schnittstelle",
+                      erschwernis: "Erschwernis",
+                    };
+                    if (items.length === 0) return null;
+                    return (
+                      <div key={cluster} style={{ border: "1px solid #eee", borderRadius: 12, padding: 14, background: "#fafafa" }}>
+                        <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 10 }}>
+                          {labels[cluster]} ({items.length})
+                        </div>
+                        <div style={{ display: "grid", gap: 10 }}>
+                          {items.map((o) => (
+                            <div key={o.id} style={{ border: "1px solid #e5e5e5", borderRadius: 10, padding: 12, background: "#fff" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                <span style={{ fontWeight: 800, color: "#111" }}>{o.title}</span>
+                                <div style={{ display: "flex", gap: 8, fontSize: 11, fontWeight: 700 }}>
+                                  <span style={{ color: o.potential === "high" ? "#b00020" : o.potential === "medium" ? "#a36b00" : "#666" }}>
+                                    Potential: {o.potential}
+                                  </span>
+                                  {o.riskLevel && <span style={{ color: "#666" }}>Risiko: {o.riskLevel}</span>}
+                                  {o.assertiveness && <span style={{ color: "#666" }}>Assertiv: {o.assertiveness}</span>}
+                                </div>
+                              </div>
+                              <div style={{ marginTop: 8, fontSize: 13, color: "#333" }}>{o.reason}</div>
+                              {o.sourceTextSnippets && o.sourceTextSnippets.length > 0 && (
+                                <div style={{ marginTop: 8, fontSize: 11, color: "#999", fontFamily: "ui-monospace, monospace" }}>
+                                  {o.sourceTextSnippets.slice(0, 2).map((s, i) => (
+                                    <div key={i} style={{ marginTop: 4 }}>&quot;{s.slice(0, 100)}{s.length > 100 ? "…" : ""}&quot;</div>
+                                  ))}
+                                </div>
+                              )}
+                              {o.sourceFindingIds && o.sourceFindingIds.length > 0 && (
+                                <div style={{ marginTop: 6, fontSize: 11, color: "#777" }}>
+                                  Quellen: {o.sourceFindingIds.join(", ")}
+                                  {o.sourceType && o.sourceType.length > 0 && ` [${o.sourceType.join(", ")}]`}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                )}
+              </>
+            )}
+
+            {!changeOrderAnalysis && !changeOrderLoading && (
+              <div style={{ marginTop: 12, color: "#666", fontSize: 13, fontWeight: 700 }}>
+                Hybrid: Regelbasierte Baseline aus Findings, Vortext-Risiken und KeyFacts. Optional LLM für komplexe Nachtragshinweise. Klicke „Nachtragspotenziale ermitteln".
+              </div>
+            )}
+
+            {changeOrderLoading && (
+              <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: "#666", fontWeight: 700 }}>
+                Nachtragsanalyse läuft…
+              </div>
+            )}
+          </div>
+
           {/* ✅ Debug Card */}
           {result.debug && (
             <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
@@ -1109,6 +1612,16 @@ export default function ScorePage() {
                 <div style={{ fontWeight: 800 }}>
                   triggersUsed: <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.triggersUsed ?? "-"}</span>
                 </div>
+                {result.debug.llmMode && (
+                  <>
+                    <div style={{ fontWeight: 800 }}>
+                      findingsBeforeLlm: <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.findingsBeforeLlm ?? "-"}</span>
+                    </div>
+                    <div style={{ fontWeight: 800 }}>
+                      findingsAfterLlm: <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.findingsAfterLlm ?? "-"}</span>
+                    </div>
+                  </>
+                )}
                 <div style={{ fontWeight: 800 }}>
                   sizeF: <span style={{ fontWeight: 700, color: "#111" }}>{result.debug.sizeF ?? "-"}</span>
                 </div>
@@ -1136,7 +1649,14 @@ export default function ScorePage() {
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>FILTER</div>
-              <div style={{ color: "#666", fontWeight: 700 }}>Treffer nach Filter: {filteredFindings.length}</div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                {result.llmMode && (
+                  <div style={{ fontSize: 11, color: "#666", fontWeight: 800 }}>
+                    LLM-Analyse: {result.findingsBeforeLlm ?? 0} System + {(result.findingsAfterLlm ?? 0) - (result.findingsBeforeLlm ?? 0)} LLM = {result.findingsAfterLlm ?? 0} Findings
+                  </div>
+                )}
+                <div style={{ color: "#666", fontWeight: 700 }}>Treffer nach Filter: {filteredFindings.length}</div>
+              </div>
             </div>
 
             <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr 1fr auto", gap: 10 }}>
@@ -1152,9 +1672,10 @@ export default function ScorePage() {
                 onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
                 style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", width: "100%" }}
               >
-                <option value="both">Quelle: DB + SYS</option>
+                <option value="both">Quelle: alle</option>
                 <option value="db">Quelle: nur DB</option>
                 <option value="sys">Quelle: nur SYS</option>
+                <option value="llm">Quelle: nur LLM</option>
               </select>
 
               <select
@@ -1214,6 +1735,7 @@ export default function ScorePage() {
 
               <div style={{ color: "#666", fontWeight: 700 }}>
                 DB: {dbFindings.length} | SYS: {sysFindings.length}
+                {llmFindings.length > 0 ? ` | LLM: ${llmFindings.length}` : ""}
                 {otherFindings.length > 0 ? ` | Other: ${otherFindings.length}` : ""}
               </div>
             </div>
@@ -1280,10 +1802,37 @@ export default function ScorePage() {
 
               {otherFindings.length > 0 && (
                 <div style={{ marginTop: 12, color: "#666", fontSize: 12 }}>
-                  Hinweis: {otherFindings.length} Findings ohne Prefix (DB_/SYS_) im Ergebnis.
+                  Hinweis: {otherFindings.length} Findings ohne Prefix (DB_/SYS_/LLM_) im Ergebnis.
                 </div>
               )}
             </div>
+
+            {/* LLM */}
+            {llmFindings.length > 0 && (
+              <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>LLM-ANALYSE</div>
+                  <div style={{ color: "#666" }}>{llmFindings.length} Treffer</div>
+                </div>
+
+                <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                  {llmFindings.map((f) => (
+                    <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                        <div style={{ fontWeight: 900 }}>
+                          {severityDot(f.severity)} {f.title}
+                        </div>
+                        <div style={{ color: "#666", fontWeight: 900 }}>
+                          -{f.penalty} ({catLabel(f.category)})
+                        </div>
+                      </div>
+                      {f.detail && <div style={{ marginTop: 6, color: "#444" }}>{f.detail}</div>}
+                      <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>id: {stripPrefix(f.id)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

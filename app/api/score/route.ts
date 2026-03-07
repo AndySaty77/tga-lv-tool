@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { analyzeLvText, DbTrigger } from "../../../lib/analyzeLvText";
 import { computeScore } from "../../../lib/scoring";
+import { analyzeLvTextWithLLM } from "../../../lib/llmRelevanceFilter";
 
 type CategoryKey =
   | "vertrags_lv_risiken"
@@ -283,8 +284,30 @@ export async function POST(req: Request) {
       return true;
     });
 
-  // 3) Findings erzeugen (wichtig: jetzt aus dem richtigen Text)
-  const findings = analyzeLvText(textForAnalysis, dbTriggers);
+  // 3) Findings erzeugen
+  const useLlmRelevance = (body as any)?.useLlmRelevance === true && !!process.env.OPENAI_API_KEY;
+
+  let findings: any[];
+  let findingsBeforeLlm = 0;
+  let findingsAfterLlm = 0;
+
+  if (useLlmRelevance) {
+    // LLM-Modus: eigene Recherche im LV-Text, Trigger werden ignoriert
+    const systemFindings = analyzeLvText(textForAnalysis, [], {
+      vortext: hasSplit ? vortext : undefined,
+    });
+    const llmFindings = await analyzeLvTextWithLLM(textForAnalysis);
+    findings = [...systemFindings, ...llmFindings];
+    findingsBeforeLlm = systemFindings.length;
+    findingsAfterLlm = findings.length;
+  } else {
+    // Trigger-Modus: kontextbewusstes Matching
+    findings = analyzeLvText(textForAnalysis, dbTriggers, {
+      vortext: hasSplit ? vortext : undefined,
+    });
+    findingsBeforeLlm = findings.length;
+    findingsAfterLlm = findings.length;
+  }
 
   // 4) Kategorien mappen
   const findingsMapped = (findings ?? []).map((f: any) => ({
@@ -352,7 +375,7 @@ export async function POST(req: Request) {
     console.log("perCategorySum(abs):", perCategorySum, "sizeF:", sizeF, "cfg.version:", cfg.version);
   }
 
-  return NextResponse.json({
+  const json: Record<string, unknown> = {
     ...result,
     total: totalNormalized,
     perCategory,
@@ -366,7 +389,10 @@ export async function POST(req: Request) {
             detectedDisciplines: det.all,
             primaryDiscipline: det.primary,
             secondaryDisciplines: det.secondary,
-            triggersUsed: dbTriggers.length,
+            triggersUsed: useLlmRelevance ? 0 : dbTriggers.length,
+            llmMode: useLlmRelevance,
+            findingsBeforeLlm,
+            findingsAfterLlm,
             perCategorySum,
             sizeF,
             scoringConfigVersion: cfg.version,
@@ -374,5 +400,13 @@ export async function POST(req: Request) {
           },
         }
       : {}),
-  });
+  };
+
+  if (useLlmRelevance) {
+    json.llmMode = true;
+    json.findingsBeforeLlm = findingsBeforeLlm;
+    json.findingsAfterLlm = findingsAfterLlm;
+  }
+
+  return NextResponse.json(json);
 }

@@ -1,0 +1,20 @@
+Leistungsverzeichnis
+Neubau Rettungszentrum Rebland
+4200 Heizungsarbeiten
+
+Allgemeine Vertragsbedingungen:
+VOB, Teile A, B und C.
+
+TITEL 1: Rohrleitungen
+123.456
+m
+no
+
+456.789
+Stück
+no
+
+TITEL 2: Heizkörper
+789.012
+m2
+yes

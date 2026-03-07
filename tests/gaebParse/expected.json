@@ -1,0 +1,38 @@
+{
+  "sample-gaeb.xml": {
+    "formatDetected": "gaeb-xml",
+    "parserUsed": "xml-gaeb",
+    "itemCountMin": 2,
+    "itemCountMax": 10,
+    "structureConfidenceMin": 0.3,
+    "prefaceContains": ["Vorbemerkungen", "Vertragsbedingungen"],
+    "prefaceMinLength": 20
+  },
+  "sample-californiax.txt": {
+    "formatDetected": "plain-text",
+    "parserUsed": "text-californiax",
+    "itemCountMin": 2,
+    "itemCountMax": 10,
+    "structureConfidenceMin": 0.6,
+    "prefaceContains": ["Vertragsbedingungen", "VOB"],
+    "prefaceMinLength": 10
+  },
+  "sample-dangl.txt": {
+    "formatDetected": "plain-text",
+    "parserUsed": "text-dangl",
+    "itemCountMin": 0,
+    "itemCountMax": 5,
+    "structureConfidenceMin": 0.5,
+    "prefaceContains": [],
+    "prefaceMinLength": 0
+  },
+  "sample-raw.txt": {
+    "formatDetected": "raw-text",
+    "parserUsed": "raw-fallback",
+    "itemCountMin": 0,
+    "itemCountMax": 5,
+    "structureConfidenceMin": 0.1,
+    "prefaceContains": ["Vertragsbedingungen"],
+    "prefaceMinLength": 10
+  }
+}

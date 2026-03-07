@@ -17,6 +17,8 @@ export type DbTrigger = {
   question_template: string | null;
   offer_text_template: string | null;
   is_active: boolean;
+  /** Optional: "vortext_only" = nur im Vortext matchen (weniger False Positives) */
+  match_scope?: string | null;
 };
 
 // ===================== Text Preprocessing =====================
@@ -99,35 +101,64 @@ function isUsableKeyword(raw: string) {
   if (/^\d+([.,]\d+)?$/.test(lower)) return false;
 
   // harte Stopwords (erweiterbar)
-  if (
-    ["pos", "position", "stück", "stk", "m2", "m3", "m", "dn", "en", "din", "iso", "mm", "cm"].includes(lower)
-  ) {
-    return false;
-  }
+  const stopwords = [
+    "pos", "position", "stück", "stk", "m2", "m3", "m", "dn", "en", "din", "iso", "mm", "cm",
+    "rep", "ref", "stlb", "bau", "yes", "no", "aaa", "od", "id",
+  ];
+  if (stopwords.includes(lower)) return false;
 
   return true;
 }
 
+/** Kontext um Treffer: prüft ob Match in „sinnvollem" Text oder in Zahl-/Code-Block */
+const CONTEXT_CHARS = 120;
+const DIGIT_RATIO_THRESHOLD = 0.45;
+
+function getContextAt(text: string, index: number): string {
+  const start = Math.max(0, index - CONTEXT_CHARS);
+  const end = Math.min(text.length, index + CONTEXT_CHARS);
+  return text.slice(start, end);
+}
+
+function isLikelyRelevantContext(context: string): boolean {
+  const digits = (context.match(/\d/g) ?? []).length;
+  const letters = (context.match(/[a-zA-ZäöüÄÖÜß]/g) ?? []).length;
+  const total = context.replace(/\s/g, "").length;
+  if (total < 10) return true;
+  const digitRatio = digits / total;
+  if (digitRatio > DIGIT_RATIO_THRESHOLD) return false;
+  const letterRatio = letters / total;
+  if (letterRatio < 0.2) return false;
+  return true;
+}
+
+const SIGNAL_WORDS = /\b(unklar|nicht\s+definiert|fehlt|nicht\s+eindeutig|ohne\s+angabe|siehe\s+position|nicht\s+genannt)\b/i;
+
 /**
- * Treffer zählen:
- * - Regex (Trigger-regex) hat Priorität
- * - Keywords: Wortgrenzen für Einzelwörter, Phrase-Match für Mehrwort
+ * Treffer zählen (kontextbewusst):
+ * - Regex: nur Treffer in sinnvollem Kontext (keine reinen Zahlblöcke)
+ * - Keywords: Wortgrenzen, Phrase-Match, Kontextprüfung
+ * - Signal-Wörter (unklar, nicht definiert) im Kontext = relevanter Treffer
  */
 function computeHits(text: string, trigger: DbTrigger): number {
   let hits = 0;
 
-  // 1) Trigger-Regex (präzise)
+  // 1) Trigger-Regex (präzise, kontextbewusst)
   if (trigger.regex && trigger.regex.trim().length > 0) {
     try {
       const re = new RegExp(trigger.regex, "gi");
-      hits = (text.match(re) ?? []).length;
-      return hits;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) {
+        const ctx = getContextAt(text, m.index);
+        if (isLikelyRelevantContext(ctx) || SIGNAL_WORDS.test(ctx)) hits += 1;
+      }
+      if (hits > 0) return clamp(hits, 0, 50);
     } catch {
       // ignore
     }
   }
 
-  // 2) Keywords (gehärtet)
+  // 2) Keywords (gehärtet, kontextbewusst)
   const kws = Array.isArray(trigger.keywords) ? trigger.keywords : [];
   if (!kws.length) return 0;
 
@@ -138,19 +169,24 @@ function computeHits(text: string, trigger: DbTrigger): number {
 
     const kw = raw.trim().toLowerCase();
 
-    // Mehrwort-Phrase: simple substring
     if (kw.includes(" ")) {
-      const parts = lower.split(kw);
-      hits += Math.max(0, parts.length - 1);
+      let idx = lower.indexOf(kw);
+      while (idx >= 0) {
+        const ctx = getContextAt(text, idx);
+        if (isLikelyRelevantContext(ctx) || SIGNAL_WORDS.test(ctx)) hits += 1;
+        idx = lower.indexOf(kw, idx + 1);
+      }
       continue;
     }
 
-    // Einzelwort: Wortgrenze (damit "an" nicht in "dangl" matched)
     const re = new RegExp(`\\b${escapeRegex(kw)}\\b`, "g");
-    hits += (lower.match(re) ?? []).length;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(lower)) !== null) {
+      const ctx = getContextAt(text, m.index);
+      if (isLikelyRelevantContext(ctx) || SIGNAL_WORDS.test(ctx)) hits += 1;
+    }
   }
 
-  // Cap: selbst wenn es noch ausrastet, nicht ins Unendliche
   return clamp(hits, 0, 50);
 }
 
@@ -172,14 +208,35 @@ const mapSupabaseCategoryToScore = (catRaw: string): ScoreCategory => {
 type DedupeMode = "per_trigger" | "none";
 const DEFAULT_DEDUPE_MODE: DedupeMode = "per_trigger";
 
-function applyDbTriggers(cleanText: string, triggers: DbTrigger[], dedupeMode: DedupeMode): Finding[] {
+function getTextForTrigger(
+  fullText: string,
+  vortext: string | undefined,
+  trigger: DbTrigger
+): string {
+  const scope = (trigger.match_scope ?? "").toString().toLowerCase();
+  if (scope === "vortext_only" && vortext && vortext.trim().length > 100) {
+    return vortext;
+  }
+  if (/vertrag|vortext|lv.risiko/.test((trigger.category ?? "").toLowerCase()) && vortext && vortext.length > 200) {
+    return vortext;
+  }
+  return fullText;
+}
+
+function applyDbTriggers(
+  cleanText: string,
+  triggers: DbTrigger[],
+  dedupeMode: DedupeMode,
+  vortext?: string
+): Finding[] {
   const findings: Finding[] = [];
   const seen = new Set<string>();
 
   for (const t of triggers) {
     if (!t.is_active) continue;
 
-    const hits = computeHits(cleanText, t);
+    const textToUse = getTextForTrigger(cleanText, vortext ? preprocessLvText(vortext) : undefined, t);
+    const hits = computeHits(textToUse, t);
     if (hits <= 0) continue;
 
     const id = `DB_${t.id}`;
@@ -214,16 +271,94 @@ function applyDbTriggers(cleanText: string, triggers: DbTrigger[], dedupeMode: D
   return findings;
 }
 
+// ===================== Merge ähnlicher Findings =====================
+
+/** Muster für Zusammenführung: gleicher Merge-Key = ein Finding */
+const MERGE_PATTERNS: Array<{ pattern: RegExp; mergedTitle: string }> = [
+  {
+    pattern: /(?:Wartung\/Intervall|Wartung)\s*(?:für\s+)?Armaturengruppe\s+\d+/i,
+    mergedTitle: "Sanitär-Detail: Wartung/Intervall für Armaturengruppen unklar",
+  },
+  {
+    pattern: /Armaturengruppe\s+\d+\s*[Uu]nklar/i,
+    mergedTitle: "Armaturengruppen: Unklare Anforderungen (mehrere Gruppen)",
+  },
+];
+
+function getMergedTitle(f: Finding): string | null {
+  for (const { pattern, mergedTitle } of MERGE_PATTERNS) {
+    if (pattern.test(f.title)) return mergedTitle;
+  }
+  return null;
+}
+
+/**
+ * Fasst ähnliche DB-Findings zusammen (z. B. "Armaturengruppe 03/09/11 unklar" → ein Finding).
+ */
+function mergeSimilarFindings(findings: Finding[]): Finding[] {
+  const dbFindings = findings.filter((f) => f.id.startsWith("DB_"));
+  const otherFindings = findings.filter((f) => !f.id.startsWith("DB_"));
+
+  const groups = new Map<string, Finding[]>();
+  const unmerged: Finding[] = [];
+
+  for (const f of dbFindings) {
+    const mergedTitle = getMergedTitle(f);
+    if (mergedTitle) {
+      const key = mergedTitle;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(f);
+    } else {
+      unmerged.push(f);
+    }
+  }
+
+  const merged: Finding[] = [];
+  for (const [key, group] of groups) {
+    if (group.length === 0) continue;
+    const first = group[0];
+    const totalPenalty = group.reduce((s, g) => s + g.penalty, 0);
+    const maxPenalty = Math.max(...group.map((g) => g.penalty));
+    const penalty = clamp(maxPenalty + Math.floor((group.length - 1) * 2), 0, 20);
+    const ids = group.map((g) => g.id.replace(/^DB_/, "")).slice(0, 5);
+    merged.push({
+      id: first.id,
+      category: first.category,
+      title: key,
+      severity: severityFromWeight(penalty),
+      penalty,
+      detail: [
+        `Zusammengeführt aus ${group.length} ähnlichen Triggern`,
+        `IDs: ${ids.join(", ")}${group.length > 5 ? " …" : ""}`,
+        first.detail,
+      ]
+        .filter(Boolean)
+        .join(" | "),
+    });
+  }
+
+  return [...otherFindings, ...unmerged, ...merged];
+}
+
 // ===================== Hauptfunktion =====================
 
-export function analyzeLvText(lvTextRaw: string, dbTriggers: DbTrigger[] = []): Finding[] {
+export type AnalyzeLvTextOptions = {
+  vortext?: string;
+};
+
+export function analyzeLvText(
+  lvTextRaw: string,
+  dbTriggers: DbTrigger[] = [],
+  opts?: AnalyzeLvTextOptions
+): Finding[] {
   const raw = lvTextRaw ?? "";
-  const text = preprocessLvText(raw); // <-- DAS ist der Gamechanger
+  const text = preprocessLvText(raw);
   const findings: Finding[] = [];
 
-  // 0) DB Trigger
+  // 0) DB Trigger (mit kontextbewusstem Matching, optional vortext_only)
   if (dbTriggers.length) {
-    findings.push(...applyDbTriggers(text, dbTriggers, DEFAULT_DEDUPE_MODE));
+    const dbFindings = applyDbTriggers(text, dbTriggers, DEFAULT_DEDUPE_MODE, opts?.vortext);
+    findings.push(...mergeSimilarFindings(dbFindings));
   }
 
   // 1) System/Baseline Checks (auf bereinigtem Text!)
