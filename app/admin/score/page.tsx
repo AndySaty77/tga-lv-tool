@@ -19,14 +19,17 @@ const CUSTOMER_DESIGN = {
   cardRadius: 12,
   cardRadiusLg: 16,
   cardShadow: "0 1px 3px rgba(0,0,0,0.06)",
-  cardShadowHover: "0 2px 6px rgba(0,0,0,0.08)",
+  cardShadowHover: "0 4px 12px rgba(0,0,0,0.06)",
   textPrimary: "#0f172a",
   textSecondary: "#475569",
   textMuted: "#94a3b8",
-  spacingSection: 28,
-  spacingCard: 20,
+  spacingSection: 32,
+  spacingCard: 24,
   radiusButton: 10,
   radiusToggle: 8,
+  headerPaddingV: 28,
+  headerPaddingH: 40,
+  badgeRadius: 8,
 } as const;
 
 type CategoryKey =
@@ -1084,21 +1087,24 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       {customerRoute && (
         <style dangerouslySetInnerHTML={{ __html: `
           .tga-btn-primary { transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease; }
-          .tga-btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
-          .tga-btn-primary:active:not(:disabled) { transform: translateY(0); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+          .tga-btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(30,95,116,0.25); }
+          .tga-btn-primary:active:not(:disabled) { transform: translateY(0); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
           .tga-btn-primary:focus-visible { outline: 2px solid #1e5f74; outline-offset: 2px; }
           .tga-btn-secondary { transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease; }
-          .tga-btn-secondary:hover { transform: translateY(-1px); box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+          .tga-btn-secondary:hover { border-color: #cbd5e1 !important; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
           .tga-btn-secondary:active { transform: translateY(0); }
           .tga-btn-secondary:focus-visible { outline: 2px solid #1e5f74; outline-offset: 2px; }
-          .tga-toggle-option { transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease; }
+          .tga-toggle-option { transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease; }
           .tga-toggle-option:hover { background-color: #f1f5f9 !important; }
           .tga-toggle-option:not([data-active]):hover { color: #0f172a !important; }
+          .tga-toggle-option[data-active] { box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
           .tga-toggle-option:active { transform: scale(0.98); }
           .tga-toggle-option:focus-visible { outline: 2px solid #1e5f74; outline-offset: 1px; }
           .tga-tab { transition: color 0.2s ease, border-color 0.2s ease; }
           .tga-tab:hover { color: #0f172a !important; }
           .tga-tab:focus-visible { outline: 2px solid #1e5f74; outline-offset: 2px; }
+          .tga-benefit-card { transition: box-shadow 0.2s ease; }
+          .tga-benefit-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
         ` }} />
       )}
 
@@ -1197,26 +1203,26 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       <header
         style={{
           marginBottom: 0,
-          padding: customerRoute ? "20px 32px" : "0 28px",
-          minHeight: 64,
+          padding: customerRoute ? `${CUSTOMER_DESIGN.headerPaddingV}px ${CUSTOMER_DESIGN.headerPaddingH}px` : "0 28px",
+          minHeight: customerRoute ? 72 : 64,
           height: customerRoute ? "auto" : 64,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          gap: 24,
+          gap: 28,
           background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff",
           borderBottom: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e7eb",
           flexWrap: "wrap",
         }}
       >
         {/* Linke Seite: Titel, optional Untertitel (Kundenroute), Dateiname */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: customerRoute ? 8 : 2, minWidth: 0, flex: "1 1 280px" }}>
           {customerRoute ? (
             <>
-              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, letterSpacing: "-0.02em", lineHeight: 1.2 }}>
+              <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: CUSTOMER_DESIGN.textPrimary, letterSpacing: "-0.025em", lineHeight: 1.2 }}>
                 Leistungsverzeichnis analysieren
               </h1>
-              <p style={{ margin: 0, fontSize: 14, color: CUSTOMER_DESIGN.textSecondary, fontWeight: 400, maxWidth: 480 }}>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, fontWeight: 400, maxWidth: 480, lineHeight: 1.5 }}>
                 Erkennen Sie Risiken, Unklarheiten und mögliche Nachtragspotenziale vor der Angebotsabgabe.
               </p>
             </>
@@ -1226,33 +1232,35 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             </h1>
           )}
           {fileMeta?.name && (
-            <span style={{ fontSize: 12, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
+            <span style={{ fontSize: 12, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 4 }}>
               {fileMeta.name}
               {fileMeta.size ? ` · ${fmtKB(fileMeta.size)}` : ""}
             </span>
           )}
         </div>
 
-        {/* Rechte Seite: Status dezent, Modus-Toggle mit Hilfetext (Kundenroute) */}
-        <div style={{ display: "flex", alignItems: "center", gap: 20, flexShrink: 0 }}>
+        {/* Rechte Seite: Status-Badge, Modus-Toggle mit Hilfetext (Kundenroute) */}
+        <div style={{ display: "flex", alignItems: "center", gap: customerRoute ? 24 : 20, flexShrink: 0 }}>
           {analysisStatus && (
             <span
               style={{
                 fontSize: 11,
-                fontWeight: 500,
-                color: loading ? "#b45309" : result ? (customerRoute ? CUSTOMER_DESIGN.primary : "#047857") : (customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af"),
-                padding: "4px 10px",
-                borderRadius: 6,
-                background: loading ? "#fffbeb" : result ? (customerRoute ? "#e8f4f8" : "#ecfdf5") : "#f9fafb",
+                fontWeight: 600,
+                letterSpacing: "0.02em",
+                color: loading ? "#b45309" : result ? (customerRoute ? CUSTOMER_DESIGN.primary : "#047857") : (customerRoute ? CUSTOMER_DESIGN.textSecondary : "#9ca3af"),
+                padding: customerRoute ? "6px 12px" : "4px 10px",
+                borderRadius: customerRoute ? CUSTOMER_DESIGN.badgeRadius : 6,
+                background: loading ? "#fffbeb" : result ? (customerRoute ? "#e8f4f8" : "#ecfdf5") : (customerRoute ? "#f8fafc" : "#f9fafb"),
+                border: customerRoute ? `1px solid ${loading ? "#fde68a" : result ? "#b8dce6" : CUSTOMER_DESIGN.cardBorder}` : "none",
               }}
             >
               {loading ? "Analyse läuft…" : result ? "Abgeschlossen" : "Bereit"}
             </span>
           )}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 11, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af", fontWeight: 500 }}>{customerRoute ? "Ansicht" : "Modus"}</span>
-              <div style={{ display: "flex", background: customerRoute ? CUSTOMER_DESIGN.cardBorder : "#f3f4f6", borderRadius: customerRoute ? CUSTOMER_DESIGN.radiusToggle : 8, padding: 2 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 11, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af", fontWeight: 500, letterSpacing: "0.01em" }}>{customerRoute ? "Ansicht" : "Modus"}</span>
+              <div style={{ display: "flex", background: customerRoute ? CUSTOMER_DESIGN.cardBorder : "#f3f4f6", borderRadius: customerRoute ? CUSTOMER_DESIGN.radiusToggle : 8, padding: 3 }}>
                 <button
                   type="button"
                   className={customerRoute ? "tga-toggle-option" : undefined}
@@ -1262,15 +1270,15 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                     if (resultTab === "trigger" || resultTab === "transparenz") setResultTab("uebersicht");
                   }}
                   style={{
-                    padding: "6px 14px",
+                    padding: customerRoute ? "8px 16px" : "6px 14px",
                     border: "none",
                     borderRadius: 6,
                     background: analysisMode === "standard" ? (customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff") : "transparent",
                     color: analysisMode === "standard" ? (customerRoute ? CUSTOMER_DESIGN.textPrimary : "#111") : (customerRoute ? CUSTOMER_DESIGN.textSecondary : "#6b7280"),
-                    fontWeight: 500,
+                    fontWeight: 600,
                     fontSize: 13,
                     cursor: "pointer",
-                    boxShadow: analysisMode === "standard" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+                    boxShadow: analysisMode === "standard" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
                   }}
                 >
                   Standard
@@ -1281,15 +1289,15 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                   data-active={customerRoute && analysisMode === "expert" ? "true" : undefined}
                   onClick={() => setAnalysisMode("expert")}
                   style={{
-                    padding: "6px 14px",
+                    padding: customerRoute ? "8px 16px" : "6px 14px",
                     border: "none",
                     borderRadius: 6,
                     background: analysisMode === "expert" ? (customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff") : "transparent",
                     color: analysisMode === "expert" ? (customerRoute ? CUSTOMER_DESIGN.textPrimary : "#111") : (customerRoute ? CUSTOMER_DESIGN.textSecondary : "#6b7280"),
-                    fontWeight: 500,
+                    fontWeight: 600,
                     fontSize: 13,
                     cursor: "pointer",
-                    boxShadow: analysisMode === "expert" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+                    boxShadow: analysisMode === "expert" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
                   }}
                 >
                   Experte
@@ -1297,7 +1305,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               </div>
             </div>
             {customerRoute && (
-              <div style={{ fontSize: 10, color: CUSTOMER_DESIGN.textMuted, maxWidth: 220, textAlign: "right", lineHeight: 1.35 }}>
+              <div style={{ fontSize: 10, color: CUSTOMER_DESIGN.textMuted, maxWidth: 220, textAlign: "right", lineHeight: 1.4 }}>
                 {analysisMode === "standard"
                   ? "Reduzierte Ansicht mit den wichtigsten Ergebnissen"
                   : "Zusätzliche technische Details und vertiefte Auswertung"}
@@ -1319,7 +1327,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       <div
         style={{
           marginTop: customerRoute ? CUSTOMER_DESIGN.spacingSection : 24,
-          padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16,
+          padding: customerRoute ? 28 : 16,
           border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e7eb",
           borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadiusLg : 16,
           background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fafafa",
@@ -1337,33 +1345,33 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           style={{
             border: `2px dashed ${dragOver ? (customerRoute ? CUSTOMER_DESIGN.primary : "#0a7a2f") : (customerRoute ? CUSTOMER_DESIGN.cardBorder : "#d1d5db")}`,
             borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 14,
-            padding: customerRoute ? 28 : 14,
-            background: dragOver ? (customerRoute ? "#e8f4f8" : "#f0fdf4") : customerRoute ? "#f8fafb" : "#fff",
+            padding: customerRoute ? 32 : 14,
+            background: dragOver ? (customerRoute ? "#e8f4f8" : "#f0fdf4") : customerRoute ? "#f8fafc" : "#fff",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            gap: 20,
+            gap: 24,
             flexWrap: "wrap",
           }}
         >
-          <div style={{ minWidth: 0, flex: "1 1 260px" }}>
+          <div style={{ minWidth: 0, flex: "1 1 280px" }}>
             {customerRoute ? (
               <>
-                <div style={{ fontSize: 18, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 8, letterSpacing: "-0.01em" }}>
                   Leistungsverzeichnis hochladen
                 </div>
-                <p style={{ margin: 0, fontSize: 14, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>
+                <p style={{ margin: 0, fontSize: 14, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.55 }}>
                   Datei hierher ziehen oder über den Button auswählen. Anschließend Analyse starten.
                 </p>
                 {!fileMeta && (
-                  <ul style={{ margin: "12px 0 0", paddingLeft: 20, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.6 }}>
+                  <ul style={{ margin: "16px 0 0", paddingLeft: 20, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.65 }}>
                     <li>Erkennt Risiken im Leistungsverzeichnis</li>
                     <li>Zeigt mögliche Nachtragspotenziale</li>
                     <li>Formuliert Rückfragen und Angebotsklarstellungen</li>
                   </ul>
                 )}
                 {fileMeta && (
-                  <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "#e8f4f8", color: CUSTOMER_DESIGN.primary, fontWeight: 600, fontSize: 13 }}>
+                  <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: CUSTOMER_DESIGN.radiusButton, background: "#e8f4f8", border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, color: CUSTOMER_DESIGN.primary, fontWeight: 600, fontSize: 13 }}>
                     Geladen: {fileMeta.name}
                     {fileMeta.size ? ` · ${fmtKB(fileMeta.size)}` : ""}
                   </div>
@@ -1428,10 +1436,10 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           rows={10}
           style={{
             width: "100%",
-            marginTop: 12,
+            marginTop: customerRoute ? 16 : 12,
             borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 12,
             border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #ddd",
-            padding: 12,
+            padding: customerRoute ? 14 : 12,
             resize: "vertical",
             fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
             fontSize: 13,
@@ -1442,7 +1450,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
         />
 
         {/* Actions */}
-        <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: customerRoute ? 12 : 10, marginTop: customerRoute ? 20 : 14, flexWrap: "wrap", alignItems: "center" }}>
           <button
             type="button"
             className={customerRoute ? "tga-btn-primary" : undefined}
@@ -1538,31 +1546,31 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       {/* Value-Preview: Was Sie nach der Analyse erhalten (nur Kundenroute, Startzustand) */}
       {customerRoute && !result && !loading && (
         <div style={{ marginTop: CUSTOMER_DESIGN.spacingSection }}>
-          <h2 style={{ margin: "0 0 20px", fontSize: 17, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary }}>Nach der Analyse erhalten Sie</h2>
+          <h2 style={{ margin: "0 0 24px", fontSize: 18, fontWeight: 800, color: CUSTOMER_DESIGN.textPrimary, letterSpacing: "-0.02em" }}>Nach der Analyse erhalten Sie</h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: CUSTOMER_DESIGN.spacingCard }}>
-            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>Risikoübersicht</div>
-              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Erkennen Sie kritische Punkte in Vorbemerkungen, Mengen und Leistungsgrenzen.</p>
+            <div className="tga-benefit-card" style={{ padding: CUSTOMER_DESIGN.spacingCard, minHeight: 120, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 8 }}>Risikoübersicht</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.55 }}>Erkennen Sie kritische Punkte in Vorbemerkungen, Mengen und Leistungsgrenzen.</p>
             </div>
-            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>Nachtragspotenzial</div>
-              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Identifizieren Sie mögliche Ursachen für spätere Mehrkosten.</p>
+            <div className="tga-benefit-card" style={{ padding: CUSTOMER_DESIGN.spacingCard, minHeight: 120, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 8 }}>Nachtragspotenzial</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.55 }}>Identifizieren Sie mögliche Ursachen für spätere Mehrkosten.</p>
             </div>
-            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>Rückfragen</div>
-              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Erhalten Sie konkrete Fragen zur Klärung vor Angebotsabgabe.</p>
+            <div className="tga-benefit-card" style={{ padding: CUSTOMER_DESIGN.spacingCard, minHeight: 120, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 8 }}>Rückfragen</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.55 }}>Erhalten Sie konkrete Fragen zur Klärung vor Angebotsabgabe.</p>
             </div>
-            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>Angebotsklarstellungen</div>
-              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Nutzen Sie Formulierungsvorschläge für Ihr Angebot.</p>
+            <div className="tga-benefit-card" style={{ padding: CUSTOMER_DESIGN.spacingCard, minHeight: 120, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 8 }}>Angebotsklarstellungen</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.55 }}>Nutzen Sie Formulierungsvorschläge für Ihr Angebot.</p>
             </div>
-            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.vorbemerkungen}</div>
-              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Lesbare Darstellung der Vorbemerkungen aus Ihrem LV inkl. Suche und Volltextansicht.</p>
+            <div className="tga-benefit-card" style={{ padding: CUSTOMER_DESIGN.spacingCard, minHeight: 120, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 8 }}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.vorbemerkungen}</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.55 }}>Lesbare Darstellung der Vorbemerkungen aus Ihrem LV inkl. Suche und Volltextansicht.</p>
             </div>
-            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.positionen}</div>
-              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Übersicht der Positionsinhalte des Leistungsverzeichnisses mit Suchfunktion.</p>
+            <div className="tga-benefit-card" style={{ padding: CUSTOMER_DESIGN.spacingCard, minHeight: 120, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 8 }}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.positionen}</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.55 }}>Übersicht der Positionsinhalte des Leistungsverzeichnisses mit Suchfunktion.</p>
             </div>
           </div>
         </div>
