@@ -2,8 +2,32 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { Lesansicht } from "@/components/Lesansicht";
+import { VorbemerkungenDocumentView } from "@/components/VorbemerkungenDocumentView";
+import { VortextDetailModal } from "@/components/VortextDetailModal";
+import { sanitizeForDisplay, stripTechnicalNoiseForDisplay } from "@/lib/displayText";
 import { AMPEL_THRESHOLDS } from "@/lib/scoringConfig";
 import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
+
+/** Designsystem Kundenroute /analyse: Modern Industrial B2B SaaS – Petrol/Stahlblau, ruhig, präzise. */
+const CUSTOMER_DESIGN = {
+  primary: "#1e5f74",
+  primaryHover: "#164c5e",
+  pageBg: "#f1f5f9",
+  cardBg: "#ffffff",
+  cardBorder: "#e2e8f0",
+  cardRadius: 12,
+  cardRadiusLg: 16,
+  cardShadow: "0 1px 3px rgba(0,0,0,0.06)",
+  cardShadowHover: "0 2px 6px rgba(0,0,0,0.08)",
+  textPrimary: "#0f172a",
+  textSecondary: "#475569",
+  textMuted: "#94a3b8",
+  spacingSection: 28,
+  spacingCard: 20,
+  radiusButton: 10,
+  radiusToggle: 8,
+} as const;
 
 type CategoryKey =
   | "vertrags_lv_risiken"
@@ -377,6 +401,8 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
   const [loading, setLoading] = useState(false);
   /** Fortschritts-Schritt für die Analyse-Warteanzeige (0–5), zeitbasiert. */
   const [analysisStep, setAnalysisStep] = useState(0);
+  /** Rotierender Unterstatus im letzten Schritt (nur UI, bessere Fortschrittswahrnehmung). */
+  const [lastStepSubIndex, setLastStepSubIndex] = useState(0);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -403,6 +429,8 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
   const [vortextLoading, setVortextLoading] = useState(false);
   const [vortextError, setVortextError] = useState<string | null>(null);
   const [riskClauses, setRiskClauses] = useState<RiskClause[]>([]);
+  /** Index des geöffneten Vortext-/Risiko-Detail-Modals (Risiken im Einleitungstext). */
+  const [riskClauseDetailIndex, setRiskClauseDetailIndex] = useState<number | null>(null);
   const [keyFacts, setKeyFacts] = useState<Record<string, string>>({});
   // optional: falls Route später confidence liefert
   const [keyFactConfidence, setKeyFactConfidence] = useState<Record<string, number>>({});
@@ -477,8 +505,13 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
   const isExpertMode = analysisMode === "expert";
 
   /** Aktiver Tab der Analyse-Ausgabe (nur Darstellung). */
-  type ResultTabId = "uebersicht" | "risiken" | "nachtragspotenzial" | "rueckfragen" | "angebotsklarstellungen" | "trigger" | "transparenz";
+  type ResultTabId = "uebersicht" | "risiken" | "vorbemerkungen" | "positionen" | "nachtragspotenzial" | "rueckfragen" | "angebotsklarstellungen" | "trigger" | "transparenz";
   const [resultTab, setResultTab] = useState<ResultTabId>("uebersicht");
+  const [vorbemerkungenModalOpen, setVorbemerkungenModalOpen] = useState(false);
+  const [vorbemerkungenSearchQuery, setVorbemerkungenSearchQuery] = useState("");
+  const [vorbemerkungenCurrentHitIndex, setVorbemerkungenCurrentHitIndex] = useState(0);
+  const [positionenSearchQuery, setPositionenSearchQuery] = useState("");
+  const [positionenCurrentHitIndex, setPositionenCurrentHitIndex] = useState(0);
 
   const totalAmp = traffic(clamp0_100(result?.total ?? 0));
 
@@ -758,14 +791,29 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
   useEffect(() => {
     if (!loading) {
       setAnalysisStep(0);
+      setLastStepSubIndex(0);
       return;
     }
     setAnalysisStep(0);
+    setLastStepSubIndex(0);
     const interval = setInterval(() => {
       setAnalysisStep((s) => Math.min(s + 1, 5));
     }, 2000);
     return () => clearInterval(interval);
   }, [loading]);
+
+  // Im letzten Schritt: rotierende Unterstatus-Texte (nur UI, keine Backend-Logik)
+  const isLastStep = loading && analysisStep === 5;
+  useEffect(() => {
+    if (!isLastStep) {
+      setLastStepSubIndex(0);
+      return;
+    }
+    const subInterval = setInterval(() => {
+      setLastStepSubIndex((i) => (i + 1) % 4);
+    }, 3000);
+    return () => clearInterval(subInterval);
+  }, [isLastStep]);
 
   const loadFile = async (file: File) => {
     setError(null);
@@ -779,7 +827,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     if (file.size > MAX_FILE_BYTES) {
       setFileMeta({ name: file.name, size: file.size });
       setLvText("");
-      setError(`Datei zu groß (${fmtKB(file.size)}). Limit aktuell: ${fmtKB(MAX_FILE_BYTES)}.`);
+      setError(`Datei zu groß (${fmtKB(file.size)}). Limit aktuell: 10 MB.`);
       return;
     }
 
@@ -934,6 +982,78 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
   const effectiveVortextLen = (split?.vortext ?? structureVortext ?? "").trim().length;
   const effectivePositionsLen = (split?.positions ?? structurePositions ?? "").trim().length;
 
+  /** Vortext für die Dokumentleseansicht (Vorbemerkungen-Tab). Bevorzugt KI/Split, sonst Struktur. */
+  const vortextForDocumentView = useMemo(() => {
+    const raw = (split?.vortext ?? gaebPreview?.vortextGuessClean ?? structureVortext ?? "").trim();
+    return raw;
+  }, [split?.vortext, gaebPreview?.vortextGuessClean, structureVortext]);
+
+  /** Bereinigt und ohne technische Metadaten – nur für Anzeige im Vorbemerkungen-Tab. */
+  const vortextForDocumentViewDisplay = useMemo(
+    () => stripTechnicalNoiseForDisplay(sanitizeForDisplay(vortextForDocumentView)),
+    [vortextForDocumentView]
+  );
+
+  /** Positionen für die Dokumentleseansicht (Positionen-Tab). Dieselbe Quelle wie für die Analyse. */
+  const positionsForDocumentView = useMemo(() => {
+    const raw = (split?.positions ?? gaebPreview?.positionsGuessClean ?? structurePositions ?? "").trim();
+    return raw;
+  }, [split?.positions, gaebPreview?.positionsGuessClean, structurePositions]);
+
+  /** Bereinigter Positionstext für Suche/Trefferzählung – identisch mit der in der Ansicht angezeigten Version. */
+  const positionsForDocumentViewDisplay = useMemo(
+    () => stripTechnicalNoiseForDisplay(sanitizeForDisplay(positionsForDocumentView)),
+    [positionsForDocumentView]
+  );
+
+  /** Trefferanzahl für Suche im Vorbemerkungen-Tab (nur angezeigter Text, case-insensitive). */
+  const vorbemerkungenMatchCount = useMemo(() => {
+    const q = vorbemerkungenSearchQuery.trim();
+    if (!q) return 0;
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escaped, "gi");
+    let count = 0;
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(vortextForDocumentViewDisplay)) !== null) count++;
+    return count;
+  }, [vorbemerkungenSearchQuery, vortextForDocumentViewDisplay]);
+
+  /** Trefferanzahl für Suche im Positionen-Tab (nur angezeigter Text, case-insensitive). */
+  const positionenMatchCount = useMemo(() => {
+    const q = positionenSearchQuery.trim();
+    if (!q) return 0;
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escaped, "gi");
+    let count = 0;
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(positionsForDocumentViewDisplay)) !== null) count++;
+    return count;
+  }, [positionenSearchQuery, positionsForDocumentViewDisplay]);
+
+  useEffect(() => {
+    if (vorbemerkungenMatchCount > 0) {
+      setVorbemerkungenCurrentHitIndex((i) => Math.min(i, vorbemerkungenMatchCount - 1));
+    }
+  }, [vorbemerkungenMatchCount]);
+
+  useEffect(() => {
+    if (positionenMatchCount > 0) {
+      setPositionenCurrentHitIndex((i) => Math.min(i, positionenMatchCount - 1));
+    }
+  }, [positionenMatchCount]);
+
+  useEffect(() => {
+    if (resultTab !== "vorbemerkungen" || vorbemerkungenMatchCount === 0) return;
+    const el = document.getElementById(`vorbemerkungen-hit-${vorbemerkungenCurrentHitIndex}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [resultTab, vorbemerkungenCurrentHitIndex, vorbemerkungenMatchCount]);
+
+  useEffect(() => {
+    if (resultTab !== "positionen" || positionenMatchCount === 0) return;
+    const el = document.getElementById(`positionen-hit-${positionenCurrentHitIndex}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [resultTab, positionenCurrentHitIndex, positionenMatchCount]);
+
   const analysisStatus = loading ? "Analysiere…" : result ? "Abgeschlossen" : "Bereit";
 
   const analysisSteps = [
@@ -945,8 +1065,43 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     "KI erstellt Zusammenfassung",
   ];
 
+  const lastStepSubStatuses = [
+    "Rückfragen werden formuliert …",
+    "Angebotsklarstellungen werden erstellt …",
+    "Zusammenfassung wird aufbereitet …",
+    "Ergebnisansicht wird vorbereitet …",
+  ];
+
   return (
-    <div style={{ padding: 28, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" }}>
+    <div
+      style={{
+        padding: customerRoute ? 32 : 28,
+        fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
+        ...(customerRoute ? { background: CUSTOMER_DESIGN.pageBg, minHeight: "100vh" } : {}),
+      }}
+    >
+      {/* Micro-Animations nur für Kundenroute (keine neuen Abhängigkeiten) */}
+      {customerRoute && (
+        <style dangerouslySetInnerHTML={{ __html: `
+          .tga-btn-primary { transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease; }
+          .tga-btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+          .tga-btn-primary:active:not(:disabled) { transform: translateY(0); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+          .tga-btn-primary:focus-visible { outline: 2px solid #1e5f74; outline-offset: 2px; }
+          .tga-btn-secondary { transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease; }
+          .tga-btn-secondary:hover { transform: translateY(-1px); box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+          .tga-btn-secondary:active { transform: translateY(0); }
+          .tga-btn-secondary:focus-visible { outline: 2px solid #1e5f74; outline-offset: 2px; }
+          .tga-toggle-option { transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease; }
+          .tga-toggle-option:hover { background-color: #f1f5f9 !important; }
+          .tga-toggle-option:not([data-active]):hover { color: #0f172a !important; }
+          .tga-toggle-option:active { transform: scale(0.98); }
+          .tga-toggle-option:focus-visible { outline: 2px solid #1e5f74; outline-offset: 1px; }
+          .tga-tab { transition: color 0.2s ease, border-color 0.2s ease; }
+          .tga-tab:hover { color: #0f172a !important; }
+          .tga-tab:focus-visible { outline: 2px solid #1e5f74; outline-offset: 2px; }
+        ` }} />
+      )}
+
       {/* Analyse-Warteanzeige: Overlay, abdunkeln, Tabs/Inhalt ausgeblendet über result && !loading */}
       {loading && (
         <div
@@ -975,13 +1130,29 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {analysisSteps.map((label, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, color: i < analysisStep ? "#0a7a2f" : i === analysisStep ? "#111" : "#999", fontWeight: i === analysisStep ? 700 : 500 }}>
-                  <span style={{ width: 20, textAlign: "center" }}>
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    fontSize: 14,
+                    color: i < analysisStep ? (customerRoute ? CUSTOMER_DESIGN.primary : "#0a7a2f") : i === analysisStep ? "#111" : "#999",
+                    fontWeight: i === analysisStep ? 700 : 500,
+                    ...(i === analysisStep && customerRoute ? { paddingLeft: 4, borderLeft: `3px solid ${CUSTOMER_DESIGN.primary}`, marginLeft: -4 } : {}),
+                  }}
+                >
+                  <span style={{ width: 20, textAlign: "center", flexShrink: 0 }}>
                     {i < analysisStep ? "✓" : i === analysisStep ? "→" : "•"}
                   </span>
                   <span>{label}</span>
                 </div>
               ))}
+              {analysisStep === 5 && (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e2e8f0", fontSize: 13, color: "#64748b", fontWeight: 500 }}>
+                  {lastStepSubStatuses[lastStepSubIndex]}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1026,87 +1197,112 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       <header
         style={{
           marginBottom: 0,
-          padding: "0 28px",
-          height: 64,
+          padding: customerRoute ? "20px 32px" : "0 28px",
+          minHeight: 64,
+          height: customerRoute ? "auto" : 64,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           gap: 24,
-          background: "#fff",
-          borderBottom: "1px solid #e5e7eb",
+          background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff",
+          borderBottom: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e7eb",
           flexWrap: "wrap",
         }}
       >
-        {/* Linke Seite: Titel, optional Dateiname */}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 16, minWidth: 0 }}>
-          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "#111", letterSpacing: "-0.02em" }}>
-            LV Analyse
-          </h1>
+        {/* Linke Seite: Titel, optional Untertitel (Kundenroute), Dateiname */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+          {customerRoute ? (
+            <>
+              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, letterSpacing: "-0.02em", lineHeight: 1.2 }}>
+                Leistungsverzeichnis analysieren
+              </h1>
+              <p style={{ margin: 0, fontSize: 14, color: CUSTOMER_DESIGN.textSecondary, fontWeight: 400, maxWidth: 480 }}>
+                Erkennen Sie Risiken, Unklarheiten und mögliche Nachtragspotenziale vor der Angebotsabgabe.
+              </p>
+            </>
+          ) : (
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "#111", letterSpacing: "-0.02em" }}>
+              LV Analyse
+            </h1>
+          )}
           {fileMeta?.name && (
-            <span style={{ fontSize: 13, color: "#6b7280", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: 12, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
               {fileMeta.name}
               {fileMeta.size ? ` · ${fmtKB(fileMeta.size)}` : ""}
             </span>
           )}
         </div>
 
-        {/* Rechte Seite: Status (optional), Modus-Toggle */}
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        {/* Rechte Seite: Status dezent, Modus-Toggle mit Hilfetext (Kundenroute) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 20, flexShrink: 0 }}>
           {analysisStatus && (
             <span
               style={{
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: 500,
-                color: loading ? "#b45309" : result ? "#047857" : "#6b7280",
-                padding: "6px 12px",
-                borderRadius: 8,
-                background: loading ? "#fffbeb" : result ? "#ecfdf5" : "#f3f4f6",
+                color: loading ? "#b45309" : result ? (customerRoute ? CUSTOMER_DESIGN.primary : "#047857") : (customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af"),
+                padding: "4px 10px",
+                borderRadius: 6,
+                background: loading ? "#fffbeb" : result ? (customerRoute ? "#e8f4f8" : "#ecfdf5") : "#f9fafb",
               }}
             >
-              {loading ? "Analyse läuft" : result ? "Analyse abgeschlossen" : "Bereit"}
+              {loading ? "Analyse läuft…" : result ? "Abgeschlossen" : "Bereit"}
             </span>
           )}
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 500 }}>{customerRoute ? "Ansicht" : "Modus"}</span>
-            <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 8, padding: 2 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setAnalysisMode("standard");
-                  if (resultTab === "trigger" || resultTab === "transparenz") setResultTab("uebersicht");
-                }}
-                style={{
-                  padding: "6px 14px",
-                  border: "none",
-                  borderRadius: 6,
-                  background: analysisMode === "standard" ? "#fff" : "transparent",
-                  color: analysisMode === "standard" ? "#111" : "#6b7280",
-                  fontWeight: 500,
-                  fontSize: 13,
-                  cursor: "pointer",
-                  boxShadow: analysisMode === "standard" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
-                }}
-              >
-                Standard
-              </button>
-              <button
-                type="button"
-                onClick={() => setAnalysisMode("expert")}
-                style={{
-                  padding: "6px 14px",
-                  border: "none",
-                  borderRadius: 6,
-                  background: analysisMode === "expert" ? "#fff" : "transparent",
-                  color: analysisMode === "expert" ? "#111" : "#6b7280",
-                  fontWeight: 500,
-                  fontSize: 13,
-                  cursor: "pointer",
-                  boxShadow: analysisMode === "expert" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
-                }}
-              >
-                {customerRoute ? "Erweiterte Ansicht" : "Experte"}
-              </button>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 11, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af", fontWeight: 500 }}>{customerRoute ? "Ansicht" : "Modus"}</span>
+              <div style={{ display: "flex", background: customerRoute ? CUSTOMER_DESIGN.cardBorder : "#f3f4f6", borderRadius: customerRoute ? CUSTOMER_DESIGN.radiusToggle : 8, padding: 2 }}>
+                <button
+                  type="button"
+                  className={customerRoute ? "tga-toggle-option" : undefined}
+                  data-active={customerRoute && analysisMode === "standard" ? "true" : undefined}
+                  onClick={() => {
+                    setAnalysisMode("standard");
+                    if (resultTab === "trigger" || resultTab === "transparenz") setResultTab("uebersicht");
+                  }}
+                  style={{
+                    padding: "6px 14px",
+                    border: "none",
+                    borderRadius: 6,
+                    background: analysisMode === "standard" ? (customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff") : "transparent",
+                    color: analysisMode === "standard" ? (customerRoute ? CUSTOMER_DESIGN.textPrimary : "#111") : (customerRoute ? CUSTOMER_DESIGN.textSecondary : "#6b7280"),
+                    fontWeight: 500,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    boxShadow: analysisMode === "standard" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+                  }}
+                >
+                  Standard
+                </button>
+                <button
+                  type="button"
+                  className={customerRoute ? "tga-toggle-option" : undefined}
+                  data-active={customerRoute && analysisMode === "expert" ? "true" : undefined}
+                  onClick={() => setAnalysisMode("expert")}
+                  style={{
+                    padding: "6px 14px",
+                    border: "none",
+                    borderRadius: 6,
+                    background: analysisMode === "expert" ? (customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff") : "transparent",
+                    color: analysisMode === "expert" ? (customerRoute ? CUSTOMER_DESIGN.textPrimary : "#111") : (customerRoute ? CUSTOMER_DESIGN.textSecondary : "#6b7280"),
+                    fontWeight: 500,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    boxShadow: analysisMode === "expert" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+                  }}
+                >
+                  Experte
+                </button>
+              </div>
             </div>
+            {customerRoute && (
+              <div style={{ fontSize: 10, color: CUSTOMER_DESIGN.textMuted, maxWidth: 220, textAlign: "right", lineHeight: 1.35 }}>
+                {analysisMode === "standard"
+                  ? "Reduzierte Ansicht mit den wichtigsten Ergebnissen"
+                  : "Zusätzliche technische Details und vertiefte Auswertung"}
+              </div>
+            )}
           </div>
           {!customerRoute && (
             <a
@@ -1122,11 +1318,12 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       {/* Analysebereich: Upload + Tabs, klar unter dem Header */}
       <div
         style={{
-          marginTop: 24,
-          padding: 16,
-          border: "1px solid #e5e5e5",
-          borderRadius: 14,
-          background: "#fafafa",
+          marginTop: customerRoute ? CUSTOMER_DESIGN.spacingSection : 24,
+          padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16,
+          border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e7eb",
+          borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadiusLg : 16,
+          background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fafafa",
+          boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : "none",
         }}
       >
         {/* Dropzone */}
@@ -1138,31 +1335,57 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
           style={{
-            border: `2px dashed ${dragOver ? "#111" : "#ddd"}`,
-            borderRadius: 14,
-            padding: 14,
-            background: dragOver ? "#f1f1f1" : "#fff",
+            border: `2px dashed ${dragOver ? (customerRoute ? CUSTOMER_DESIGN.primary : "#0a7a2f") : (customerRoute ? CUSTOMER_DESIGN.cardBorder : "#d1d5db")}`,
+            borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 14,
+            padding: customerRoute ? 28 : 14,
+            background: dragOver ? (customerRoute ? "#e8f4f8" : "#f0fdf4") : customerRoute ? "#f8fafb" : "#fff",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            gap: 12,
+            gap: 20,
             flexWrap: "wrap",
           }}
         >
-          <div>
-            <div style={{ fontWeight: 900 }}>Drag & Drop Datei hier rein</div>
-            <div style={{ color: "#666", marginTop: 4 }}>
-              Struktur des Leistungsverzeichnisses und automatische Textanalyse trennen Einleitung und Positionen.
-            </div>
-            {fileMeta && (
-              <div style={{ marginTop: 8, color: "#111", fontWeight: 700 }}>
-                Geladen: {fileMeta.name}{" "}
-                <span style={{ color: "#666", fontWeight: 600 }}>({fmtKB(fileMeta.size)})</span>
-              </div>
+          <div style={{ minWidth: 0, flex: "1 1 260px" }}>
+            {customerRoute ? (
+              <>
+                <div style={{ fontSize: 18, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>
+                  Leistungsverzeichnis hochladen
+                </div>
+                <p style={{ margin: 0, fontSize: 14, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>
+                  Datei hierher ziehen oder über den Button auswählen. Anschließend Analyse starten.
+                </p>
+                {!fileMeta && (
+                  <ul style={{ margin: "12px 0 0", paddingLeft: 20, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.6 }}>
+                    <li>Erkennt Risiken im Leistungsverzeichnis</li>
+                    <li>Zeigt mögliche Nachtragspotenziale</li>
+                    <li>Formuliert Rückfragen und Angebotsklarstellungen</li>
+                  </ul>
+                )}
+                {fileMeta && (
+                  <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "#e8f4f8", color: CUSTOMER_DESIGN.primary, fontWeight: 600, fontSize: 13 }}>
+                    Geladen: {fileMeta.name}
+                    {fileMeta.size ? ` · ${fmtKB(fileMeta.size)}` : ""}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 900 }}>Drag & Drop Datei hier rein</div>
+                <div style={{ color: "#666", marginTop: 4 }}>
+                  Struktur des Leistungsverzeichnisses und automatische Textanalyse trennen Einleitung und Positionen.
+                </div>
+                {fileMeta && (
+                  <div style={{ marginTop: 8, color: "#111", fontWeight: 700 }}>
+                    Geladen: {fileMeta.name}{" "}
+                    <span style={{ color: "#666", fontWeight: 600 }}>({fmtKB(fileMeta.size)})</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: customerRoute ? "flex-end" : "center" }}>
             <input
               ref={fileInputRef}
               type="file"
@@ -1171,20 +1394,26 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               style={{ display: "none" }}
             />
             <button
+              type="button"
+              className={customerRoute ? "tga-btn-primary" : undefined}
               onClick={() => fileInputRef.current?.click()}
               style={{
-                padding: "10px 14px",
-                borderRadius: 12,
-                border: "1px solid #111",
-                background: "#111",
+                padding: customerRoute ? "12px 20px" : "10px 14px",
+                borderRadius: customerRoute ? CUSTOMER_DESIGN.radiusButton : 12,
+                border: "none",
+                background: customerRoute ? CUSTOMER_DESIGN.primary : "#111",
                 color: "#fff",
                 cursor: "pointer",
-                fontWeight: 800,
+                fontWeight: 700,
+                fontSize: customerRoute ? 14 : 13,
+                boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : "none",
               }}
             >
-              Datei wählen
+              {customerRoute ? "Datei auswählen" : "Datei wählen"}
             </button>
-
+            {customerRoute && (
+              <span style={{ fontSize: 11, color: CUSTOMER_DESIGN.textMuted }}>Max. 10 MB · TXT, XML, GAEB</span>
+            )}
             {isExpertMode && (
               <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
                 <input type="checkbox" checked={autoAnalyze} onChange={(e) => setAutoAnalyze(e.target.checked)} />
@@ -1200,34 +1429,38 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           style={{
             width: "100%",
             marginTop: 12,
-            borderRadius: 12,
-            border: "1px solid #ddd",
+            borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 12,
+            border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #ddd",
             padding: 12,
             resize: "vertical",
             fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
             fontSize: 13,
           }}
-          placeholder="LV Text hier einfügen..."
+          placeholder={customerRoute ? "Optional: Text hier einfügen oder nur Datei nutzen …" : "LV Text hier einfügen..."}
           value={lvText}
           onChange={(e) => setLvText(e.target.value)}
         />
 
         {/* Actions */}
-        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
           <button
+            type="button"
+            className={customerRoute ? "tga-btn-primary" : undefined}
             onClick={() => analyze()}
             disabled={loading || lvText.trim().length === 0}
             style={{
-              padding: "10px 14px",
-              borderRadius: 12,
-              border: "1px solid #111",
-              background: loading ? "#eee" : "#111",
-              color: loading ? "#111" : "#fff",
+              padding: customerRoute ? "12px 20px" : "10px 14px",
+              borderRadius: customerRoute ? CUSTOMER_DESIGN.radiusButton : 12,
+              border: "none",
+              background: loading ? "#d1d5db" : customerRoute ? CUSTOMER_DESIGN.primary : "#111",
+              color: loading ? "#6b7280" : "#fff",
               cursor: loading ? "default" : "pointer",
-              fontWeight: 800,
+              fontWeight: 700,
+              fontSize: customerRoute ? 14 : 13,
+              boxShadow: customerRoute && !loading ? CUSTOMER_DESIGN.cardShadow : "none",
             }}
           >
-            {loading ? "Analysiere..." : "Analysieren"}
+            {loading ? "Analysiere…" : "Analysieren"}
           </button>
 
           {isExpertMode && (
@@ -1246,7 +1479,8 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                 border: "1px solid #ddd",
                 background: "#fff",
                 cursor: splitLoading || !lastFile ? "default" : "pointer",
-                fontWeight: 800,
+                fontWeight: 700,
+                fontSize: 13,
               }}
               title={!lastFile ? "Nur möglich, wenn eine Datei geladen wurde." : ""}
             >
@@ -1255,6 +1489,8 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           )}
 
           <button
+            type="button"
+            className={customerRoute ? "tga-btn-secondary" : undefined}
             onClick={() => {
               setLvText("");
               setResult(null);
@@ -1267,32 +1503,70 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             }}
             style={{
               padding: "10px 14px",
-              borderRadius: 12,
-              border: "1px solid #ddd",
-              background: "#fff",
+              borderRadius: customerRoute ? CUSTOMER_DESIGN.radiusButton : 12,
+              border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #d1d5db",
+              background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff",
+              color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#6b7280",
               cursor: "pointer",
-              fontWeight: 700,
+              fontWeight: 500,
+              fontSize: 13,
             }}
           >
             {customerRoute ? "Eingabe zurücksetzen" : "Zurücksetzen"}
           </button>
 
           {isExpertMode && (
-            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
-              color: "#666", fontWeight: 600 }}>
+            <label
+              title={customerRoute ? "Bei Aktivierung werden bei der Analyse zusätzliche Risiken per KI ermittelt." : "Bei Aktivierung werden bei der Analyse zusätzliche Risiken per KI ermittelt (Relevanzfilter)."}
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                color: "#6b7280", fontWeight: 500, fontSize: 13 }}
+            >
               <input
                 type="checkbox"
                 checked={useLlmRelevance}
                 onChange={(e) => setUseLlmRelevance(e.target.checked)}
               />
-              {customerRoute ? "Erweiterte Filter" : "Relevanzfilter (KI)"}
+              {customerRoute ? "Erweiterte Filter (KI-Risiken)" : "Relevanzfilter (KI)"}
             </label>
           )}
-          <div style={{ color: "#666", display: "flex", alignItems: "center" }}>Limit: {fmtKB(MAX_FILE_BYTES)}</div>
+          <span style={{ fontSize: 12, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af" }}>Max. 10 MB</span>
         </div>
 
         {error && <div style={{ marginTop: 12, color: "#b00020", fontWeight: 800 }}>{error}</div>}
       </div>
+
+      {/* Value-Preview: Was Sie nach der Analyse erhalten (nur Kundenroute, Startzustand) */}
+      {customerRoute && !result && !loading && (
+        <div style={{ marginTop: CUSTOMER_DESIGN.spacingSection }}>
+          <h2 style={{ margin: "0 0 20px", fontSize: 17, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary }}>Nach der Analyse erhalten Sie</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: CUSTOMER_DESIGN.spacingCard }}>
+            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>Risikoübersicht</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Erkennen Sie kritische Punkte in Vorbemerkungen, Mengen und Leistungsgrenzen.</p>
+            </div>
+            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>Nachtragspotenzial</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Identifizieren Sie mögliche Ursachen für spätere Mehrkosten.</p>
+            </div>
+            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>Rückfragen</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Erhalten Sie konkrete Fragen zur Klärung vor Angebotsabgabe.</p>
+            </div>
+            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>Angebotsklarstellungen</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Nutzen Sie Formulierungsvorschläge für Ihr Angebot.</p>
+            </div>
+            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.vorbemerkungen}</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Lesbare Darstellung der Vorbemerkungen aus Ihrem LV inkl. Suche und Volltextansicht.</p>
+            </div>
+            <div style={{ padding: CUSTOMER_DESIGN.spacingCard, borderRadius: CUSTOMER_DESIGN.cardRadius, border: `1px solid ${CUSTOMER_DESIGN.cardBorder}`, background: CUSTOMER_DESIGN.cardBg, boxShadow: CUSTOMER_DESIGN.cardShadow }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: CUSTOMER_DESIGN.textPrimary, marginBottom: 6 }}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.positionen}</div>
+              <p style={{ margin: 0, fontSize: 13, color: CUSTOMER_DESIGN.textSecondary, lineHeight: 1.5 }}>Übersicht der Positionsinhalte des Leistungsverzeichnisses mit Suchfunktion.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Dateistruktur / Struktur LV (nur in erweiterter Ansicht) */}
       {isExpertMode && (
@@ -1315,7 +1589,10 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
         {!gaebPreviewLoading && (gaebPreview || split) && (
           <>
             <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {(["llm_vortext", "llm_positions", "vortext", "positions", "raw", "clean"] as const).map((t) => (
+              {(customerRoute
+                ? (["llm_vortext", "llm_positions", "vortext", "positions", "clean", "raw"] as const)
+                : (["llm_vortext", "llm_positions", "vortext", "positions", "raw", "clean"] as const)
+              ).map((t) => (
                 <button
                   key={t}
                   onClick={() => setGaebTab(t)}
@@ -1323,22 +1600,24 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                     padding: "8px 10px",
                     borderRadius: 10,
                     border: "1px solid #ddd",
-                    background: gaebTab === t ? "#111" : "#fff",
+                    background: gaebTab === t ? (customerRoute ? CUSTOMER_DESIGN.primary : "#111") : "#fff",
                     color: gaebTab === t ? "#fff" : "#111",
                     cursor: "pointer",
                     fontWeight: 800,
                   }}
                 >
                   {t === "llm_vortext"
-                    ? "KI: Einleitungstext"
+                    ? "Einleitung (KI)"
                     : t === "llm_positions"
-                      ? "KI: Positionen"
+                      ? "Positionen (KI)"
                       : t === "vortext"
-                        ? "Einleitung (Struktur)"
+                        ? "Einleitung"
                         : t === "positions"
-                          ? "Positionen (Struktur)"
+                          ? "Positionen"
                           : t === "raw"
-                            ? "Rohdaten"
+                            ? customerRoute
+                              ? "Rohdaten (technisch)"
+                              : "Rohdaten"
                             : "Bereinigt"}
                 </button>
               ))}
@@ -1358,22 +1637,39 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               </button>
             </div>
 
-            <pre
-              style={{
-                marginTop: 10,
-                padding: 12,
-                borderRadius: 12,
-                border: "1px solid #eee",
-                background: "#fafafa",
-                fontSize: 12,
-                whiteSpace: "pre-wrap",
-                maxHeight: 260,
-                overflow: "auto",
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-              }}
-            >
-              {gaebTextForTab}
-            </pre>
+            <div style={{ marginTop: 10 }}>
+              {gaebTab === "raw" ? (
+                <pre
+                  style={{
+                    margin: 0,
+                    padding: 12,
+                    borderRadius: 12,
+                    border: "1px solid #eee",
+                    background: "#fafafa",
+                    fontSize: 12,
+                    whiteSpace: "pre-wrap",
+                    maxHeight: 320,
+                    overflow: "auto",
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                  }}
+                >
+                  {gaebTextForTab}
+                </pre>
+              ) : (
+                <Lesansicht
+                  content={gaebTextForTab ?? ""}
+                  maxHeight="320px"
+                  styles={
+                    customerRoute
+                      ? {
+                          textPrimary: CUSTOMER_DESIGN.textPrimary,
+                          textSecondary: CUSTOMER_DESIGN.textSecondary,
+                        }
+                      : undefined
+                  }
+                />
+              )}
+            </div>
 
             <div style={{ marginTop: 8, color: "#666", fontSize: 12, fontWeight: 700 }}>
               {split ? (
@@ -1402,7 +1698,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
 
       {/* Results mit Tab-Struktur (während Analyse ausgeblendet) */}
       {result && !loading && (
-        <div style={{ marginTop: 18 }}>
+        <div style={{ marginTop: customerRoute ? CUSTOMER_DESIGN.spacingSection : 18 }}>
           {/* Tab-Leiste */}
           <div
             style={{
@@ -1410,7 +1706,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               gap: 4,
               marginBottom: 16,
               padding: "6px 0",
-              borderBottom: "2px solid #e5e5e5",
+              borderBottom: customerRoute ? `2px solid ${CUSTOMER_DESIGN.cardBorder}` : "2px solid #e5e5e5",
               flexWrap: "wrap",
             }}
           >
@@ -1418,6 +1714,8 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               [
                 ["uebersicht", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.uebersicht],
                 ["risiken", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.risiken],
+                ["vorbemerkungen", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.vorbemerkungen],
+                ["positionen", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.positionen],
                 ["nachtragspotenzial", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial],
                 ["rueckfragen", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.rueckfragen],
                 ["angebotsklarstellungen", DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.angebotsklarstellungen],
@@ -1428,16 +1726,17 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               <button
                 key={id}
                 type="button"
+                className={customerRoute ? "tga-tab" : undefined}
                 onClick={() => setResultTab(id)}
                 style={{
                   padding: "10px 16px",
                   border: "none",
-                  borderBottom: resultTab === id ? "2px solid #111" : "2px solid transparent",
+                  borderBottom: resultTab === id ? `2px solid ${customerRoute ? CUSTOMER_DESIGN.primary : "#111"}` : "2px solid transparent",
                   marginBottom: -8,
                   background: "none",
                   fontWeight: 700,
                   fontSize: 13,
-                  color: resultTab === id ? "#111" : "#666",
+                  color: resultTab === id ? (customerRoute ? CUSTOMER_DESIGN.textPrimary : "#111") : (customerRoute ? CUSTOMER_DESIGN.textSecondary : "#666"),
                   cursor: "pointer",
                 }}
               >
@@ -1448,26 +1747,26 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
 
           {/* Tab-Inhalt: Übersicht – Entscheidungs-Dashboard (nur Darstellung) */}
           {resultTab === "uebersicht" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "calc(100vh - 280px)", minHeight: 0 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: customerRoute ? CUSTOMER_DESIGN.spacingCard : 12, maxHeight: "calc(100vh - 280px)", minHeight: 0 }}>
             {/* Zeile 1: KPI-Karten Komplexität | Gesamt-Risiko | Claim-Potenzial */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "14px 16px" }}>
-                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.complexity}</div>
-                <div style={{ marginTop: 4, fontSize: 28, fontWeight: 700, color: "#111" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: customerRoute ? CUSTOMER_DESIGN.spacingCard : 12 }}>
+              <div style={{ background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 12, padding: customerRoute ? "18px 20px" : "14px 16px", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
+                <div style={{ fontSize: 11, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.complexity}</div>
+                <div style={{ marginTop: 4, fontSize: 28, fontWeight: 700, color: customerRoute ? CUSTOMER_DESIGN.textPrimary : "#111" }}>
                   {clamp0_100(result.total)}
-                  <span style={{ fontSize: 14, color: "#9ca3af", fontWeight: 500 }}> / 100</span>
+                  <span style={{ fontSize: 14, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af", fontWeight: 500 }}> / 100</span>
                 </div>
               </div>
-              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "14px 16px" }}>
-                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.totalRisk}</div>
+              <div style={{ background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 12, padding: customerRoute ? "18px 20px" : "14px 16px", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
+                <div style={{ fontSize: 11, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.totalRisk}</div>
                 <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 20 }}>{totalAmp.dot}</span>
                   <span style={{ fontSize: 18, fontWeight: 700, color: totalAmp.tone }}>{totalAmp.text}</span>
                 </div>
               </div>
-              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "14px 16px" }}>
-                <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.claimPotential}</div>
-                <div style={{ marginTop: 4, fontSize: 16, fontWeight: 700, color: "#111" }}>
+              <div style={{ background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 12, padding: customerRoute ? "18px 20px" : "14px 16px", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
+                <div style={{ fontSize: 11, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.claimPotential}</div>
+                <div style={{ marginTop: 4, fontSize: 16, fontWeight: 700, color: customerRoute ? CUSTOMER_DESIGN.textPrimary : "#111" }}>
                   {result.findingsSorted?.length === 0
                     ? DEFAULT_TEXTS_CONFIG.internal.severityLabels.low
                     : (result.total ?? 0) >= 70
@@ -1480,16 +1779,16 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             </div>
 
             {/* Zeile 2: Risiko-Ampel + Top Findings nebeneinander */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, flex: 1, minHeight: 0 }}>
-              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, overflow: "auto" }}>
-                <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700, marginBottom: 10 }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.riskAmpelCategories}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: customerRoute ? CUSTOMER_DESIGN.spacingCard : 12, flex: 1, minHeight: 0 }}>
+              <div style={{ background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 12, padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 12, overflow: "auto", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
+                <div style={{ fontSize: 12, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#6b7280", fontWeight: 700, marginBottom: 10 }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.riskAmpelCategories}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {CATEGORY_ORDER.map((k) => {
                     const v = clamp0_100(result.perCategory?.[k] ?? 0);
                     const amp = traffic(v);
                     return (
                       <div key={k} style={{ display: "grid", gridTemplateColumns: "140px 1fr 28px", gap: 8, alignItems: "center", fontSize: 12 }}>
-                        <span style={{ color: "#374151", fontWeight: 500 }}>{catLabel(k)}</span>
+                        <span style={{ color: customerRoute ? CUSTOMER_DESIGN.textPrimary : "#374151", fontWeight: 500 }}>{catLabel(k)}</span>
                         <div style={{ height: 8, background: "#f3f4f6", borderRadius: 4, overflow: "hidden" }}>
                           <div style={{ width: `${v}%`, height: "100%", background: amp.tone, borderRadius: 4 }} />
                         </div>
@@ -1499,16 +1798,16 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                   })}
                 </div>
               </div>
-              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, overflow: "auto" }}>
-                <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700, marginBottom: 10 }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.topFindings}</div>
+              <div style={{ background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 12, padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 12, overflow: "auto", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
+                <div style={{ fontSize: 12, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#6b7280", fontWeight: 700, marginBottom: 10 }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.topFindings}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {(filteredFindings.slice(0, 8)).length === 0 ? (
-                    <div style={{ color: "#9ca3af", fontSize: 13 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noTreffer}</div>
+                    <div style={{ color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af", fontSize: 13 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noTreffer}</div>
                   ) : (
                     filteredFindings.slice(0, 8).map((f) => (
                       <div key={f.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0", borderBottom: "1px solid #f3f4f6" }}>
                         <span style={{ flexShrink: 0 }}>{severityDot(f.severity)}</span>
-                        <span style={{ fontSize: 13, color: "#111", fontWeight: 500, lineHeight: 1.35 }}>{f.title}</span>
+                        <span style={{ fontSize: 13, color: customerRoute ? CUSTOMER_DESIGN.textPrimary : "#111", fontWeight: 500, lineHeight: 1.35 }}>{sanitizeForDisplay(f.title ?? "")}</span>
                       </div>
                     ))
                   )}
@@ -1520,28 +1819,28 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
 
           {/* Tab-Inhalt: Risiken */}
           {resultTab === "risiken" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16 }}>
           <div
             style={{
-              padding: "14px 18px",
-              borderRadius: 12,
-              background: "#f0f4f8",
-              border: "1px solid #e2e8f0",
+              padding: customerRoute ? "18px 20px" : "14px 18px",
+              borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 12,
+              background: customerRoute ? "#e8f4f8" : "#f0f4f8",
+              border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e2e8f0",
               marginBottom: 4,
             }}
           >
-            <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
+            <p style={{ margin: 0, color: customerRoute ? CUSTOMER_DESIGN.textPrimary : "#334155", fontSize: 14, lineHeight: 1.65 }}>
               <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.risiken}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.risiken}
             </p>
           </div>
           {/* ===== Projektdaten aus dem Leistungsverzeichnis ===== */}
-          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+          <div style={{ border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e5e5", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadiusLg : 14, padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16, background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
               <div>
-                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.projektdaten}</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: "#888", fontWeight: 600 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.projektdatenSub}</div>
+                <div style={{ fontSize: 14, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#666", fontWeight: 900 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.projektdaten}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#888", fontWeight: 600 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.projektdatenSub}</div>
               </div>
-              <div style={{ color: "#666", fontWeight: 700 }}>
+              <div style={{ color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#666", fontWeight: 700 }}>
                 {vortextLoading ? "Extrahiere…" : `${keyFactsEntries.length} Felder`}
               </div>
             </div>
@@ -1573,7 +1872,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                         </div>
                       )}
 
-                      <div style={{ marginTop: 6, fontWeight: 800, color: "#111", whiteSpace: "pre-wrap" }}>{v}</div>
+                      <div style={{ marginTop: 6, fontWeight: 800, color: "#111", whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(v)}</div>
                     </div>
                   );
                 })}
@@ -1588,11 +1887,11 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           </div>
 
           {/* ===== Risiken im Einleitungstext ===== */}
-          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+          <div style={{ border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e5e5", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadiusLg : 14, padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16, background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
               <div>
-                <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenVortext}</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: "#888", fontWeight: 600 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenVortextSub}</div>
+                <div style={{ fontSize: 14, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#666", fontWeight: 900 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenVortext}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#888", fontWeight: 600 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenVortextSub}</div>
               </div>
               <div style={{ color: "#666", fontWeight: 700 }}>
                 {vortextLoading ? "Analysiere…" : `${riskClauses.length} Treffer`}
@@ -1619,38 +1918,63 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             )}
 
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {riskClauses.map((r, idx) => (
-                <div key={idx} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                    <div style={{ fontWeight: 900, color: "#111" }}>
-                      {riskIcon(r.riskLevel)} {r.type || "Risiko"}
+              {riskClauses.map((r, idx) => {
+                const teaserLen = 120;
+                const cleaned = sanitizeForDisplay(r.text);
+                const teaser = cleaned.length <= teaserLen ? cleaned : `${cleaned.slice(0, teaserLen)}…`;
+                const title = `${r.type || "Risiko"} · ${String(r.riskLevel).toUpperCase()}`;
+                return (
+                  <div key={idx} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                      <div style={{ fontWeight: 900, color: "#111" }}>
+                        {riskIcon(r.riskLevel)} {r.type || "Risiko"}
+                      </div>
+                      <div style={{ fontWeight: 900, color: riskTone(r.riskLevel) }}>{String(r.riskLevel).toUpperCase()}</div>
                     </div>
-                    <div style={{ fontWeight: 900, color: riskTone(r.riskLevel) }}>{String(r.riskLevel).toUpperCase()}</div>
-                  </div>
 
-                  <div
-                    style={{
-                      marginTop: 8,
-                      padding: 10,
-                      borderRadius: 12,
-                      border: "1px solid #eee",
-                      background: "#fafafa",
-                      whiteSpace: "pre-wrap",
-                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                      fontSize: 12,
-                    }}
-                  >
-                    {r.text}
-                  </div>
-
-                  {r.interpretation && (
-                    <div style={{ marginTop: 8, color: "#333" }}>
-                      <span style={{ fontWeight: 900 }}>Interpretation:</span> {r.interpretation}
+                    <div
+                      style={{
+                        marginTop: 8,
+                        fontSize: 14,
+                        lineHeight: 1.5,
+                        color: customerRoute ? CUSTOMER_DESIGN.textPrimary : "#333",
+                      }}
+                    >
+                      {teaser}
                     </div>
-                  )}
-                </div>
-              ))}
+
+                    <button
+                      type="button"
+                      onClick={() => setRiskClauseDetailIndex(idx)}
+                      style={{
+                        marginTop: 10,
+                        padding: "8px 14px",
+                        borderRadius: 8,
+                        border: `1px solid ${customerRoute ? CUSTOMER_DESIGN.cardBorder : "#ddd"}`,
+                        background: "transparent",
+                        color: customerRoute ? CUSTOMER_DESIGN.primary : "#111",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Vollständig anzeigen
+                    </button>
+                  </div>
+                );
+              })}
             </div>
+
+            {riskClauseDetailIndex !== null && riskClauses[riskClauseDetailIndex] && (
+              <VortextDetailModal
+                title={`${riskClauses[riskClauseDetailIndex].type || "Risiko"} · ${String(riskClauses[riskClauseDetailIndex].riskLevel).toUpperCase()}`}
+                shortText={sanitizeForDisplay(riskClauses[riskClauseDetailIndex].text).slice(0, 140)}
+                longText={riskClauses[riskClauseDetailIndex].text}
+                interpretation={riskClauses[riskClauseDetailIndex].interpretation}
+                onClose={() => setRiskClauseDetailIndex(null)}
+                theme={customerRoute ? { textPrimary: CUSTOMER_DESIGN.textPrimary, textSecondary: CUSTOMER_DESIGN.textSecondary, cardBg: CUSTOMER_DESIGN.cardBg, cardBorder: CUSTOMER_DESIGN.cardBorder } : undefined}
+              />
+            )}
 
             <div style={{ marginTop: 10, color: "#666", fontSize: 12, fontWeight: 700 }}>
               Einleitungstext aus automatischer Textanalyse.
@@ -1730,7 +2054,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                           {items.map((o) => (
                             <div key={o.id} style={{ border: "1px solid #e5e5e5", borderRadius: 10, padding: 12, background: "#fff" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                <span style={{ fontWeight: 800, color: "#111" }}>{o.title}</span>
+                                <span style={{ fontWeight: 800, color: "#111" }}>{sanitizeForDisplay(o.title ?? "")}</span>
                                 <div style={{ display: "flex", gap: 8, fontSize: 11, fontWeight: 700 }}>
                                   <span style={{ color: o.potential === "high" ? "#b00020" : o.potential === "medium" ? "#a36b00" : "#666" }}>
                                     Potential: {o.potential}
@@ -1739,11 +2063,11 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                                   {o.assertiveness && <span style={{ color: "#666" }}>Assertiv: {o.assertiveness}</span>}
                                 </div>
                               </div>
-                              <div style={{ marginTop: 8, fontSize: 13, color: "#333" }}>{o.reason}</div>
+                              <div style={{ marginTop: 8, fontSize: 13, color: "#333", whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(o.reason ?? "")}</div>
                               {o.sourceTextSnippets && o.sourceTextSnippets.length > 0 && (
                                 <div style={{ marginTop: 8, fontSize: 11, color: "#999", fontFamily: "ui-monospace, monospace" }}>
                                   {o.sourceTextSnippets.slice(0, 2).map((s, i) => (
-                                    <div key={i} style={{ marginTop: 4 }}>&quot;{s.slice(0, 100)}{s.length > 100 ? "…" : ""}&quot;</div>
+                                    <div key={i} style={{ marginTop: 4 }}>&quot;{sanitizeForDisplay(String(s).slice(0, 100))}{s.length > 100 ? "…" : ""}&quot;</div>
                                   ))}
                                 </div>
                               )}
@@ -1778,6 +2102,234 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           </div>
 
           </div>
+          )}
+
+          {/* Tab-Inhalt: Vorbemerkungen – lesbare Dokumentansicht (Standard + Experte), keine Risiko-/Technik-Vermischung */}
+          {resultTab === "vorbemerkungen" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16 }}>
+            <div
+              style={{
+                padding: customerRoute ? "18px 20px" : "14px 18px",
+                borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 12,
+                background: customerRoute ? "#e8f4f8" : "#f0f4f8",
+                border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e2e8f0",
+                marginBottom: 4,
+              }}
+            >
+              <p style={{ margin: 0, color: customerRoute ? CUSTOMER_DESIGN.textPrimary : "#334155", fontSize: 14, lineHeight: 1.65 }}>
+                <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.vorbemerkungen}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.vorbemerkungen}
+              </p>
+            </div>
+            <div style={{ border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e5e5", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadiusLg : 14, padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16, background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
+              <div style={{ marginBottom: 16 }}>
+                <label htmlFor="vorbemerkungen-suche" style={{ display: "block", fontSize: 13, fontWeight: 600, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#475569", marginBottom: 6 }}>
+                  In Vorbemerkungen suchen
+                </label>
+                <input
+                  id="vorbemerkungen-suche"
+                  type="text"
+                  placeholder="Suchbegriff eingeben …"
+                  value={vorbemerkungenSearchQuery}
+                  onChange={(e) => {
+                    setVorbemerkungenSearchQuery(e.target.value);
+                    setVorbemerkungenCurrentHitIndex(0);
+                  }}
+                  style={{
+                    width: "100%",
+                    maxWidth: 360,
+                    padding: "10px 14px",
+                    borderRadius: customerRoute ? CUSTOMER_DESIGN.radiusButton : 10,
+                    border: `1px solid ${customerRoute ? CUSTOMER_DESIGN.cardBorder : "#e2e8f0"}`,
+                    background: "#fff",
+                    fontSize: 14,
+                    color: customerRoute ? CUSTOMER_DESIGN.textPrimary : "#0f172a",
+                  }}
+                />
+              </div>
+              {vorbemerkungenSearchQuery.trim() && (
+                <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  {vorbemerkungenMatchCount === 0 ? (
+                    <span style={{ fontSize: 13, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#94a3b8" }}>
+                      Keine Treffer für &quot;{vorbemerkungenSearchQuery.trim()}&quot;.
+                    </span>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#475569" }}>
+                        {vorbemerkungenMatchCount} {vorbemerkungenMatchCount === 1 ? "Treffer" : "Treffer"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setVorbemerkungenCurrentHitIndex((i) => (i - 1 + vorbemerkungenMatchCount) % vorbemerkungenMatchCount)}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 8,
+                          border: `1px solid ${customerRoute ? CUSTOMER_DESIGN.cardBorder : "#e2e8f0"}`,
+                          background: "#fff",
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#475569",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Vorheriger
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVorbemerkungenCurrentHitIndex((i) => (i + 1) % vorbemerkungenMatchCount)}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 8,
+                          border: `1px solid ${customerRoute ? CUSTOMER_DESIGN.cardBorder : "#e2e8f0"}`,
+                          background: "#fff",
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#475569",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Nächster
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              <VorbemerkungenDocumentView
+                content={vortextForDocumentView}
+                maxHeight="420px"
+                searchQuery={vorbemerkungenSearchQuery.trim() || undefined}
+                theme={customerRoute ? { textPrimary: CUSTOMER_DESIGN.textPrimary, textSecondary: CUSTOMER_DESIGN.textSecondary, cardBorder: CUSTOMER_DESIGN.cardBorder } : undefined}
+              />
+              {vortextForDocumentViewDisplay.trim().length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <button
+                    type="button"
+                    onClick={() => setVorbemerkungenModalOpen(true)}
+                    style={{
+                      padding: "10px 16px",
+                      borderRadius: customerRoute ? CUSTOMER_DESIGN.radiusButton : 10,
+                      border: `1px solid ${customerRoute ? CUSTOMER_DESIGN.cardBorder : "#ddd"}`,
+                      background: "transparent",
+                      color: customerRoute ? CUSTOMER_DESIGN.primary : "#111",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Volltext lesen
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+          )}
+
+          {/* Tab-Inhalt: Positionen – vorhandene LV-Positionen aus GAEB (Standard + Experte), nur Anzeige */}
+          {resultTab === "positionen" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16 }}>
+            <div
+              style={{
+                padding: customerRoute ? "18px 20px" : "14px 18px",
+                borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 12,
+                background: customerRoute ? "#e8f4f8" : "#f0f4f8",
+                border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e2e8f0",
+                marginBottom: 4,
+              }}
+            >
+              <p style={{ margin: 0, color: customerRoute ? CUSTOMER_DESIGN.textPrimary : "#334155", fontSize: 14, lineHeight: 1.65 }}>
+                <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.positionen}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.positionen}
+              </p>
+            </div>
+            <div style={{ border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e5e5", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadiusLg : 14, padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16, background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
+              <div style={{ marginBottom: 16 }}>
+                <label htmlFor="positionen-suche" style={{ display: "block", fontSize: 13, fontWeight: 600, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#475569", marginBottom: 6 }}>
+                  In Positionen suchen
+                </label>
+                <input
+                  id="positionen-suche"
+                  type="text"
+                  placeholder="Suchbegriff eingeben …"
+                  value={positionenSearchQuery}
+                  onChange={(e) => {
+                    setPositionenSearchQuery(e.target.value);
+                    setPositionenCurrentHitIndex(0);
+                  }}
+                  style={{
+                    width: "100%",
+                    maxWidth: 360,
+                    padding: "10px 14px",
+                    borderRadius: customerRoute ? CUSTOMER_DESIGN.radiusButton : 10,
+                    border: `1px solid ${customerRoute ? CUSTOMER_DESIGN.cardBorder : "#e2e8f0"}`,
+                    background: "#fff",
+                    fontSize: 14,
+                    color: customerRoute ? CUSTOMER_DESIGN.textPrimary : "#0f172a",
+                  }}
+                />
+              </div>
+              {positionenSearchQuery.trim() && (
+                <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  {positionenMatchCount === 0 ? (
+                    <span style={{ fontSize: 13, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#94a3b8" }}>
+                      Keine Treffer für &quot;{positionenSearchQuery.trim()}&quot;.
+                    </span>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#475569" }}>
+                        {positionenMatchCount} {positionenMatchCount === 1 ? "Treffer" : "Treffer"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPositionenCurrentHitIndex((i) => (i - 1 + positionenMatchCount) % positionenMatchCount)}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 8,
+                          border: `1px solid ${customerRoute ? CUSTOMER_DESIGN.cardBorder : "#e2e8f0"}`,
+                          background: "#fff",
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#475569",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Vorheriger
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPositionenCurrentHitIndex((i) => (i + 1) % positionenMatchCount)}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 8,
+                          border: `1px solid ${customerRoute ? CUSTOMER_DESIGN.cardBorder : "#e2e8f0"}`,
+                          background: "#fff",
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#475569",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Nächster
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              <VorbemerkungenDocumentView
+                content={positionsForDocumentView}
+                maxHeight="420px"
+                variant="positionen"
+                searchQuery={positionenSearchQuery.trim() || undefined}
+                theme={customerRoute ? { textPrimary: CUSTOMER_DESIGN.textPrimary, textSecondary: CUSTOMER_DESIGN.textSecondary, cardBorder: CUSTOMER_DESIGN.cardBorder } : undefined}
+              />
+            </div>
+          </div>
+          )}
+
+          {vorbemerkungenModalOpen && vortextForDocumentViewDisplay.trim().length > 0 && (
+            <VortextDetailModal
+              title={DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.vorbemerkungen}
+              longText={vortextForDocumentViewDisplay}
+              onClose={() => setVorbemerkungenModalOpen(false)}
+              theme={customerRoute ? { textPrimary: CUSTOMER_DESIGN.textPrimary, textSecondary: CUSTOMER_DESIGN.textSecondary, cardBg: CUSTOMER_DESIGN.cardBg, cardBorder: CUSTOMER_DESIGN.cardBorder } : undefined}
+            />
           )}
 
           {/* Tab-Inhalt: Nachtragspotenzial – Darstellung aus vorhandener Nachtragsanalyse, keine neue Logik */}
@@ -1864,7 +2416,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                     <div style={{ marginTop: 14, fontWeight: 800, color: "#333", fontSize: 14 }}>Mögliche Ursachen:</div>
                     <ul style={{ marginTop: 8, paddingLeft: 20, color: "#333", fontSize: 14, lineHeight: 1.6 }}>
                       {deduplicatedOpportunities.map((o) => (
-                        <li key={o.id} style={{ marginBottom: 4 }}>{o.title}</li>
+                        <li key={o.id} style={{ marginBottom: 4 }}>{sanitizeForDisplay(o.title ?? "")}</li>
                       ))}
                     </ul>
                   </>
@@ -1992,7 +2544,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               ) : (
                 filteredFindings.map((f) => (
                   <div key={f.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
-                    <div style={{ fontWeight: 800, color: "#111", marginBottom: 6 }}>{f.title}</div>
+                    <div style={{ fontWeight: 800, color: "#111", marginBottom: 6 }}>{sanitizeForDisplay(f.title ?? "")}</div>
                     <div style={{ fontSize: 13, color: "#666" }}>Kategorie: {catLabel(f.category)}</div>
                     <div style={{ fontSize: 13, color: "#666", marginTop: 2 }}>Risiko: {severityLabel(f.severity)}</div>
                   </div>
@@ -2026,8 +2578,8 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                         {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
                         {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}><span style={{ color: "#666", fontWeight: 700 }}>Regex:</span> {(f as any).regex}</div>}
                         {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Keywords:</span> {(f as any).keywords}</div>}
-                        <div style={{ marginTop: 4, fontWeight: 800, color: "#111" }}>{f.title}</div>
-                        {f.detail && <div style={{ color: "#444" }}>{f.detail}</div>}
+                        <div style={{ marginTop: 4, fontWeight: 800, color: "#111" }}>{sanitizeForDisplay(f.title ?? "")}</div>
+                        {f.detail && <div style={{ color: "#444", whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(f.detail)}</div>}
                         <div><span style={{ color: "#666", fontWeight: 700 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
                       </div>
                     </div>
@@ -2057,8 +2609,8 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                         {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
                         {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}><span style={{ color: "#666", fontWeight: 700 }}>Regex:</span> {(f as any).regex}</div>}
                         {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Keywords:</span> {(f as any).keywords}</div>}
-                        <div style={{ marginTop: 4, fontWeight: 800, color: "#111" }}>{f.title}</div>
-                        {f.detail && <div style={{ color: "#444" }}>{f.detail}</div>}
+                        <div style={{ marginTop: 4, fontWeight: 800, color: "#111" }}>{sanitizeForDisplay(f.title ?? "")}</div>
+                        {f.detail && <div style={{ color: "#444", whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(f.detail)}</div>}
                         <div><span style={{ color: "#666", fontWeight: 700 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
                       </div>
                     </div>
@@ -2092,8 +2644,8 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                         {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
                         {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}><span style={{ color: "#666", fontWeight: 700 }}>Regex:</span> {(f as any).regex}</div>}
                         {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: "#666", fontWeight: 700 }}>Keywords:</span> {(f as any).keywords}</div>}
-                        <div style={{ marginTop: 4, fontWeight: 800, color: "#111" }}>{f.title}</div>
-                        {f.detail && <div style={{ color: "#444" }}>{f.detail}</div>}
+                        <div style={{ marginTop: 4, fontWeight: 800, color: "#111" }}>{sanitizeForDisplay(f.title ?? "")}</div>
+                        {f.detail && <div style={{ color: "#444", whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(f.detail)}</div>}
                         <div><span style={{ color: "#666", fontWeight: 700 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
                       </div>
                     </div>
@@ -2164,11 +2716,11 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                                   <span style={{ fontSize: 11, color: "#999" }}>← {q.sourceFindingId}</span>
                                 )}
                               </div>
-                              <div style={{ marginTop: 8, fontWeight: 700, color: "#333" }}>{q.question}</div>
-                              <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>{q.reason}</div>
+                              <div style={{ marginTop: 8, fontWeight: 700, color: "#333", whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(q.question ?? "")}</div>
+                              <div style={{ marginTop: 6, fontSize: 12, color: "#666", whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(q.reason ?? "")}</div>
                               {q.sourceTextSnippet && (
-                                <div style={{ marginTop: 6, fontSize: 11, color: "#999", fontFamily: "monospace" }}>
-                                  &quot;{q.sourceTextSnippet}&quot;
+                                <div style={{ marginTop: 6, fontSize: 11, color: "#999", fontFamily: "monospace", whiteSpace: "pre-wrap" }}>
+                                  &quot;{sanitizeForDisplay(q.sourceTextSnippet)}&quot;
                                 </div>
                               )}
                             </div>
@@ -2265,8 +2817,8 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                                   {a.sourceQuestionId && <>Frage: {a.sourceQuestionId}</>}
                                 </span>
                               </div>
-                              <div style={{ marginTop: 8, fontWeight: 700, color: "#333" }}>{a.assumption}</div>
-                              <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>{a.reason}</div>
+                              <div style={{ marginTop: 8, fontWeight: 700, color: "#333", whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(a.assumption ?? "")}</div>
+                              <div style={{ marginTop: 6, fontSize: 12, color: "#666", whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(a.reason ?? "")}</div>
                             </div>
                           ))}
                         </div>

@@ -2,8 +2,8 @@
 import { ScorePage } from "../admin/score/page";
 
 export const metadata = {
-  title: "LV Analyse",
-  description: "Risiko- und Bewertungsanalyse für Leistungsverzeichnisse",
+  title: "Leistungsverzeichnis analysieren",
+  description: "Risiken, Unklarheiten und Nachtragspotenziale vor der Angebotsabgabe erkennen – mit Rückfragen und Angebotsklarstellungen.",
 };
 
 export default function AnalysePage() {

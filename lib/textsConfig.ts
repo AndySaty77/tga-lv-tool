@@ -23,6 +23,8 @@ export type TextsConfig = {
   };
   explanation: {
     risiken: string;
+    vorbemerkungen: string;
+    positionen: string;
     nachtragspotenzial: string;
     rueckfragen: string;
     angebotsklarstellungen: string;
@@ -56,6 +58,8 @@ export const DEFAULT_TEXTS_CONFIG: TextsConfig = {
     tabLabels: {
       uebersicht: "Übersicht",
       risiken: "Risiken",
+      vorbemerkungen: "Vorbemerkungen",
+      positionen: "Positionen",
       nachtragspotenzial: "Nachtragspotenzial",
       rueckfragen: "Rückfragen",
       angebotsklarstellungen: "Angebotsklarstellungen",
@@ -99,6 +103,10 @@ export const DEFAULT_TEXTS_CONFIG: TextsConfig = {
   explanation: {
     risiken:
       "In diesem Bereich werden mögliche Risiken im Leistungsverzeichnis dargestellt: unklare Leistungsbeschreibungen, fehlende Angaben, widersprüchliche oder mehrdeutige Formulierungen. Dazu zählen automatisch erkannte Projektdaten aus der Einleitung sowie vom System und von der KI identifizierte Risikostellen im Text. Eine systematische Prüfung dieser Punkte hilft, Nachforderungen und Streitigkeiten in der Ausführung zu reduzieren.",
+    vorbemerkungen:
+      "Hier können Sie den bereinigten Vortext und die Vorbemerkungen des Leistungsverzeichnisses als lesbares Dokument einsehen – ohne technische Metadaten oder Rohdaten. Die Darstellung entspricht der für die Risikoanalyse verwendeten Einleitung.",
+    positionen:
+      "Hier werden die Positionsinhalte des Leistungsverzeichnisses angezeigt – derselbe bereinigte Text, der aus Ihrer GAEB-Datei bzw. aus der automatischen Aufbereitung stammt.",
     nachtragspotenzial:
       "Dieser Bereich zeigt mögliche Ursachen für spätere Nachträge oder zusätzliche Kosten während der Bauausführung. Unklare Leistungsgrenzen, fehlende Schnittstellendefinitionen oder nicht beschriebene Erschwernisse können zu Nachforderungen führen. Die Analyse nutzt die erkannten Risiken und Projektdaten, um solche Treiber zu identifizieren. So können Sie früh gegensteuern oder im Angebot entsprechende Annahmen und Klarstellungen formulieren.",
     rueckfragen:
