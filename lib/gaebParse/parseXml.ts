@@ -3,7 +3,7 @@
  */
 
 import type { GaebParseResult, GaebParseMeta, GaebSection, GaebItem } from "./types";
-import { hardCut, normalizeNewlines, stripHtml } from "./utils";
+import { hardCut, normalizeNewlines, stripHtml, MAX_XML_PARSING_CHARS } from "./utils";
 
 export type ParseXmlOpts = {
   filename?: string;
@@ -14,7 +14,7 @@ export type ParseXmlOpts = {
  * Fallback: wenn XML-Parsing fehlschlägt, wird cleanedText + Rohtext zurückgegeben.
  */
 export function parseXml(raw: string, opts?: ParseXmlOpts): GaebParseResult {
-  const rawNorm = normalizeNewlines(hardCut(raw));
+  const rawNorm = normalizeNewlines(hardCut(raw, MAX_XML_PARSING_CHARS));
   const warnings: string[] = [];
   const meta: GaebParseMeta = {
     filename: opts?.filename,
@@ -47,19 +47,25 @@ export function parseXml(raw: string, opts?: ParseXmlOpts): GaebParseResult {
       structureConfidence = Math.min(1, structureConfidence + 0.2);
     }
 
-    // Positionen: <Position>, <LvPosition>, <Pos>, <Item> (DA83)
-    const posBlocks = rawNorm.matchAll(
-      /<(?:Position|LvPosition|Pos|Item)[^>]*>([\s\S]*?)<\/(?:Position|LvPosition|Pos|Item)>/gi
-    );
+    // Positionen: <Position>, <LvPosition>, <Pos>, <Item> (DA83/X83); namespace-robust (optional prefix z. B. da83:)
+    const posTagRegex =
+      /<(?:[a-zA-Z_][\w.-]*:)?(?:Position|LvPosition|Pos|Item)\s[^>]*>([\s\S]*?)<\/(?:[a-zA-Z_][\w.-]*:)?(?:Position|LvPosition|Pos|Item)\s*>/gi;
+    const posBlocks = rawNorm.matchAll(posTagRegex);
     const posArr: string[] = [];
+    const rnoPartAttr = /RNoPart\s*=\s*["']([^"']*)["']/i;
     for (const m of posBlocks) {
+      const fullTag = m[0];
       const innerXml = m[1] ?? "";
       const block = stripHtml(innerXml).trim();
       if (block.length > 2) {
         posArr.push(block);
 
-        // Strukturierte Positionsfelder aus dem unveränderten XML-Block lesen
+        const openTag = fullTag.match(/<(?:[a-zA-Z_][\w.-]*:)?(?:Position|LvPosition|Pos|Item)\s([^>]*)>/i);
+        const itemAttrs = openTag?.[1] ?? "";
+        const rnoFromAttr = itemAttrs.match(rnoPartAttr)?.[1]?.trim();
         const nr =
+          rnoFromAttr ||
+          innerXml.match(/<RNoPart[^>]*>([^<]*)<\/RNoPart>/i)?.[1]?.trim() ||
           innerXml.match(/<PosNr[^>]*>([^<]*)<\/PosNr>/i)?.[1]?.trim() ||
           innerXml.match(/<Nr>([^<]*)<\/Nr>/i)?.[1]?.trim() ||
           innerXml.match(/<ItemNo[^>]*>([^<]*)<\/ItemNo>/i)?.[1]?.trim();
@@ -69,11 +75,22 @@ export function parseXml(raw: string, opts?: ParseXmlOpts): GaebParseResult {
           innerXml.match(/<ShortText[^>]*>([\s\S]*?)<\/ShortText>/i)?.[1] ||
           innerXml.match(/<OutlineAddText[^>]*>([\s\S]*?)<\/OutlineAddText>/i)?.[1];
 
-        const longRaw =
+        let longRaw =
           innerXml.match(/<Langtext[^>]*>([\s\S]*?)<\/Langtext>/i)?.[1] ||
           innerXml.match(/<LongText[^>]*>([\s\S]*?)<\/LongText>/i)?.[1] ||
           innerXml.match(/<DetailAddText[^>]*>([\s\S]*?)<\/DetailAddText>/i)?.[1] ||
           innerXml.match(/<AddText[^>]*>([\s\S]*?)<\/AddText>/i)?.[1];
+        if (!longRaw && /<Description[^>]*>/i.test(innerXml)) {
+          const descBlock = innerXml.match(/<Description[^>]*>([\s\S]*?)<\/Description>/i)?.[1];
+          if (descBlock) {
+            longRaw =
+              descBlock.match(/<DetailTxt[^>]*>([\s\S]*?)<\/DetailTxt>/i)?.[1] ||
+              descBlock.match(/<CompleteText[^>]*>([\s\S]*?)<\/CompleteText>/i)?.[1];
+          }
+        }
+        if (!longRaw) {
+          longRaw = innerXml.match(/<DetailTxt[^>]*>([\s\S]*?)<\/DetailTxt>/i)?.[1];
+        }
 
         const qty =
           innerXml.match(/<Menge[^>]*>([^<]*)<\/Menge>/i)?.[1]?.trim() ||
@@ -116,7 +133,7 @@ export function parseXml(raw: string, opts?: ParseXmlOpts): GaebParseResult {
 
     // Fallback: wenn kein Vortext aus XML, vor erstem Positions-/Item-Knoten nehmen
     if (!prefaceText && (rawNorm.includes("<Position") || rawNorm.includes("<Item"))) {
-      const firstPosIdx = rawNorm.search(/<(?:Position|LvPosition|Pos|Item)\b/i);
+      const firstPosIdx = rawNorm.search(/<(?:[a-zA-Z_][\w.-]*:)?(?:Position|LvPosition|Pos|Item)\s/i);
       if (firstPosIdx !== -1) {
         const pre = rawNorm.slice(0, firstPosIdx);
         // Bevorzugt AddText-/OutlineAddText-/DetailAddText-Blöcke im Kopfbereich

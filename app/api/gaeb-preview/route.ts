@@ -39,7 +39,8 @@ export async function POST(req: Request) {
     let positionsSource: "normalized-items" | "legacy-structured-items" = "legacy-structured-items";
 
     if (parsed.formatDetected === "gaeb-xml") {
-      const norm = parseGaebXmlNormalized(parsed.rawText);
+      // Vollständige Datei für normalisierte Struktur (X83 mit vielen Positionen), nicht parsed.rawText (kann bei sehr großen Dateien gekürzt sein)
+      const norm = parseGaebXmlNormalized(raw);
       normalized = {
         groups: norm.groups,
         remarks: norm.remarks,
@@ -48,7 +49,7 @@ export async function POST(req: Request) {
         topLabelForPreface: norm.topLabelForPreface,
         debugExtra: norm.debugExtra,
       };
-      rawStructures = debugRawStructures(parsed.rawText);
+      rawStructures = debugRawStructures(raw.length > (parsed.rawText?.length ?? 0) ? raw : parsed.rawText);
 
       const globalRemarks = (norm.remarks as { scope?: string }[]).filter((r) => r.scope === "global");
       if (globalRemarks.length > 0) {
@@ -139,6 +140,19 @@ export async function POST(req: Request) {
     const positionsForPreview =
       positionsFromNormalized.length > 0 ? positionsFromNormalized : parsed.itemTexts;
 
+    // structure.positionen.items: bei GAEB-XML aus normalized (vollständige Datei), sonst aus parsed
+    const structurePositionenItems =
+      normalized?.items != null && normalized.items.length > 0
+        ? (normalized.items as { posNr?: string; shortText?: string; longText?: string; quantity?: string; unit?: string }[]).map((it) => ({
+            posNr: it.posNr,
+            shortText: it.shortText,
+            longText: it.longText,
+            quantity: it.quantity,
+            unit: it.unit,
+            raw: [it.posNr, it.shortText, it.longText, it.quantity, it.unit].filter(Boolean).join(" "),
+          }))
+        : parsed.items ?? [];
+
     const firstNormalizedItem =
       normalized && normalized.items.length > 0
         ? (() => {
@@ -176,7 +190,7 @@ export async function POST(req: Request) {
         vorbemerkungen: parsed.vorbemerkungenText ?? "",
         vortext: parsed.vortextText ?? "",
         abschnitte: parsed.sectionTexts,
-        positionen: { raw: parsed.itemTexts, items: parsed.items },
+        positionen: { raw: positionsForPreview, items: structurePositionenItems },
         raw: {
           full: parsed.rawText,
           cutMethod: parsed.meta.cutMethod ?? parsed.meta.parserUsed ?? "unknown",
@@ -277,6 +291,28 @@ export async function POST(req: Request) {
         topLevelBoQBodyChildSequence: (normalized as { debugExtra?: { topLevelBoQBodyChildSequence?: string[] } })?.debugExtra?.topLevelBoQBodyChildSequence ?? null,
         globalRemarkTexts: (normalized as { debugExtra?: { globalRemarkTexts?: string[] } })?.debugExtra?.globalRemarkTexts ?? null,
         groupRemarkTexts: (normalized as { debugExtra?: { groupRemarkTexts?: string[] } })?.debugExtra?.groupRemarkTexts ?? null,
+        positionsParserDebug: (normalized as { debugExtra?: { positionsParserDebug?: unknown } })?.debugExtra?.positionsParserDebug ?? null,
+        positionsRegressionCheck:
+          normalized?.items != null && (normalized.items as unknown[]).length > 0
+            ? (() => {
+                const arr = normalized!.items as { posNr?: string; quantity?: string; unit?: string; shortText?: string; longText?: string }[];
+                const first = arr[0];
+                const hasRNoPart = (first?.posNr ?? "").trim().length > 0;
+                const hasQty = (first?.quantity ?? "").trim().length > 0;
+                const hasQU = (first?.unit ?? "").trim().length > 0;
+                const hasText = ((first?.shortText ?? "").trim() + (first?.longText ?? "").trim()).length > 0;
+                const ok = hasRNoPart && hasQty && hasQU && hasText;
+                return {
+                  ok,
+                  positionCount: arr.length,
+                  firstHasRNoPart: hasRNoPart,
+                  firstHasQty: hasQty,
+                  firstHasQU: hasQU,
+                  firstHasText: hasText,
+                  message: ok ? "ok" : [hasRNoPart ? null : "missing RNoPart", hasQty ? null : "missing Qty", hasQU ? null : "missing QU", hasText ? null : "missing text"].filter(Boolean).join("; "),
+                };
+              })()
+            : null,
         formattedPrefaceLength,
         prefaceFormattingApplied,
         positionRenderMode:

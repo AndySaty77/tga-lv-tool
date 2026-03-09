@@ -24,8 +24,12 @@ import { formatRemarkOrLabelText } from "./textFormatting";
 
 const RX_LBLTX = /<LblTx[^>]*>([\s\S]*?)<\/LblTx>/i;
 const RX_RNOPART_ATTR = /RNoPart\s*=\s*["']([^"']*)["']/i;
+const RX_RNOPART_ELEMENT = /<RNoPart[^>]*>([^<]*)<\/RNoPart>/i;
 const RX_DETAIL_TXT_IN_REMARK = /<DetailTxt[^>]*>([\s\S]*?)<\/DetailTxt>/i;
-const RX_ITEM_BLOCK = /<Item\s[^>]*>([\s\S]*?)<\/Item>/gi;
+/** Item mit optionalem XML-Namespace-Prefix (z. B. da83:Item) für X83/DA83. */
+const RX_ITEM_BLOCK = /<(?:[a-zA-Z_][\w.-]*:)?Item\s[^>]*>([\s\S]*?)<\/(?:[a-zA-Z_][\w.-]*:)?Item\s*>/gi;
+/** BoQCtgy mit optionalem Namespace-Prefix. */
+const RX_BOQCTGY = /<(?:[a-zA-Z_][\w.-]*:)?BoQCtgy\s[^>]*>([\s\S]*?)<\/(?:[a-zA-Z_][\w.-]*:)?BoQCtgy\s*>/gi;
 
 /** Findet alle <TagName>…</TagName>-Blöcke in XML-Reihenfolge, inkl. verschachtelter. */
 function findAllTagRanges(xml: string, tagName: string): { start: number; end: number }[] {
@@ -91,8 +95,8 @@ export function parseGaebXmlNormalized(raw: string): GaebPreviewNormalized {
   const items: GaebPreviewItem[] = [];
   const norm = normalizeNewlines(raw);
 
-  // --- Gruppen: BoQCtgy mit RNoPart und LblTx (Hierarchie durch Reihenfolge + Level); Index für displayNodes ---
-  const boqCtgyBlocks = [...norm.matchAll(/<BoQCtgy\s[^>]*>([\s\S]*?)<\/BoQCtgy>/gi)];
+  // --- Gruppen: BoQCtgy mit RNoPart und LblTx (namespace-robust) ---
+  const boqCtgyBlocks = [...norm.matchAll(RX_BOQCTGY)];
   const groupStack: { rno: string; label: string; level: number }[] = [];
   const groupNodes: { idx: number; group: GaebPreviewGroup }[] = [];
   let level = 0;
@@ -252,14 +256,16 @@ export function parseGaebXmlNormalized(raw: string): GaebPreviewNormalized {
   // Ereignisse: BoQCtgy open/close und Item, nach Position im Text sortiert, um aktuellen Gruppenpfad pro Item zu kennen
   type Event = { idx: number; type: "boqOpen" | "boqClose" | "item"; rno?: string; itemInner?: string; itemAttrs?: string };
   const events: Event[] = [];
-  for (const m of norm.matchAll(/<BoQCtgy\s([^>]*)>/gi)) {
+  const boqOpenRegex = /<(?:[a-zA-Z_][\w.-]*:)?BoQCtgy\s([^>]*)>/gi;
+  for (const m of norm.matchAll(boqOpenRegex)) {
     events.push({ idx: m.index ?? 0, type: "boqOpen", rno: getRNoPartFromAttrs(m[1] ?? "") });
   }
-  for (const m of norm.matchAll(/<\/BoQCtgy>/gi)) {
+  const boqCloseRegex = /<\/(?:[a-zA-Z_][\w.-]*:)?BoQCtgy\s*>/gi;
+  for (const m of norm.matchAll(boqCloseRegex)) {
     events.push({ idx: m.index ?? 0, type: "boqClose" });
   }
   for (const m of norm.matchAll(RX_ITEM_BLOCK)) {
-    const openTag = m[0].match(/<Item\s([^>]*)>/i);
+    const openTag = m[0].match(/<(?:[a-zA-Z_][\w.-]*:)?Item\s([^>]*)>/i);
     events.push({
       idx: m.index ?? 0,
       type: "item",
@@ -279,7 +285,9 @@ export function parseGaebXmlNormalized(raw: string): GaebPreviewNormalized {
     } else if (ev.type === "item" && ev.itemInner != null) {
       const idx = ev.idx ?? 0;
       const inner = ev.itemInner;
-      const itemRno = ev.itemAttrs ? getRNoPartFromAttrs(ev.itemAttrs) : undefined;
+      const itemRno =
+        (ev.itemAttrs ? getRNoPartFromAttrs(ev.itemAttrs) : undefined) ??
+        inner.match(RX_RNOPART_ELEMENT)?.[1]?.trim();
       const itemRnoStr = itemRno != null ? itemRno : "";
       const shortText = extractOutlineText(inner);
       const longText = extractDetailTxt(inner);
@@ -391,10 +399,40 @@ export function parseGaebXmlNormalized(raw: string): GaebPreviewNormalized {
   allWithIdx.sort((a, b) => a.idx - b.idx);
   const displayNodes: GaebPreviewDisplayNode[] = allWithIdx.map((x) => x.node);
 
+  const rawItemMatches = [...norm.matchAll(RX_ITEM_BLOCK)];
+  const positionsParserDebug = {
+    rawItemCount: rawItemMatches.length,
+    structurePositionenItemsCount: items.length,
+    namespaceStrategy: "tag-name-with-optional-prefix",
+    firstItem:
+      items.length > 0
+        ? {
+            id: items[0].posNr,
+            RNoPart: items[0].posNr,
+            Qty: items[0].quantity,
+            QU: items[0].unit,
+            OutlineText: (items[0].shortText ?? "").slice(0, 120),
+            DetailTxt: (items[0].longText ?? "").slice(0, 200),
+          }
+        : null,
+    secondItem:
+      items.length > 1
+        ? {
+            id: items[1].posNr,
+            RNoPart: items[1].posNr,
+            Qty: items[1].quantity,
+            QU: items[1].unit,
+            OutlineText: (items[1].shortText ?? "").slice(0, 120),
+            DetailTxt: (items[1].longText ?? "").slice(0, 200),
+          }
+        : null,
+  };
+
   const debugExtra = {
     topLevelBoQBodyChildSequence,
     globalRemarkTexts: remarks.filter((r) => r.scope === "global").map((r) => r.text).slice(0, 3),
     groupRemarkTexts: remarks.filter((r) => r.scope === "group").map((r) => r.text).slice(0, 3),
+    positionsParserDebug,
   };
 
   return { groups, remarks, items, displayNodes, topLabelForPreface, debugExtra };
@@ -455,16 +493,16 @@ export function debugRawStructures(raw: string): RawStructureDebug {
     };
   }
 
-  const itemMatches = [...norm.matchAll(/<Item\s[^>]*>([\s\S]*?)<\/Item>/gi)];
+  const itemMatches = [...norm.matchAll(RX_ITEM_BLOCK)];
   for (let i = 0; i < Math.min(2, itemMatches.length); i++) {
     const m = itemMatches[i];
     const fullMatch = m?.[0];
     const inner = m?.[1] ?? "";
     if (!fullMatch) continue;
-    const openTag = fullMatch.match(/<Item\s([^>]*)>/i);
+    const openTag = fullMatch.match(/<(?:[a-zA-Z_][\w.-]*:)?Item\s([^>]*)>/i);
     const attrs = openTag?.[1] ?? "";
     const extracted = {
-      RNoPart: getRNoPartFromAttrs(attrs),
+      RNoPart: getRNoPartFromAttrs(attrs) ?? inner.match(RX_RNOPART_ELEMENT)?.[1]?.trim(),
       Qty:
         inner.match(/<Qty[^>]*>([^<]*)<\/Qty>/i)?.[1]?.trim() ??
         inner.match(/<Quantity[^>]*>([^<]*)<\/Quantity>/i)?.[1]?.trim() ??

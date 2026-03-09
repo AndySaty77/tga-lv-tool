@@ -152,15 +152,24 @@ export function extractOutlineText(innerXml: string): string {
 
 /**
  * DetailTxt aus XML-Block extrahieren (Langtext).
- * Sucht nach <DetailTxt>, <DetailAddText>, <Langtext>, <LongText>, <AddText> etc.
+ * Sucht nach <DetailTxt>, <DetailAddText>, <Langtext>, <LongText>, <AddText>.
+ * Unterstützt Pfad Description > CompleteText > DetailTxt (X83/DA83).
  */
 export function extractDetailTxt(innerXml: string): string {
-  const raw =
+  let raw =
     innerXml.match(/<DetailTxt[^>]*>([\s\S]*?)<\/DetailTxt>/i)?.[1] ??
     innerXml.match(/<DetailAddText[^>]*>([\s\S]*?)<\/DetailAddText>/i)?.[1] ??
     innerXml.match(/<Langtext[^>]*>([\s\S]*?)<\/Langtext>/i)?.[1] ??
     innerXml.match(/<LongText[^>]*>([\s\S]*?)<\/LongText>/i)?.[1] ??
     innerXml.match(/<AddText[^>]*>([\s\S]*?)<\/AddText>/i)?.[1];
+  if (!raw && /<Description[^>]*>/i.test(innerXml)) {
+    const descBlock = innerXml.match(/<Description[^>]*>([\s\S]*?)<\/Description>/i)?.[1];
+    if (descBlock) {
+      raw =
+        descBlock.match(/<DetailTxt[^>]*>([\s\S]*?)<\/DetailTxt>/i)?.[1] ??
+        descBlock.match(/<CompleteText[^>]*>([\s\S]*?)<\/CompleteText>/i)?.[1];
+    }
+  }
   return raw ? richTextToPlainText(raw) : "";
 }
 

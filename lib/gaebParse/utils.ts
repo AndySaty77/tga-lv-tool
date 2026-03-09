@@ -4,6 +4,9 @@
 
 export const HARD_MAX_CHARS = 200_000;
 
+/** Für XML-Parser: große X83/DA83-Dateien vollständig parsen (z. B. 243 Items). */
+export const MAX_XML_PARSING_CHARS = 1_500_000;
+
 export function hardCut(s: string, max: number = HARD_MAX_CHARS): string {
   const t = (s ?? "").toString();
   return t.length > max ? t.slice(0, max) : t;
