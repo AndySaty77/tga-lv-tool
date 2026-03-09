@@ -1,11 +1,12 @@
 // app/admin/score/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import React, { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { Lesansicht } from "@/components/Lesansicht";
 import { VorbemerkungenDocumentView } from "@/components/VorbemerkungenDocumentView";
 import { VortextDetailModal } from "@/components/VortextDetailModal";
 import { sanitizeForDisplay, stripTechnicalNoiseForDisplay } from "@/lib/displayText";
+import { normalizeViewerPositionenText, normalizeViewerVorbemerkungenText } from "@/lib/gaebViewerNormalize";
 import { AMPEL_THRESHOLDS } from "@/lib/scoringConfig";
 import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
 
@@ -402,6 +403,8 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
   const [lvText, setLvText] = useState("");
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [loading, setLoading] = useState(false);
+  /** 'file' = Datei wird vorbereitet (sofortiges Feedback), 'analyze' = mehrstufige Analyseanzeige. */
+  const [loadingPhase, setLoadingPhase] = useState<"file" | "analyze">("analyze");
   /** Fortschritts-Schritt für die Analyse-Warteanzeige (0–5), zeitbasiert. */
   const [analysisStep, setAnalysisStep] = useState(0);
   /** Rotierender Unterstatus im letzten Schritt (nur UI, bessere Fortschrittswahrnehmung). */
@@ -420,7 +423,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
   const [gaebPreviewError, setGaebPreviewError] = useState<string | null>(null);
   const [gaebPreview, setGaebPreview] = useState<any>(null);
   const [gaebTab, setGaebTab] = useState<
-    "vortext" | "positions" | "raw" | "clean" | "llm_vortext" | "llm_positions"
+    "structure" | "vortext" | "positions" | "raw" | "clean" | "llm_vortext" | "llm_positions"
   >("vortext");
 
   // ===== SPLIT (LLM) STATE =====
@@ -643,6 +646,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       const j = await r.json();
       if (!r.ok) throw new Error(j?.message || j?.error || "gaeb-preview failed");
       setGaebPreview(j);
+      if (j?.normalized) setGaebTab("structure");
       return j;
     } catch (e: any) {
       setGaebPreviewError(e?.message || "gaeb-preview failed");
@@ -725,10 +729,14 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     options?: { gaebPreviewData?: any; splitData?: SplitResult | null }
   ) => {
     const textToUse = (textOverride ?? lvText).trim();
-    if (!textToUse) return;
+    if (!textToUse) {
+      setLoading(false);
+      return;
+    }
 
     setError(null);
     setLoading(true);
+    setLoadingPhase("analyze");
     setResult(null);
     resetVortext();
 
@@ -795,9 +803,9 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     if (!loading) {
       setAnalysisStep(0);
       setLastStepSubIndex(0);
+      setLoadingPhase("analyze");
       return;
     }
-    setAnalysisStep(0);
     setLastStepSubIndex(0);
     const interval = setInterval(() => {
       setAnalysisStep((s) => Math.min(s + 1, 5));
@@ -824,7 +832,6 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     resetVortext();
     resetGaebPreview();
     resetSplit();
-
     setLastFile(file);
 
     if (file.size > MAX_FILE_BYTES) {
@@ -834,18 +841,36 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       return;
     }
 
-    // 1) Preview (Debug)
-    const previewData = await runGaebPreview(file);
+    // Sofort Ladeanzeige, damit Nutzer direkt Feedback sieht (vor allen async Schritten)
+    if (autoAnalyze) {
+      setLoading(true);
+      setLoadingPhase("file");
+      setAnalysisStep(0);
+    }
 
-    // 2) LLM Split (Echte Trennung, stabiler als Guess)
-    const splitData = await runGaebSplitLLM(file);
+    try {
+      // 1) Preview (Debug)
+      const previewData = await runGaebPreview(file);
 
-    // 3) Originaltext in Textarea (Debug/Transparenz)
-    const text = await file.text();
-    setFileMeta({ name: file.name, size: file.size });
-    setLvText(text);
+      // 2) LLM Split (Echte Trennung, stabiler als Guess)
+      const splitData = await runGaebSplitLLM(file);
 
-    if (autoAnalyze) await analyze(text, { gaebPreviewData: previewData ?? undefined, splitData: splitData ?? undefined });
+      // 3) Originaltext in Textarea (Debug/Transparenz)
+      const text = await file.text();
+      setFileMeta({ name: file.name, size: file.size });
+      setLvText(text);
+
+      if (autoAnalyze) {
+        setLoadingPhase("analyze");
+        setAnalysisStep(0);
+        await analyze(text, { gaebPreviewData: previewData ?? undefined, splitData: splitData ?? undefined });
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Fehler beim Laden oder bei der Analyse");
+      if (autoAnalyze) setLoading(false);
+    } finally {
+      if (!autoAnalyze) setLoading(false);
+    }
   };
 
   const onPickFile = async (file: File | null) => {
@@ -966,6 +991,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     if (gaebTab === "llm_positions") return (split?.positions ?? "").toString();
 
     if (!gaebPreview) return "";
+    if (gaebTab === "structure") return gaebPreview.vortextGuessClean ?? "";
     if (gaebTab === "vortext") return gaebPreview.vortextGuessClean ?? "";
     if (gaebTab === "positions") return gaebPreview.positionsGuessClean ?? "";
     if (gaebTab === "raw") return gaebPreview.rawPreview ?? "";
@@ -982,14 +1008,47 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     return gaebPreview?.structure?.positionen?.raw ?? "";
   }, [gaebPreview?.structure]);
 
+  /** Strukturierte Vorbemerkungen/Vortext-Quelle (Parser-Felder oder XML-Preface), nur für Anzeige wenn vorhanden. */
+  const structuredVortextForView = useMemo(() => {
+    const vorb = (gaebPreview?.structure?.vorbemerkungen ?? "").trim();
+    const vort = (gaebPreview?.structure?.vortext ?? "").trim();
+    if (vorb || vort) return [vorb, vort].filter(Boolean).join("\n\n").trim();
+
+    // Für GAEB-XML/DA83-Dateien: vollständiger Preface-Text aus dem Parser (vortextFullClean) als strukturierte Quelle verwenden.
+    const isXml = gaebPreview?.structure?.meta?.formatDetected === "gaeb-xml";
+    const preface = (gaebPreview as any)?.vortextFullClean ?? (gaebPreview as any)?.vortextFullRaw;
+    if (isXml && typeof preface === "string" && preface.trim().length > 0) {
+      return preface.trim();
+    }
+
+    return "";
+  }, [gaebPreview]);
+
   const effectiveVortextLen = (split?.vortext ?? structureVortext ?? "").trim().length;
   const effectivePositionsLen = (split?.positions ?? structurePositions ?? "").trim().length;
 
-  /** Vortext für die Dokumentleseansicht (Vorbemerkungen-Tab). Bevorzugt KI/Split, sonst Struktur. */
+  /** Explizite Quellenwahl Vorbemerkungen – nur für Verifikation/Debug. */
+  const vortextSourceUsed = useMemo((): string => {
+    if (structuredVortextForView.length > 0) {
+      const vorb = (gaebPreview?.structure?.vorbemerkungen ?? "").trim();
+      const vort = (gaebPreview?.structure?.vortext ?? "").trim();
+      return vorb || vort ? "structured-vortext" : "vortextFullClean";
+    }
+    const s = (split?.vortext ?? "").trim();
+    if (s.length > 0) return "split-vortext";
+    const g = (gaebPreview?.vortextGuessClean ?? "").trim();
+    if (g.length > 0) return "vortextGuessClean";
+    const st = (structureVortext ?? "").trim();
+    if (st.length > 0) return "structureVortext";
+    return "none";
+  }, [structuredVortextForView, gaebPreview?.structure?.vorbemerkungen, gaebPreview?.structure?.vortext, split?.vortext, gaebPreview?.vortextGuessClean, structureVortext]);
+
+  /** Vortext für die Dokumentleseansicht (Vorbemerkungen-Tab). Strukturierte Quelle bevorzugt; Fallback durch Viewer-Normalisierung. */
   const vortextForDocumentView = useMemo(() => {
+    if (structuredVortextForView.length > 0) return structuredVortextForView;
     const raw = (split?.vortext ?? gaebPreview?.vortextGuessClean ?? structureVortext ?? "").trim();
-    return raw;
-  }, [split?.vortext, gaebPreview?.vortextGuessClean, structureVortext]);
+    return normalizeViewerVorbemerkungenText(raw);
+  }, [structuredVortextForView, split?.vortext, gaebPreview?.vortextGuessClean, structureVortext]);
 
   /** Bereinigt und ohne technische Metadaten – nur für Anzeige im Vorbemerkungen-Tab. */
   const vortextForDocumentViewDisplay = useMemo(
@@ -997,11 +1056,47 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     [vortextForDocumentView]
   );
 
-  /** Positionen für die Dokumentleseansicht (Positionen-Tab). Dieselbe Quelle wie für die Analyse. */
+  /** Lesbarer Positionstext aus structure.positionen.items (Reihenfolge wie in items). Pro Item: posNr, shortText, Menge+Einheit, longText; wenn shortText und longText leer, Fallback aus item.raw (viewer-normalisiert). */
+  const positionsFromStructuredItems = useMemo(() => {
+    const items = gaebPreview?.structure?.positionen?.items;
+    if (!Array.isArray(items) || items.length === 0) return "";
+    const blocks: string[] = [];
+    for (const it of items) {
+      const posNr = (it?.posNr ?? "").trim();
+      const shortText = (it?.shortText ?? "").trim();
+      const longText = (it?.longText ?? "").trim();
+      const quantity = (it?.quantity ?? "").trim();
+      const unit = (it?.unit ?? "").trim();
+      const mengeEinheit = [quantity, unit].filter(Boolean).join(" ").trim();
+      let lines: string[] = [posNr, shortText, mengeEinheit, longText].filter(Boolean);
+      const hasStructuredText = shortText.length > 0 || longText.length > 0;
+      if (!hasStructuredText && (it?.raw ?? "").trim().length > 0) {
+        const normalizedRaw = normalizeViewerPositionenText((it?.raw ?? "").trim());
+        if (normalizedRaw.length > 0) lines.push(normalizedRaw);
+      }
+      if (lines.length > 0) blocks.push(lines.join("\n"));
+    }
+    return blocks.join("\n\n");
+  }, [gaebPreview?.structure?.positionen?.items]);
+
+  /** Explizite Quellenwahl Positionen – nur für Verifikation/Debug. */
+  const positionsSourceUsed = useMemo((): string => {
+    if (positionsFromStructuredItems.length > 0) return "structured-items";
+    const s = (split?.positions ?? "").trim();
+    if (s.length > 0) return "split-positions";
+    const g = (gaebPreview?.positionsGuessClean ?? "").trim();
+    if (g.length > 0) return "positionsGuessClean";
+    const st = (structurePositions ?? "").trim();
+    if (st.length > 0) return "structurePositions";
+    return "none";
+  }, [positionsFromStructuredItems, split?.positions, gaebPreview?.positionsGuessClean, structurePositions]);
+
+  /** Positionen für die Dokumentleseansicht (Positionen-Tab). Strukturierte items-Quelle bevorzugt; Fallback durch Viewer-Normalisierung. */
   const positionsForDocumentView = useMemo(() => {
+    if (positionsFromStructuredItems.length > 0) return positionsFromStructuredItems;
     const raw = (split?.positions ?? gaebPreview?.positionsGuessClean ?? structurePositions ?? "").trim();
-    return raw;
-  }, [split?.positions, gaebPreview?.positionsGuessClean, structurePositions]);
+    return normalizeViewerPositionenText(raw);
+  }, [positionsFromStructuredItems, split?.positions, gaebPreview?.positionsGuessClean, structurePositions]);
 
   /** Bereinigter Positionstext für Suche/Trefferzählung – identisch mit der in der Ansicht angezeigten Version. */
   const positionsForDocumentViewDisplay = useMemo(
@@ -1132,10 +1227,13 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             }}
           >
             <div style={{ fontSize: 18, fontWeight: 800, color: "#111", marginBottom: 20 }}>
-              Analyse läuft
+              {loadingPhase === "file" ? "Datei wird vorbereitet" : "Analyse läuft"}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {analysisSteps.map((label, i) => (
+              {analysisSteps.map((label, i) => {
+                const effectiveStep = loadingPhase === "file" ? 0 : analysisStep;
+                const stepLabel = loadingPhase === "file" && i === 0 ? "Datei wird geladen und vorbereitet" : label;
+                return (
                 <div
                   key={i}
                   style={{
@@ -1143,18 +1241,18 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                     alignItems: "center",
                     gap: 10,
                     fontSize: 14,
-                    color: i < analysisStep ? (customerRoute ? CUSTOMER_DESIGN.primary : "#0a7a2f") : i === analysisStep ? "#111" : "#999",
-                    fontWeight: i === analysisStep ? 700 : 500,
-                    ...(i === analysisStep && customerRoute ? { paddingLeft: 4, borderLeft: `3px solid ${CUSTOMER_DESIGN.primary}`, marginLeft: -4 } : {}),
+                    color: i < effectiveStep ? (customerRoute ? CUSTOMER_DESIGN.primary : "#0a7a2f") : i === effectiveStep ? "#111" : "#999",
+                    fontWeight: i === effectiveStep ? 700 : 500,
+                    ...(i === effectiveStep && customerRoute ? { paddingLeft: 4, borderLeft: `3px solid ${CUSTOMER_DESIGN.primary}`, marginLeft: -4 } : {}),
                   }}
                 >
                   <span style={{ width: 20, textAlign: "center", flexShrink: 0 }}>
-                    {i < analysisStep ? "✓" : i === analysisStep ? "→" : "•"}
+                    {i < effectiveStep ? "✓" : i === effectiveStep ? "→" : "•"}
                   </span>
-                  <span>{label}</span>
+                  <span>{stepLabel}</span>
                 </div>
-              ))}
-              {analysisStep === 5 && (
+              ); })}
+              {loadingPhase === "analyze" && analysisStep === 5 && (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e2e8f0", fontSize: 13, color: "#64748b", fontWeight: 500 }}>
                   {lastStepSubStatuses[lastStepSubIndex]}
                 </div>
@@ -1451,10 +1549,18 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
 
         {/* Actions */}
         <div style={{ display: "flex", gap: customerRoute ? 12 : 10, marginTop: customerRoute ? 20 : 14, flexWrap: "wrap", alignItems: "center" }}>
-          <button
+            <button
             type="button"
             className={customerRoute ? "tga-btn-primary" : undefined}
-            onClick={() => analyze()}
+            onClick={() => {
+              if (lvText.trim().length === 0) return;
+              setError(null);
+              setResult(null);
+              setLoading(true);
+              setLoadingPhase("analyze");
+              setAnalysisStep(0);
+              void analyze();
+            }}
             disabled={loading || lvText.trim().length === 0}
             style={{
               padding: customerRoute ? "12px 20px" : "10px 14px",
@@ -1597,10 +1703,12 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
         {!gaebPreviewLoading && (gaebPreview || split) && (
           <>
             <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {(customerRoute
-                ? (["llm_vortext", "llm_positions", "vortext", "positions", "clean", "raw"] as const)
-                : (["llm_vortext", "llm_positions", "vortext", "positions", "raw", "clean"] as const)
-              ).map((t) => (
+              {[
+                ...(gaebPreview?.normalized ? (["structure"] as const) : []),
+                ...(customerRoute
+                  ? (["llm_vortext", "llm_positions", "vortext", "positions", "clean", "raw"] as const)
+                  : (["llm_vortext", "llm_positions", "vortext", "positions", "raw", "clean"] as const)),
+              ].map((t) => (
                 <button
                   key={t}
                   onClick={() => setGaebTab(t)}
@@ -1614,19 +1722,21 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                     fontWeight: 800,
                   }}
                 >
-                  {t === "llm_vortext"
-                    ? "Einleitung (KI)"
-                    : t === "llm_positions"
-                      ? "Positionen (KI)"
-                      : t === "vortext"
-                        ? "Einleitung"
-                        : t === "positions"
-                          ? "Positionen"
-                          : t === "raw"
-                            ? customerRoute
-                              ? "Rohdaten (technisch)"
-                              : "Rohdaten"
-                            : "Bereinigt"}
+                  {t === "structure"
+                    ? "Struktur"
+                    : t === "llm_vortext"
+                      ? "Einleitung (KI)"
+                      : t === "llm_positions"
+                        ? "Positionen (KI)"
+                        : t === "vortext"
+                          ? "Einleitung"
+                          : t === "positions"
+                            ? "Positionen"
+                            : t === "raw"
+                              ? customerRoute
+                                ? "Rohdaten (technisch)"
+                                : "Rohdaten"
+                              : "Bereinigt"}
                 </button>
               ))}
 
@@ -1646,7 +1756,14 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             </div>
 
             <div style={{ marginTop: 10 }}>
-              {gaebTab === "raw" ? (
+              {gaebTab === "structure" && gaebPreview?.normalized ? (
+                <GaebNormalizedPreview
+                  normalized={gaebPreview.normalized}
+                  debug={gaebPreview.debug}
+                  customerRoute={!!customerRoute}
+                  customerDesign={customerRoute ? CUSTOMER_DESIGN : undefined}
+                />
+              ) : gaebTab === "raw" ? (
                 <pre
                   style={{
                     margin: 0,
@@ -1690,6 +1807,9 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                   {effectivePositionsLen} Zeichen
                   {gaebPreview.structure.vorbemerkungen ? (
                     <> • Vorbemerkungen {gaebPreview.structure.vorbemerkungen.length} Zeichen</>
+                  ) : null}
+                  {gaebPreview.normalized ? (
+                    <> • Normalisiert: {gaebPreview.normalized.groups?.length ?? 0} Gruppen, {gaebPreview.normalized.remarks?.length ?? 0} Hinweise, {gaebPreview.normalized.items?.length ?? 0} Positionen</>
                   ) : null}
                 </>
               ) : (!customerRoute && (
@@ -2129,6 +2249,15 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               </p>
             </div>
             <div style={{ border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e5e5", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadiusLg : 14, padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16, background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
+              {/* Temporäre interne Verifikation: Quelle Vorbemerkungen */}
+              <div style={{ marginBottom: 12, padding: "8px 10px", background: "#f8f9fa", border: "1px solid #dee2e6", borderRadius: 6, fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#495057", lineHeight: 1.5 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Quelle Vorbemerkungen (intern)</div>
+                <div>formatDetected: {(gaebPreview as any)?.structure?.meta?.formatDetected ?? (gaebPreview as any)?.parseResult?.formatDetected ?? "—"}</div>
+                <div>structuredVortextForView vorhanden: {structuredVortextForView.length > 0 ? "ja" : "nein"} · Länge: {structuredVortextForView.length}</div>
+                <div>vortextFullClean vorhanden: {((gaebPreview as any)?.vortextFullClean?.length ?? 0) > 0 ? "ja" : "nein"} · Länge: {(gaebPreview as any)?.vortextFullClean?.length ?? 0}</div>
+                <div>verwendete Quelle: <strong>{vortextSourceUsed}</strong></div>
+                <div>Länge content (final): {vortextForDocumentView.length}</div>
+              </div>
               <div style={{ marginBottom: 16 }}>
                 <label htmlFor="vorbemerkungen-suche" style={{ display: "block", fontSize: 13, fontWeight: 600, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#475569", marginBottom: 6 }}>
                   In Vorbemerkungen suchen
@@ -2248,6 +2377,15 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               </p>
             </div>
             <div style={{ border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e5e5", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadiusLg : 14, padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16, background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
+              {/* Temporäre interne Verifikation: Quelle Positionen */}
+              <div style={{ marginBottom: 12, padding: "8px 10px", background: "#f8f9fa", border: "1px solid #dee2e6", borderRadius: 6, fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#495057", lineHeight: 1.5 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Quelle Positionen (intern)</div>
+                <div>formatDetected: {(gaebPreview as any)?.structure?.meta?.formatDetected ?? (gaebPreview as any)?.parseResult?.formatDetected ?? "—"}</div>
+                <div>structure.positionen.items vorhanden: {Array.isArray(gaebPreview?.structure?.positionen?.items) && (gaebPreview.structure.positionen.items as any[]).length > 0 ? "ja" : "nein"} · Anzahl: {Array.isArray(gaebPreview?.structure?.positionen?.items) ? (gaebPreview.structure.positionen.items as any[]).length : 0}</div>
+                <div>positionsFromStructuredItems vorhanden: {positionsFromStructuredItems.length > 0 ? "ja" : "nein"} · Länge: {positionsFromStructuredItems.length}</div>
+                <div>verwendete Quelle: <strong>{positionsSourceUsed}</strong></div>
+                <div>Länge content (final): {positionsForDocumentView.length}</div>
+              </div>
               <div style={{ marginBottom: 16 }}>
                 <label htmlFor="positionen-suche" style={{ display: "block", fontSize: 13, fontWeight: 600, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#475569", marginBottom: 6 }}>
                   In Positionen suchen
@@ -2954,6 +3092,133 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             </div>
           )}
           </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Normalisierte GAEB-Preview: Gruppen, Hinweise, Positionen-Tabelle (nur aus normalisierter Struktur, kein Roh-XML). */
+function GaebNormalizedPreview(props: {
+  normalized: { groups: any[]; remarks: any[]; items: any[] };
+  debug?: Record<string, any>;
+  customerRoute: boolean;
+  customerDesign?: typeof CUSTOMER_DESIGN;
+}) {
+  const { normalized, debug, customerRoute, customerDesign } = props;
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const primary = customerDesign?.primary ?? "#111";
+  const maxH = "320px";
+
+  return (
+    <div style={{ maxHeight: maxH, overflow: "auto", border: "1px solid #eee", borderRadius: 12, background: "#fff" }}>
+      {/* Gruppen als Abschnitte */}
+      {normalized.groups?.length > 0 && (
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#666", marginBottom: 8 }}>Gruppen</div>
+          {normalized.groups.map((g: any, i: number) => (
+            <div
+              key={i}
+              style={{
+                marginBottom: 6,
+                paddingLeft: (g.level ?? 0) * 12,
+                borderLeft: `3px solid ${primary}`,
+                padding: "6px 10px",
+                background: "#fafafa",
+                borderRadius: 6,
+              }}
+            >
+              <span style={{ fontWeight: 800, color: primary }}>{g.posNr}</span>
+              {g.posNr && " "}
+              <span>{g.label || "(ohne Bezeichnung)"}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Hinweistexte separat */}
+      {normalized.remarks?.length > 0 && (
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#666", marginBottom: 8 }}>Hinweise / Vorbemerkungen</div>
+          {normalized.remarks.map((r: any, i: number) => (
+            <div key={i} style={{ marginBottom: 8, padding: 8, background: "#f8f9fa", borderRadius: 8, whiteSpace: "pre-wrap", fontSize: 12 }}>
+              {r.kind && <strong>{r.kind}: </strong>}
+              {r.text}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Positionen tabellarisch: Pos, Kurztext, Menge, Einheit, Langtext per Accordion */}
+      {normalized.items?.length > 0 && (
+        <div style={{ padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#666", marginBottom: 8 }}>Positionen</div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid #ddd" }}>
+                  <th style={{ textAlign: "left", padding: "8px 6px", fontWeight: 800 }}>Pos</th>
+                  <th style={{ textAlign: "left", padding: "8px 6px", fontWeight: 800 }}>Kurztext</th>
+                  <th style={{ textAlign: "right", padding: "8px 6px", fontWeight: 800 }}>Menge</th>
+                  <th style={{ textAlign: "left", padding: "8px 6px", fontWeight: 800 }}>Einheit</th>
+                  <th style={{ width: 36 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {normalized.items.map((it: any, idx: number) => (
+                  <React.Fragment key={idx}>
+                    <tr style={{ borderBottom: "1px solid #eee" }}>
+                      <td style={{ padding: "6px", fontWeight: 700, verticalAlign: "top" }}>{it.posNr ?? "—"}</td>
+                      <td style={{ padding: "6px", verticalAlign: "top" }}>{it.shortText ?? "—"}</td>
+                      <td style={{ padding: "6px", textAlign: "right", verticalAlign: "top" }}>{it.quantity ?? "—"}</td>
+                      <td style={{ padding: "6px", verticalAlign: "top" }}>{it.unit ?? "—"}</td>
+                      <td style={{ padding: "6px", verticalAlign: "top" }}>
+                        {(it.longText ?? "").trim() ? (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedRow(expandedRow === idx ? null : idx)}
+                            style={{
+                              border: "none",
+                              background: "none",
+                              cursor: "pointer",
+                              fontWeight: 800,
+                              padding: 4,
+                            }}
+                            aria-expanded={expandedRow === idx}
+                          >
+                            {expandedRow === idx ? "▼" : "▶"}
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                    {expandedRow === idx && (it.longText ?? "").trim() && (
+                      <tr>
+                        <td colSpan={5} style={{ padding: "8px 6px 12px", background: "#f8f9fa", whiteSpace: "pre-wrap", fontSize: 12, borderBottom: "1px solid #eee" }}>
+                          {it.longText}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Debug: Anzahl Gruppen/Remarks/Positionen, erstes Item als JSON, Quellen */}
+      {debug && (
+        <div style={{ marginTop: 12, padding: "10px 14px", borderTop: "1px solid #eee", fontSize: 11, color: "#666", background: "#fafafa", borderRadius: 0 }}>
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Debug</div>
+          <div>Gruppen: {debug.normalizedGroupCount ?? normalized.groups?.length ?? 0} • Hinweise: {debug.normalizedRemarkCount ?? normalized.remarks?.length ?? 0} • Positionen: {debug.normalizedItemCount ?? normalized.items?.length ?? 0}</div>
+          {debug.firstNormalizedItemExample && (
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: "pointer", fontWeight: 700 }}>Erstes normalisiertes Item (Beispiel)</summary>
+              <pre style={{ marginTop: 6, padding: 8, background: "#fff", border: "1px solid #eee", borderRadius: 6, overflow: "auto", fontSize: 10, whiteSpace: "pre-wrap" }}>
+                {JSON.stringify(debug.firstNormalizedItemExample, null, 2)}
+              </pre>
+            </details>
           )}
         </div>
       )}

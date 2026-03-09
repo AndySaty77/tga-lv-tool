@@ -47,30 +47,52 @@ export function parseXml(raw: string, opts?: ParseXmlOpts): GaebParseResult {
       structureConfidence = Math.min(1, structureConfidence + 0.2);
     }
 
-    // Positionen: <Position>, <LvPosition>, <Pos>
+    // Positionen: <Position>, <LvPosition>, <Pos>, <Item> (DA83)
     const posBlocks = rawNorm.matchAll(
-      /<(?:Position|LvPosition|Pos)[^>]*>([\s\S]*?)<\/(?:Position|LvPosition|Pos)>/gi
+      /<(?:Position|LvPosition|Pos|Item)[^>]*>([\s\S]*?)<\/(?:Position|LvPosition|Pos|Item)>/gi
     );
     const posArr: string[] = [];
     for (const m of posBlocks) {
-      const block = stripHtml(m[1]).trim();
+      const innerXml = m[1] ?? "";
+      const block = stripHtml(innerXml).trim();
       if (block.length > 2) {
         posArr.push(block);
-        const nr = block.match(/<PosNr[^>]*>([^<]*)<\/PosNr>/i)?.[1]?.trim()
-          || block.match(/<Nr>([^<]*)<\/Nr>/i)?.[1]?.trim();
-        const short = block.match(/<Kurztext[^>]*>([\s\S]*?)<\/Kurztext>/i)?.[1]?.trim()
-          || block.match(/<ShortText[^>]*>([\s\S]*?)<\/ShortText>/i)?.[1]?.trim();
-        const long = block.match(/<Langtext[^>]*>([\s\S]*?)<\/Langtext>/i)?.[1]?.trim()
-          || block.match(/<LongText[^>]*>([\s\S]*?)<\/LongText>/i)?.[1]?.trim();
-        const qty = block.match(/<Menge[^>]*>([^<]*)<\/Menge>/i)?.[1]?.trim()
-          || block.match(/<Quantity[^>]*>([^<]*)<\/Quantity>/i)?.[1]?.trim();
-        const unit = block.match(/<Einheit[^>]*>([^<]*)<\/Einheit>/i)?.[1]?.trim()
-          || block.match(/<Unit[^>]*>([^<]*)<\/Unit>/i)?.[1]?.trim();
+
+        // Strukturierte Positionsfelder aus dem unveränderten XML-Block lesen
+        const nr =
+          innerXml.match(/<PosNr[^>]*>([^<]*)<\/PosNr>/i)?.[1]?.trim() ||
+          innerXml.match(/<Nr>([^<]*)<\/Nr>/i)?.[1]?.trim() ||
+          innerXml.match(/<ItemNo[^>]*>([^<]*)<\/ItemNo>/i)?.[1]?.trim();
+
+        const shortRaw =
+          innerXml.match(/<Kurztext[^>]*>([\s\S]*?)<\/Kurztext>/i)?.[1] ||
+          innerXml.match(/<ShortText[^>]*>([\s\S]*?)<\/ShortText>/i)?.[1] ||
+          innerXml.match(/<OutlineAddText[^>]*>([\s\S]*?)<\/OutlineAddText>/i)?.[1];
+
+        const longRaw =
+          innerXml.match(/<Langtext[^>]*>([\s\S]*?)<\/Langtext>/i)?.[1] ||
+          innerXml.match(/<LongText[^>]*>([\s\S]*?)<\/LongText>/i)?.[1] ||
+          innerXml.match(/<DetailAddText[^>]*>([\s\S]*?)<\/DetailAddText>/i)?.[1] ||
+          innerXml.match(/<AddText[^>]*>([\s\S]*?)<\/AddText>/i)?.[1];
+
+        const qty =
+          innerXml.match(/<Menge[^>]*>([^<]*)<\/Menge>/i)?.[1]?.trim() ||
+          innerXml.match(/<Quantity[^>]*>([^<]*)<\/Quantity>/i)?.[1]?.trim() ||
+          innerXml.match(/<Qty[^>]*>([^<]*)<\/Qty>/i)?.[1]?.trim();
+
+        const unit =
+          innerXml.match(/<Einheit[^>]*>([^<]*)<\/Einheit>/i)?.[1]?.trim() ||
+          innerXml.match(/<Unit[^>]*>([^<]*)<\/Unit>/i)?.[1]?.trim() ||
+          innerXml.match(/<(?:Uom|QtyUnit)[^>]*>([^<]*)<\/(?:Uom|QtyUnit)>/i)?.[1]?.trim();
+
+        const short = shortRaw ? stripHtml(shortRaw).trim() : undefined;
+        const long = longRaw ? stripHtml(longRaw).trim() : undefined;
+
         if (nr || short || long || block) {
           items.push({
             posNr: nr,
-            shortText: short ? stripHtml(short) : undefined,
-            longText: long ? stripHtml(long) : undefined,
+            shortText: short,
+            longText: long,
             quantity: qty,
             unit: unit,
             raw: block,
@@ -92,14 +114,31 @@ export function parseXml(raw: string, opts?: ParseXmlOpts): GaebParseResult {
       }
     }
 
-    // Fallback: wenn kein Vortext aus XML, vor erstem <Position> nehmen
-    if (!prefaceText && rawNorm.includes("<Position")) {
-      const firstPos = rawNorm.indexOf("<Position");
-      const pre = rawNorm.slice(0, firstPos);
-      const textPart = pre.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      if (textPart.length > 50) {
-        prefaceText = stripHtml(pre).trim();
-        warnings.push("Vortext aus Text vor erstem <Position> rekonstruiert");
+    // Fallback: wenn kein Vortext aus XML, vor erstem Positions-/Item-Knoten nehmen
+    if (!prefaceText && (rawNorm.includes("<Position") || rawNorm.includes("<Item"))) {
+      const firstPosIdx = rawNorm.search(/<(?:Position|LvPosition|Pos|Item)\b/i);
+      if (firstPosIdx !== -1) {
+        const pre = rawNorm.slice(0, firstPosIdx);
+        // Bevorzugt AddText-/OutlineAddText-/DetailAddText-Blöcke im Kopfbereich
+        const addBlocks = pre.matchAll(
+          /<(?:AddText|OutlineAddText|DetailAddText)[^>]*>([\s\S]*?)<\/(?:AddText|OutlineAddText|DetailAddText)>/gi
+        );
+        const addTexts: string[] = [];
+        for (const a of addBlocks) {
+          const t = stripHtml(a[1] ?? "").trim();
+          if (t.length > 0) addTexts.push(t);
+        }
+        if (addTexts.length > 0) {
+          prefaceText = addTexts.join("\n\n").trim();
+        } else {
+          const textPart = pre.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+          if (textPart.length > 50) {
+            prefaceText = stripHtml(pre).trim();
+          }
+        }
+        if (prefaceText.length > 0) {
+          warnings.push("Vortext aus Kopfbereich vor erster Position/Item rekonstruiert");
+        }
       }
     }
 

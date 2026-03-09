@@ -7,5 +7,6 @@ export type { GaebParseResult, GaebParseOpts, GaebFormat, GaebParser, GaebParseM
 export { detectFormat } from "./detectFormat";
 export type { FormatDetectionResult } from "./detectFormat";
 export { parseXml } from "./parseXml";
+export { parseGaebXmlNormalized } from "./parseGaebXmlNormalized";
 export { parseText } from "./parseText";
 export { parseRaw } from "./parseRaw";

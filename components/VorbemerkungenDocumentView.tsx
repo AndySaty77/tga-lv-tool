@@ -7,6 +7,9 @@ import { sanitizeForDisplay, stripTechnicalNoiseForDisplay, toParagraphs } from 
 const SECTION_NUMBER_LINE = /^(\d+(?:\.\d+)*)\s+(.+)$/;
 /** Label:Wert-Zeile (Label bis 60 Zeichen, dann Doppelpunkt, Wert). Reihenfolge im Dokument unverändert. */
 const LABEL_VALUE_LINE = /^([^:]{1,60}):\s*(.*)$/;
+/** Kurze Zeile mit Datum-/Versions-/Struktur-Charakter (nur für dezente Typografie, keine Filterung). */
+const LOOKS_STRUCTURAL = /^\s*.{1,78}\s*$/;
+const HAS_STRUCTURAL_HINTS = /\d{4}-\d{2}|\d+\.\d+\.\d+|\s\/\s|^\d+\.\d+\s/;
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -115,8 +118,10 @@ export function VorbemerkungenDocumentView({
       };
 
   const baseParagraphStyle: React.CSSProperties = isPositionen
-    ? { margin: "0 0 1.4em", whiteSpace: "pre-wrap" }
-    : { margin: "0 0 1.25em", whiteSpace: "pre-wrap" };
+    ? { margin: "0 0 0.6em", whiteSpace: "pre-wrap", lineHeight: 1.6 }
+    : { margin: "0 0 0.55em", whiteSpace: "pre-wrap", lineHeight: 1.6 };
+  /** Absatzblock: etwas Abstand nach dem Block, damit Absätze visuell getrennt sind. */
+  const paragraphBlockStyle: React.CSSProperties = { marginBottom: "1.25em" };
 
   const sectionHeadingStyle: React.CSSProperties = isPositionen
     ? {
@@ -146,6 +151,14 @@ export function VorbemerkungenDocumentView({
   const valueStyle: React.CSSProperties = {
     color: textPrimary,
     fontWeight: 400,
+  };
+
+  /** Kurze Zeilen, die wie technische/strukturelle Angaben wirken, nur visuell dezent absetzen – keine inhaltliche Änderung. */
+  const structuralLineStyle: React.CSSProperties = {
+    fontSize: "0.9em",
+    color: textSecondary,
+    margin: "0 0 0.5em",
+    whiteSpace: "pre-wrap",
   };
 
   const emptyMessage = isPositionen ? "Keine Positionen vorhanden." : "Keine Vorbemerkungen vorhanden.";
@@ -198,14 +211,19 @@ export function VorbemerkungenDocumentView({
         );
         return;
       }
+      const useStructuralStyle = LOOKS_STRUCTURAL.test(trimmed) && HAS_STRUCTURAL_HINTS.test(trimmed);
       blocks.push(
-        <div key={`${key}-${lineIdx}`} style={baseParagraphStyle}>
+        <div key={`${key}-${lineIdx}`} style={useStructuralStyle ? structuralLineStyle : baseParagraphStyle}>
           {searchQuery ? highlightMatches(trimmed, searchQuery, getNextHitId, highlightStyle) : trimmed}
         </div>
       );
     });
 
-    return <div key={key}>{blocks}</div>;
+    return (
+      <div key={key} style={paragraphBlockStyle}>
+        {blocks}
+      </div>
+    );
   }
 
   const outerStyle: React.CSSProperties = isPositionen

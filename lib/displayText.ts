@@ -1,11 +1,24 @@
 /**
  * Bereinigung und Aufbereitung von Text für die Anzeige (keine Fachlogik).
- * Entfernt HTML/XML-Fragmente, erhält Absätze und Zeilenumbrüche.
+ * Entfernt HTML/XML-Fragmente, dekodiert HTML-Entities, erhält Absätze und Zeilenumbrüche.
  */
 
+/** Dekodiert numerische HTML-Entities (&#123; und &#x7B;) für die Lesbarkeit. Reihenfolge unverändert. */
+function decodeNumericHtmlEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+      const code = parseInt(hex, 16);
+      return code <= 0xffff ? String.fromCharCode(code) : "";
+    })
+    .replace(/&#(\d+);/g, (_, dec) => {
+      const code = parseInt(dec, 10);
+      return code <= 0xffff ? String.fromCharCode(code) : "";
+    });
+}
+
 /**
- * Entfernt HTML/XML-Fragmente für die Anzeige; erhält Absätze und Zeilenumbrüche.
- * Nur Darstellung – keine inhaltliche Verfälschung.
+ * Entfernt HTML/XML-Fragmente für die Anzeige; dekodiert HTML-Entities; erhält Absätze und Zeilenumbrüche.
+ * Nur Darstellung – keine inhaltliche Verfälschung, keine Umgruppierung.
  */
 export function sanitizeForDisplay(input: string): string {
   let s = (input ?? "").toString();
@@ -13,6 +26,8 @@ export function sanitizeForDisplay(input: string): string {
   s = s.replace(/<style[\s\S]*?<\/style>/gi, " ");
   s = s.replace(/<\/?(?:p|div|br|tr|li|h[1-6])[^>]*>/gi, "\n");
   s = s.replace(/<\/?[^>]+>/g, " ");
+  // Zuerst numerische Entities (&#x26; -> &, &#38; -> &), dann benannte
+  s = decodeNumericHtmlEntities(s);
   s = s
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")

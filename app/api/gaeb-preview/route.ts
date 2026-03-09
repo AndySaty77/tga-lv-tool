@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { parse } from "../../../lib/gaebParse";
 import { hardCut } from "../../../lib/gaebParse/utils";
+import { parseGaebXmlNormalized, debugRawStructures } from "../../../lib/gaebParse/parseGaebXmlNormalized";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,30 @@ export async function POST(req: Request) {
 
     const vortextGuessRaw = hardCut(parsed.prefaceText, VORTEXT_PREVIEW_MAX_CHARS);
     const vortextWasTruncated = parsed.prefaceText.length > VORTEXT_PREVIEW_MAX_CHARS;
+
+    // Normalisierte Struktur für Preview-UI (nur bei GAEB-XML)
+    let normalized: { groups: unknown[]; remarks: unknown[]; items: unknown[] } | undefined;
+    let rawStructures: ReturnType<typeof debugRawStructures> | undefined;
+    if (parsed.formatDetected === "gaeb-xml") {
+      const norm = parseGaebXmlNormalized(parsed.rawText);
+      normalized = { groups: norm.groups, remarks: norm.remarks, items: norm.items };
+      rawStructures = debugRawStructures(parsed.rawText);
+    }
+
+    const firstNormalizedItem =
+      normalized && normalized.items.length > 0
+        ? (() => {
+            const it = normalized!.items[0] as Record<string, unknown>;
+            return {
+              posNr: it.posNr,
+              shortText: typeof it.shortText === "string" ? it.shortText.slice(0, 120) : it.shortText,
+              longText: typeof it.longText === "string" ? it.longText.slice(0, 200) : it.longText,
+              quantity: it.quantity,
+              unit: it.unit,
+              _source: it._source,
+            };
+          })()
+        : undefined;
 
     return NextResponse.json({
       filename: f.name,
@@ -55,6 +80,9 @@ export async function POST(req: Request) {
         },
       },
 
+      /** Normalisierte LV-Struktur für die Preview-Anzeige (nur bei GAEB-XML) */
+      normalized,
+
       parseResult: parsed,
 
       debug: {
@@ -67,6 +95,13 @@ export async function POST(req: Request) {
         itemTextsLength: parsed.itemTexts.length,
         warnings: parsed.warnings,
         sectionCount: parsed.sectionTexts.length,
+        // Normalisierte Struktur (Debug)
+        normalizedGroupCount: normalized?.groups.length ?? 0,
+        normalizedRemarkCount: normalized?.remarks.length ?? 0,
+        normalizedItemCount: normalized?.items.length ?? 0,
+        firstNormalizedItemExample: firstNormalizedItem ?? null,
+        /** Rohstrukturen (erste BoQCtgy, Remark, Item 1+2) + extrahierte Felder – für Feldpfad-Mapping */
+        rawStructures: rawStructures ?? null,
         // Rückwärtskompatibilität
         previewChars: parsed.rawText.length,
         cutIdx: parsed.prefaceText.length,
