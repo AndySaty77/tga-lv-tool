@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { Lesansicht } from "@/components/Lesansicht";
+import { PositionenNodeView } from "@/components/PositionenNodeView";
 import { VorbemerkungenDocumentView } from "@/components/VorbemerkungenDocumentView";
 import { VortextDetailModal } from "@/components/VortextDetailModal";
 import { sanitizeForDisplay, stripTechnicalNoiseForDisplay } from "@/lib/displayText";
@@ -347,6 +348,26 @@ function prettyKey(k: string) {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+// ===== UI KeyFacts: Projektdaten vs. Vertragsrahmen =====
+/** Nur diese Felder im oberen Block „Projektdaten aus dem Leistungsverzeichnis“ (Reihenfolge für Anzeige). */
+const PROJEKTDATEN_KEYS_ORDER = [
+  "bauherr_ag",
+  "ort",
+  "gewerk",
+  "bindefrist",
+  "submission_einreichung",
+  "baubeginn",
+  "fertigstellung",
+  "bauzeit",
+  "vob_bgb",
+  "vertragsgrundlagen",
+];
+const PROJEKTDATEN_KEYS = new Set(PROJEKTDATEN_KEYS_ORDER);
+
+/** Diese Felder im separaten Block „Vertrags- und Abrechnungsrahmen“ (Reihenfolge für Anzeige). */
+const VERTRAGSRAHMEN_KEYS_ORDER = ["abschlagszahlung", "schlussrechnung", "gewaerhleistung", "vertragsstrafe"];
+const VERTRAGSRAHMEN_KEYS = new Set(VERTRAGSRAHMEN_KEYS_ORDER);
+
 // ===== UI KeyFacts Cleaning (Fix) =====
 const KEYFACT_HARD_MAX_VALUE = 260;
 const VALID_SHORT_KEYFACTS = new Set(["vob", "bgb", "vob/b", "vob b", "vob/c", "vob c"]);
@@ -385,7 +406,22 @@ function isGarbageKeyFactValue(v: string) {
   // einzelne Verben ohne Kontext (z. B. "einzubehalten")
   if (/^[a-zA-ZÄÖÜäöüß]+$/.test(s) && s.length >= 10 && /(halten|behalten|einhalten)$/i.test(s)) return true;
 
+  // KW-Angaben (z. B. "11. KW 2026") sind gültig für Anzeige
+  if (/\d{1,2}\.\s*KW\s*\d{4}\b/i.test(s)) return false;
+
   if (!/[a-zA-ZÄÖÜäöüß]{3,}/.test(s)) return true;
+  return false;
+}
+
+/** Schwache/ungültige Werte nicht anzeigen (UI-Regel: lieber weniger, aber sauber). */
+function isWeakKeyFactValueForDisplay(v: string, field: string): boolean {
+  const s = (v ?? "").trim();
+  if (!s) return true;
+  const lower = s.toLowerCase();
+  if (/\bund\/?oder\s+von\s+der\s+schlussrechnung\b/i.test(s)) return true;
+  if (field === "submission_einreichung" && /\b(gmbh|ag|co\.\s*kg)\b/i.test(s)) return true;
+  if (field === "gewaerhleistung" && /^(gewa[eä]hrleistung|mängelhaftung)(\s+und\s+abnahme)?$/i.test(lower.replace(/\s+/g, " "))) return true;
+  if (["fertigstellung", "bauzeit", "baubeginn"].includes(field) && /^(und|oder|von\s+der)\s+/i.test(s)) return true;
   return false;
 }
 
@@ -440,6 +476,37 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
   const [keyFacts, setKeyFacts] = useState<Record<string, string>>({});
   // optional: falls Route später confidence liefert
   const [keyFactConfidence, setKeyFactConfidence] = useState<Record<string, number>>({});
+  /** Debug: Quelle der KeyFacts (aus analyze-vortext API) */
+  const [keyFactsDebug, setKeyFactsDebug] = useState<{
+    keyFactsSourceMode?: string;
+    keyFactsWithSource?: Array<{
+      field: string;
+      value: string;
+      sourceTextType: string;
+      sourcePath: string;
+      confidence: number;
+      acceptedByPositivePattern?: boolean;
+      rejectedByNegativePattern?: boolean;
+      validationReason?: string;
+      extractionMode?: "label" | "heuristic" | "llm" | "none";
+      matchedLabel?: string;
+      rawMatchedText?: string;
+      cleanedCandidateValue?: string;
+      llmConfidence?: string;
+      llmReason?: string;
+      llmRawValue?: string;
+    }>;
+    llmFallbackUsed?: boolean;
+    llmFieldsRequested?: string[];
+    llmFieldsAccepted?: string[];
+    llmFieldsRejected?: string[];
+    llmRawResponse?: string;
+    llmParsedResponse?: Record<string, unknown> | null;
+    llmFallbackDebugPerField?: Record<string, { llmWasRequested: boolean; llmRawValue?: string; llmValidated: boolean; llmRejectedReason?: string; llmRejectedByNegativePattern?: boolean; llmRejectedByRequiredSignal?: boolean; garbageCheckReason?: string }>;
+    mergeWinnerPerField?: Record<string, string>;
+    overwrittenByLegacy?: Record<string, boolean>;
+    previousValueBeforeLegacyMerge?: Record<string, string>;
+  } | null>(null);
 
   // ===== RÜCKFRAGEN (CLARIFICATION QUESTIONS) =====
   const [clarificationQuestions, setClarificationQuestions] = useState<{
@@ -526,6 +593,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     setRiskClauses([]);
     setKeyFacts({});
     setKeyFactConfidence({});
+    setKeyFactsDebug(null);
     setVortextLoading(false);
     setClarificationQuestions(null);
     setOfferAssumptions(null);
@@ -682,18 +750,44 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     }
   };
 
-  const analyzeVortextLLM = async (vortext: string) => {
+  type VortextSource = {
+    sourceTextType: "normalized-global-remarks" | "normalized-top-label" | "normalized-groups" | "normalized-group-remarks" | "normalized-items" | "displayNodes" | "legacy-preface-text" | "legacy-cleaned-text" | "raw-text";
+    sourcePath: string;
+    keyFactsSourceMode: "normalized-structure" | "legacy-text" | "mixed";
+  };
+
+  type NormalizedPayload = {
+    globalRemarks: string[];
+    topLabelForPreface?: string;
+    groups: { label: string }[];
+    groupRemarks?: string[];
+  };
+
+  const analyzeVortextLLM = async (
+    vortext: string,
+    vortextSource?: VortextSource,
+    options?: { normalized?: NormalizedPayload; formatDetected?: string }
+  ) => {
     setVortextLoading(true);
     setVortextError(null);
     setRiskClauses([]);
     setKeyFacts({});
     setKeyFactConfidence({});
+    setKeyFactsDebug(null);
 
     try {
+      const body: Record<string, unknown> = {
+        text: vortext,
+        ...(vortextSource && { vortextSource }),
+      };
+      if (options?.formatDetected === "gaeb-xml" && options?.normalized) {
+        body.formatDetected = "gaeb-xml";
+        body.normalized = options.normalized;
+      }
       const vRes = await fetch("/api/analyze-vortext", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: vortext }),
+        body: JSON.stringify(body),
       });
 
       const vData = await vRes.json();
@@ -713,12 +807,34 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
         const conf =
           vData?.keyFactConfidence && typeof vData.keyFactConfidence === "object" ? vData.keyFactConfidence : {};
         setKeyFactConfidence(conf);
+
+        setKeyFactsDebug(
+          vData?.keyFactsDebug && typeof vData.keyFactsDebug === "object"
+            ? {
+                keyFactsSourceMode: vData.keyFactsDebug.keyFactsSourceMode,
+                llmFallbackUsed: vData.keyFactsDebug.llmFallbackUsed,
+                llmFieldsRequested: vData.keyFactsDebug.llmFieldsRequested,
+                llmFieldsAccepted: vData.keyFactsDebug.llmFieldsAccepted,
+                llmFieldsRejected: vData.keyFactsDebug.llmFieldsRejected,
+                llmRawResponse: vData.keyFactsDebug.llmRawResponse,
+                llmParsedResponse: vData.keyFactsDebug.llmParsedResponse,
+                llmFallbackDebugPerField: vData.keyFactsDebug.llmFallbackDebugPerField,
+                mergeWinnerPerField: vData.keyFactsDebug.mergeWinnerPerField,
+                overwrittenByLegacy: vData.keyFactsDebug.overwrittenByLegacy,
+                previousValueBeforeLegacyMerge: vData.keyFactsDebug.previousValueBeforeLegacyMerge,
+                keyFactsWithSource: Array.isArray(vData.keyFactsDebug.keyFactsWithSource)
+                  ? vData.keyFactsDebug.keyFactsWithSource
+                  : undefined,
+              }
+            : null
+        );
       }
     } catch (e: any) {
       setVortextError(e?.message || "Vortext Analyse fehlgeschlagen");
       setRiskClauses([]);
       setKeyFacts({});
       setKeyFactConfidence({});
+      setKeyFactsDebug(null);
     } finally {
       setVortextLoading(false);
     }
@@ -781,13 +897,32 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       if (categoryFilter !== "all" && !cats.has(categoryFilter)) setCategoryFilter("all");
 
       // ===== VORTEXT ANALYSE =====
-      // Priorität: Split-LLM -> GaebStructure (Preview) -> UI-Fallback
+      // Bei gaeb-xml: KeyFacts primär aus normalisierter Struktur; Legacy-Vortext nur für Risiken + Fallback
       const vortextForRisk =
         (splitUsed?.vortext ?? "").trim() ||
         structureVortext.trim() ||
         extractVortextUI(textToUse);
-      if (vortextForRisk.trim().length > 0) {
-        await analyzeVortextLLM(vortextForRisk);
+
+      const vortextSource: VortextSource = (splitUsed?.vortext ?? "").trim()
+        ? { sourceTextType: "legacy-cleaned-text", sourcePath: "split.vortext", keyFactsSourceMode: "legacy-text" }
+        : structureVortext.trim()
+          ? { sourceTextType: "legacy-preface-text", sourcePath: "structure.raw.full[0:vortextEnd]", keyFactsSourceMode: "legacy-text" }
+          : { sourceTextType: "raw-text", sourcePath: "extractVortextUI(lvText)", keyFactsSourceMode: "legacy-text" };
+
+      const norm = preview?.normalized as { remarks?: { text: string; scope?: string }[]; topLabelForPreface?: string; groups?: { label: string }[] } | undefined;
+      const normalizedPayload: NormalizedPayload | undefined =
+        norm && Array.isArray(norm.remarks) && Array.isArray(norm.groups)
+          ? {
+              globalRemarks: (norm.remarks as { text: string; scope?: string }[]).filter((r) => r.scope === "global").map((r) => r.text ?? ""),
+              topLabelForPreface: norm.topLabelForPreface,
+              groups: (norm.groups as { label: string }[]).map((g) => ({ label: g?.label ?? "" })),
+              groupRemarks: (norm.remarks as { text: string; scope?: string }[]).filter((r) => r.scope === "group").map((r) => r.text ?? ""),
+            }
+          : undefined;
+      const isGaebXml = preview?.debug?.formatDetected === "gaeb-xml" || (preview?.normalized != null && Array.isArray((preview.normalized as any)?.remarks));
+
+      if (vortextForRisk.trim().length > 0 || normalizedPayload) {
+        await analyzeVortextLLM(vortextForRisk, vortextSource, isGaebXml && normalizedPayload ? { normalized: normalizedPayload, formatDetected: "gaeb-xml" } : undefined);
       } else {
         setVortextError("Vortext ist leer (Split/Extraktion hat nichts geliefert).");
       }
@@ -960,30 +1095,87 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     setTop10(false);
   };
 
-  // ✅ Fix: KeyFacts filtern/normalisieren, damit kein Müll mehr angezeigt wird
-  const keyFactsEntries = useMemo(() => {
+  // Projektdaten: nur belastbare Stammdaten (Bauherr, Ort, Gewerk, Fristen, VOB/BGB etc.)
+  const keyFactsProjektdaten = useMemo(() => {
     const conf = keyFactConfidence ?? {};
     const entries = Object.entries(keyFacts ?? {})
+      .filter(([k]) => PROJEKTDATEN_KEYS.has(k))
       .map(([k, v]) => [k, normKeyFactValue(v)] as const)
       .filter(([k, v]) => {
         if (!v) return false;
         if (isGarbageKeyFactValue(v)) return false;
-
-        // optional confidence filter (falls vorhanden)
+        if (isWeakKeyFactValueForDisplay(v, k)) return false;
         const c = Number(conf[k]);
         if (Number.isFinite(c) && c > 0 && c < 0.55) return false;
-
         return true;
       });
-
-    entries.sort(([a], [b]) => {
-      const la = KEYFACT_LABELS[a] ? 0 : 1;
-      const lb = KEYFACT_LABELS[b] ? 0 : 1;
-      if (la !== lb) return la - lb;
-      return a.localeCompare(b);
-    });
-
+    entries.sort(([a], [b]) => PROJEKTDATEN_KEYS_ORDER.indexOf(a) - PROJEKTDATEN_KEYS_ORDER.indexOf(b));
     return entries;
+  }, [keyFacts, keyFactConfidence]);
+
+  // Vertrags- und Abrechnungsrahmen: Abschlagszahlung, Schlussrechnung, Gewährleistung, Vertragsstrafe
+  const keyFactsVertragsrahmen = useMemo(() => {
+    const conf = keyFactConfidence ?? {};
+    const entries = Object.entries(keyFacts ?? {})
+      .filter(([k]) => VERTRAGSRAHMEN_KEYS.has(k))
+      .map(([k, v]) => [k, normKeyFactValue(v)] as const)
+      .filter(([k, v]) => {
+        if (!v) return false;
+        if (isGarbageKeyFactValue(v)) return false;
+        if (isWeakKeyFactValueForDisplay(v, k)) return false;
+        const c = Number(conf[k]);
+        if (Number.isFinite(c) && c > 0 && c < 0.55) return false;
+        return true;
+      });
+    entries.sort(([a], [b]) => VERTRAGSRAHMEN_KEYS_ORDER.indexOf(a) - VERTRAGSRAHMEN_KEYS_ORDER.indexOf(b));
+    return entries;
+  }, [keyFacts, keyFactConfidence]);
+
+  /** Alle KeyFacts (Projektdaten + Vertragsrahmen) für Stellen, die noch die Gesamtanzahl brauchen. */
+  const keyFactsEntries = useMemo(
+    () => [...keyFactsProjektdaten, ...keyFactsVertragsrahmen],
+    [keyFactsProjektdaten, keyFactsVertragsrahmen]
+  );
+
+  // UI-Debug: welche KeyFacts werden angezeigt, welche ausgeblendet und warum (nur für Keys, die in keyFacts vorkommen)
+  const { visibleProjectKeyFactKeys, hiddenProjectKeyFactKeys, hiddenReasonPerField } = useMemo(() => {
+    const visible: string[] = [];
+    const hidden: string[] = [];
+    const reasonPerField: Record<string, string> = {};
+    const conf = keyFactConfidence ?? {};
+    const allowedSet = new Set([...PROJEKTDATEN_KEYS_ORDER, ...VERTRAGSRAHMEN_KEYS_ORDER]);
+    for (const k of Object.keys(keyFacts ?? {})) {
+      if (!allowedSet.has(k)) continue;
+      const v = keyFacts![k];
+      const norm = v != null ? normKeyFactValue(v) : "";
+      if (!norm) {
+        reasonPerField[k] = v != null && String(v).trim() !== "" ? "normKeyFactValue_empty" : "empty";
+        hidden.push(k);
+        continue;
+      }
+      if (isGarbageKeyFactValue(norm)) {
+        reasonPerField[k] = "isGarbageKeyFactValue";
+        hidden.push(k);
+        continue;
+      }
+      if (isWeakKeyFactValueForDisplay(norm, k)) {
+        reasonPerField[k] = "isWeakKeyFactValueForDisplay";
+        hidden.push(k);
+        continue;
+      }
+      const c = Number(conf[k]);
+      if (Number.isFinite(c) && c > 0 && c < 0.55) {
+        reasonPerField[k] = "lowConfidence";
+        hidden.push(k);
+        continue;
+      }
+      visible.push(k);
+    }
+    return {
+      visibleProjectKeyFactKeys: visible,
+      hiddenProjectKeyFactKeys: hidden,
+      hiddenReasonPerField: reasonPerField,
+    };
   }, [keyFacts, keyFactConfidence]);
 
   const gaebTextForTab = useMemo(() => {
@@ -1008,13 +1200,25 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     return gaebPreview?.structure?.positionen?.raw ?? "";
   }, [gaebPreview?.structure]);
 
-  /** Strukturierte Vorbemerkungen/Vortext-Quelle (Parser-Felder oder XML-Preface), nur für Anzeige wenn vorhanden. */
+  /** Strukturierte Vorbemerkungen/Vortext-Quelle. Bei GAEB-XML: nur globale Remarks, sonst LblTx-Fallback. */
   const structuredVortextForView = useMemo(() => {
+    const remarks = gaebPreview?.normalized?.remarks;
+    if (Array.isArray(remarks)) {
+      const globalOnly = remarks.filter((r: any) => r?.scope === "global");
+      if (globalOnly.length > 0) {
+        const joined = globalOnly.map((r: any) => (r?.text ?? "").trim()).filter(Boolean).join("\n\n");
+        if (joined.length > 0) return joined;
+      }
+      const topLabel = (gaebPreview?.normalized as any)?.topLabelForPreface;
+      if (typeof topLabel === "string" && topLabel.trim().length > 0) {
+        return topLabel.trim();
+      }
+    }
+
     const vorb = (gaebPreview?.structure?.vorbemerkungen ?? "").trim();
     const vort = (gaebPreview?.structure?.vortext ?? "").trim();
     if (vorb || vort) return [vorb, vort].filter(Boolean).join("\n\n").trim();
 
-    // Für GAEB-XML/DA83-Dateien: vollständiger Preface-Text aus dem Parser (vortextFullClean) als strukturierte Quelle verwenden.
     const isXml = gaebPreview?.structure?.meta?.formatDetected === "gaeb-xml";
     const preface = (gaebPreview as any)?.vortextFullClean ?? (gaebPreview as any)?.vortextFullRaw;
     if (isXml && typeof preface === "string" && preface.trim().length > 0) {
@@ -1029,6 +1233,10 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
 
   /** Explizite Quellenwahl Vorbemerkungen – nur für Verifikation/Debug. */
   const vortextSourceUsed = useMemo((): string => {
+    const remarks = gaebPreview?.normalized?.remarks;
+    const globalCount = Array.isArray(remarks) ? remarks.filter((r: any) => r?.scope === "global").length : 0;
+    if (globalCount > 0 && structuredVortextForView.length > 0) return "global-remarks";
+    if ((gaebPreview?.normalized as any)?.topLabelForPreface && structuredVortextForView.length > 0) return "top-label-fallback";
     if (structuredVortextForView.length > 0) {
       const vorb = (gaebPreview?.structure?.vorbemerkungen ?? "").trim();
       const vort = (gaebPreview?.structure?.vortext ?? "").trim();
@@ -1041,7 +1249,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     const st = (structureVortext ?? "").trim();
     if (st.length > 0) return "structureVortext";
     return "none";
-  }, [structuredVortextForView, gaebPreview?.structure?.vorbemerkungen, gaebPreview?.structure?.vortext, split?.vortext, gaebPreview?.vortextGuessClean, structureVortext]);
+  }, [gaebPreview?.normalized?.remarks, structuredVortextForView, gaebPreview?.structure?.vorbemerkungen, gaebPreview?.structure?.vortext, split?.vortext, gaebPreview?.vortextGuessClean, structureVortext]);
 
   /** Vortext für die Dokumentleseansicht (Vorbemerkungen-Tab). Strukturierte Quelle bevorzugt; Fallback durch Viewer-Normalisierung. */
   const vortextForDocumentView = useMemo(() => {
@@ -1056,8 +1264,62 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     [vortextForDocumentView]
   );
 
-  /** Lesbarer Positionstext aus structure.positionen.items (Reihenfolge wie in items). Pro Item: posNr, shortText, Menge+Einheit, longText; wenn shortText und longText leer, Fallback aus item.raw (viewer-normalisiert). */
+  /** Bei GAEB-XML: Tab Positionen ausschließlich aus displayNodes (group + remark scope group/itemlist + item). Kein Legacy-Pfad. */
+  const isGaebXml = useMemo(
+    () =>
+      gaebPreview?.structure?.meta?.formatDetected === "gaeb-xml" ||
+      gaebPreview?.parseResult?.formatDetected === "gaeb-xml",
+    [gaebPreview]
+  );
+
+  /** Bei GAEB-XML mit displayNodes: Positionen inkl. Gruppen- und Untergruppenüberschriften sowie Hinweise in Dokumentreihenfolge. */
+  const positionsFromDisplayNodes = useMemo(() => {
+    const nodes = gaebPreview?.normalized?.displayNodes;
+    if (!Array.isArray(nodes) || nodes.length === 0) return "";
+    const blocks: string[] = [];
+    for (const n of nodes) {
+      if (n.type === "group") {
+        const line = ("Gruppe " + (n.posNr || "—") + " – " + (n.label || "(ohne Bezeichnung)")).trim();
+        if (line.length > 0) blocks.push(line);
+      } else if (n.type === "remark") {
+        const t = (n.text ?? "").trim();
+        if (t.length > 0) blocks.push(t);
+      } else if (n.type === "item") {
+        const posNr = String(n.posNr ?? "").trim();
+        const shortText = String(n.shortText ?? "").trim();
+        const longText = String(n.longText ?? "").trim();
+        const quantity = String(n.quantity ?? "").trim();
+        const unit = String(n.unit ?? "").trim();
+        const mengeEinheit = [quantity, unit].filter(Boolean).join(" ").trim();
+        const lines = [posNr, shortText, mengeEinheit, longText].filter(Boolean);
+        if (lines.length > 0) blocks.push(lines.join("\n"));
+      }
+    }
+    return blocks.join("\n\n");
+  }, [gaebPreview?.normalized?.displayNodes]);
+
+  /** Bei GAEB-XML: Positionstext nur aus normalized.items (Fallback wenn displayNodes leer/fehlt). */
+  const positionsFromNormalizedItems = useMemo(() => {
+    if (isGaebXml && (gaebPreview?.normalized?.displayNodes?.length ?? 0) > 0) return "";
+    const items = gaebPreview?.normalized?.items;
+    if (!Array.isArray(items) || items.length === 0) return "";
+    const blocks: string[] = [];
+    for (const it of items) {
+      const posNr = String((it as any)?.posNr ?? "").trim();
+      const shortText = String((it as any)?.shortText ?? "").trim();
+      const longText = String((it as any)?.longText ?? "").trim();
+      const quantity = String((it as any)?.quantity ?? "").trim();
+      const unit = String((it as any)?.unit ?? "").trim();
+      const mengeEinheit = [quantity, unit].filter(Boolean).join(" ").trim();
+      const lines = [posNr, shortText, mengeEinheit, longText].filter(Boolean);
+      if (lines.length > 0) blocks.push(lines.join("\n"));
+    }
+    return blocks.join("\n\n");
+  }, [isGaebXml, gaebPreview?.normalized?.displayNodes, gaebPreview?.normalized?.items]);
+
+  /** Legacy: Positionstext aus structure.positionen.items. Bei gaeb-xml nicht verwenden. */
   const positionsFromStructuredItems = useMemo(() => {
+    if (isGaebXml) return "";
     const items = gaebPreview?.structure?.positionen?.items;
     if (!Array.isArray(items) || items.length === 0) return "";
     const blocks: string[] = [];
@@ -1077,11 +1339,14 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       if (lines.length > 0) blocks.push(lines.join("\n"));
     }
     return blocks.join("\n\n");
-  }, [gaebPreview?.structure?.positionen?.items]);
+  }, [isGaebXml, gaebPreview?.structure?.positionen?.items]);
 
-  /** Explizite Quellenwahl Positionen – nur für Verifikation/Debug. */
+  /** Explizite Quellenwahl Positionen – nur für Verifikation/Debug. Bei gaeb-xml: "displayNodes" oder "normalized-items" (nur Items). */
   const positionsSourceUsed = useMemo((): string => {
-    if (positionsFromStructuredItems.length > 0) return "structured-items";
+    if (isGaebXml && (gaebPreview?.normalized?.displayNodes?.length ?? 0) > 0) return "displayNodes";
+    if (positionsFromDisplayNodes.length > 0) return "displayNodes";
+    if (positionsFromNormalizedItems.length > 0) return "normalized-items";
+    if (positionsFromStructuredItems.length > 0) return "legacy-structured-items";
     const s = (split?.positions ?? "").trim();
     if (s.length > 0) return "split-positions";
     const g = (gaebPreview?.positionsGuessClean ?? "").trim();
@@ -1089,14 +1354,21 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     const st = (structurePositions ?? "").trim();
     if (st.length > 0) return "structurePositions";
     return "none";
-  }, [positionsFromStructuredItems, split?.positions, gaebPreview?.positionsGuessClean, structurePositions]);
+  }, [isGaebXml, gaebPreview?.normalized?.displayNodes?.length, positionsFromDisplayNodes, positionsFromNormalizedItems, positionsFromStructuredItems, split?.positions, gaebPreview?.positionsGuessClean, structurePositions]);
 
-  /** Positionen für die Dokumentleseansicht (Positionen-Tab). Strukturierte items-Quelle bevorzugt; Fallback durch Viewer-Normalisierung. */
+  /** Positionen für die Dokumentleseansicht (Positionen-Tab). Für gaeb-xml nur displayNodes oder items-Fallback; nie positionsGuessClean/Legacy. */
   const positionsForDocumentView = useMemo(() => {
+    if (isGaebXml) {
+      if ((gaebPreview?.normalized?.displayNodes?.length ?? 0) > 0) return positionsFromDisplayNodes;
+      if ((gaebPreview?.normalized?.items?.length ?? 0) > 0) return positionsFromNormalizedItems;
+      return positionsFromDisplayNodes || positionsFromNormalizedItems || "";
+    }
+    if (positionsFromDisplayNodes.length > 0) return positionsFromDisplayNodes;
+    if (positionsFromNormalizedItems.length > 0) return positionsFromNormalizedItems;
     if (positionsFromStructuredItems.length > 0) return positionsFromStructuredItems;
     const raw = (split?.positions ?? gaebPreview?.positionsGuessClean ?? structurePositions ?? "").trim();
     return normalizeViewerPositionenText(raw);
-  }, [positionsFromStructuredItems, split?.positions, gaebPreview?.positionsGuessClean, structurePositions]);
+  }, [isGaebXml, gaebPreview?.normalized?.displayNodes?.length, gaebPreview?.normalized?.items?.length, positionsFromDisplayNodes, positionsFromNormalizedItems, positionsFromStructuredItems, split?.positions, gaebPreview?.positionsGuessClean, structurePositions]);
 
   /** Bereinigter Positionstext für Suche/Trefferzählung – identisch mit der in der Ansicht angezeigten Version. */
   const positionsForDocumentViewDisplay = useMemo(
@@ -1969,7 +2241,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                 <div style={{ marginTop: 4, fontSize: 12, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#888", fontWeight: 600 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.projektdatenSub}</div>
               </div>
               <div style={{ color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#666", fontWeight: 700 }}>
-                {vortextLoading ? "Extrahiere…" : `${keyFactsEntries.length} Felder`}
+                {vortextLoading ? "Extrahiere…" : `${keyFactsProjektdaten.length} Felder`}
               </div>
             </div>
 
@@ -1979,13 +2251,13 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               </div>
             )}
 
-            {!vortextLoading && !vortextError && keyFactsEntries.length === 0 && (
+            {!vortextLoading && !vortextError && keyFactsProjektdaten.length === 0 && (
               <div style={{ marginTop: 10, color: "#666", fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noProjektdaten}</div>
             )}
 
-            {!vortextError && keyFactsEntries.length > 0 && (
+            {!vortextError && keyFactsProjektdaten.length > 0 && (
               <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {keyFactsEntries.map(([k, v]) => {
+                {keyFactsProjektdaten.map(([k, v]) => {
                   const c = Number(keyFactConfidence?.[k]);
                   const hasC = Number.isFinite(c) && c > 0;
                   return (
@@ -2013,6 +2285,29 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                 : "Der Einleitungstext wird per automatischer Textanalyse ermittelt. Ist er leer, prüfen Sie die Datei oder den GAEB-Import."}
             </div>
           </div>
+
+          {/* ===== Vertrags- und Abrechnungsrahmen ===== */}
+          {keyFactsVertragsrahmen.length > 0 && (
+            <div style={{ border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e5e5", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadiusLg : 14, padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16, background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined, marginTop: 12 }}>
+              <div style={{ fontSize: 14, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#666", fontWeight: 900 }}>Vertrags- und Abrechnungsrahmen</div>
+              <div style={{ marginTop: 4, fontSize: 12, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#888", fontWeight: 600 }}>Zahlungsbedingungen, Gewährleistung, Vertragsstrafe</div>
+              <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {keyFactsVertragsrahmen.map(([k, v]) => {
+                  const c = Number(keyFactConfidence?.[k]);
+                  const hasC = Number.isFinite(c) && c > 0;
+                  return (
+                    <div key={k} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
+                      <div style={{ fontSize: 12, color: "#666", fontWeight: 900 }}>{KEYFACT_LABELS[k] ?? prettyKey(k)}</div>
+                      {hasC && (
+                        <div style={{ marginTop: 4, fontSize: 11, color: "#999", fontWeight: 800 }}>Sicherheit der Angabe: {Math.round(c * 100)}%</div>
+                      )}
+                      <div style={{ marginTop: 6, fontWeight: 800, color: "#111", whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(v)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* ===== Risiken im Einleitungstext ===== */}
           <div style={{ border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e5e5", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadiusLg : 14, padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16, background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
@@ -2377,15 +2672,154 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               </p>
             </div>
             <div style={{ border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e5e5", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadiusLg : 14, padding: customerRoute ? CUSTOMER_DESIGN.spacingCard : 16, background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
-              {/* Temporäre interne Verifikation: Quelle Positionen */}
+              {/* End-to-End-Debug: exakt die Datenbasis für Tab Positionen (API + Client) */}
               <div style={{ marginBottom: 12, padding: "8px 10px", background: "#f8f9fa", border: "1px solid #dee2e6", borderRadius: 6, fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#495057", lineHeight: 1.5 }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>Quelle Positionen (intern)</div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Tab Positionen – Datenbasis (API + Client)</div>
                 <div>formatDetected: {(gaebPreview as any)?.structure?.meta?.formatDetected ?? (gaebPreview as any)?.parseResult?.formatDetected ?? "—"}</div>
-                <div>structure.positionen.items vorhanden: {Array.isArray(gaebPreview?.structure?.positionen?.items) && (gaebPreview.structure.positionen.items as any[]).length > 0 ? "ja" : "nein"} · Anzahl: {Array.isArray(gaebPreview?.structure?.positionen?.items) ? (gaebPreview.structure.positionen.items as any[]).length : 0}</div>
-                <div>positionsFromStructuredItems vorhanden: {positionsFromStructuredItems.length > 0 ? "ja" : "nein"} · Länge: {positionsFromStructuredItems.length}</div>
-                <div>verwendete Quelle: <strong>{positionsSourceUsed}</strong></div>
+                <div>positionsSourceUsed (API): {(gaebPreview as any)?.debug?.positionsSourceUsed ?? "—"}</div>
+                <div>prefaceSourceUsed (API): {(gaebPreview as any)?.debug?.prefaceSourceUsed ?? "—"}</div>
+                <div>verwendete Quelle (Client): <strong>{positionsSourceUsed}</strong></div>
+                <div>renderedPositionsCount: {(gaebPreview as any)?.debug?.renderedPositionsCount ?? "—"} · renderedGroupHeaderCount: {(gaebPreview as any)?.debug?.renderedGroupHeaderCount ?? "—"} · renderedRemarkCountInPositions: {(gaebPreview as any)?.debug?.renderedRemarkCountInPositions ?? "—"}</div>
+                <div>positionRenderMode: {isGaebXml && (gaebPreview?.normalized?.displayNodes?.length ?? 0) > 0 ? "node-renderer" : "text-renderer"}</div>
+                <div>visibleGroupHeaderCount: {isGaebXml && (gaebPreview?.normalized?.displayNodes?.length ?? 0) > 0 ? (gaebPreview.normalized.displayNodes as { type?: string }[]).filter((n: { type?: string }) => n.type === "group").length : "—"}</div>
+                <div>visibleRemarkCount: {isGaebXml && (gaebPreview?.normalized?.displayNodes?.length ?? 0) > 0 ? (gaebPreview.normalized.displayNodes as { type?: string }[]).filter((n: { type?: string }) => n.type === "remark").length : "—"}</div>
                 <div>Länge content (final): {positionsForDocumentView.length}</div>
+                <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #dee2e6" }}>
+                  <div><strong>Sicherheit (aus API-Datenbasis):</strong></div>
+                  <div>hasLegacyPositionsPathStillActive: {(gaebPreview as any)?.debug?.hasLegacyPositionsPathStillActive === false ? "false" : (gaebPreview as any)?.debug?.hasLegacyPositionsPathStillActive === true ? "true" : "—"}</div>
+                  <div>hasGroupNodesInFinalRenderData: {(gaebPreview as any)?.debug?.hasGroupNodesInFinalRenderData === true ? "true" : (gaebPreview as any)?.debug?.hasGroupNodesInFinalRenderData === false ? "false" : "—"}</div>
+                  <div>hasGlobalRemarksInPositionsRenderData: {(gaebPreview as any)?.debug?.hasGlobalRemarksInPositionsRenderData === true ? "true" : (gaebPreview as any)?.debug?.hasGlobalRemarksInPositionsRenderData === false ? "false" : "—"}</div>
+                </div>
+                {(gaebPreview as any)?.debug?.topLevelBoQBodyChildSequence != null && (
+                  <div style={{ marginTop: 4 }}>topLevelBoQBodyChildSequence: [{(gaebPreview as any).debug.topLevelBoQBodyChildSequence.join(", ")}]</div>
+                )}
+                {(gaebPreview as any)?.debug?.globalRemarkTexts != null && (gaebPreview as any).debug.globalRemarkTexts.length > 0 && (
+                  <details style={{ marginTop: 4 }}>
+                    <summary style={{ cursor: "pointer", fontWeight: 600 }}>globalRemarkTexts (erste 3)</summary>
+                    <pre style={{ marginTop: 4, fontSize: 10, overflow: "auto", maxHeight: 80 }}>{JSON.stringify((gaebPreview as any).debug.globalRemarkTexts, null, 2)}</pre>
+                  </details>
+                )}
+                {(gaebPreview as any)?.debug?.groupRemarkTexts != null && (gaebPreview as any).debug.groupRemarkTexts.length > 0 && (
+                  <details style={{ marginTop: 4 }}>
+                    <summary style={{ cursor: "pointer", fontWeight: 600 }}>groupRemarkTexts (erste 3)</summary>
+                    <pre style={{ marginTop: 4, fontSize: 10, overflow: "auto", maxHeight: 80 }}>{JSON.stringify((gaebPreview as any).debug.groupRemarkTexts, null, 2)}</pre>
+                  </details>
+                )}
+                {(gaebPreview as any)?.debug?.first10DisplayNodes != null && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary style={{ cursor: "pointer", fontWeight: 600 }}>first10DisplayNodes (API)</summary>
+                    <pre style={{ marginTop: 4, fontSize: 10, overflow: "auto", maxHeight: 120 }}>{JSON.stringify((gaebPreview as any).debug.first10DisplayNodes, null, 2)}</pre>
+                  </details>
+                )}
               </div>
+              {/* KeyFacts-Quelle (analyze-vortext API-Debug) */}
+              {(keyFactsDebug?.keyFactsSourceMode != null || (keyFactsDebug?.keyFactsWithSource?.length ?? 0) > 0 || keyFactsDebug?.llmFallbackUsed || (Object.keys(keyFacts ?? {}).length > 0)) && (
+                <div style={{ marginBottom: 12, padding: "8px 10px", background: "#f0f7ff", border: "1px solid #b6d4fe", borderRadius: 6, fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#0c5460", lineHeight: 1.5 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>KeyFacts-Quelle (API-Debug)</div>
+                  <div><strong>keyFactsSourceMode:</strong> {keyFactsDebug?.keyFactsSourceMode ?? "—"}</div>
+                  {keyFactsDebug?.mergeWinnerPerField && Object.keys(keyFactsDebug.mergeWinnerPerField).length > 0 && (
+                    <div style={{ marginTop: 4 }}><strong>mergeWinnerPerField:</strong> <code style={{ fontSize: 10 }}>{JSON.stringify(keyFactsDebug.mergeWinnerPerField)}</code></div>
+                  )}
+                  {keyFactsDebug?.overwrittenByLegacy && Object.keys(keyFactsDebug.overwrittenByLegacy).length > 0 && (
+                    <div style={{ marginTop: 4 }}><strong>overwrittenByLegacy:</strong> <code style={{ fontSize: 10 }}>{JSON.stringify(keyFactsDebug.overwrittenByLegacy)}</code></div>
+                  )}
+                  {keyFactsDebug?.previousValueBeforeLegacyMerge && Object.keys(keyFactsDebug.previousValueBeforeLegacyMerge).length > 0 && (
+                    <div style={{ marginTop: 4 }}><strong>previousValueBeforeLegacyMerge:</strong> <code style={{ fontSize: 10 }}>{JSON.stringify(keyFactsDebug.previousValueBeforeLegacyMerge)}</code></div>
+                  )}
+                  <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #b6d4fe" }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>UI Display-Filter (Client)</div>
+                    <div><strong>visibleProjectKeyFactKeys:</strong> <code style={{ fontSize: 10 }}>{JSON.stringify(visibleProjectKeyFactKeys)}</code></div>
+                    <div style={{ marginTop: 4 }}><strong>hiddenProjectKeyFactKeys:</strong> <code style={{ fontSize: 10 }}>{JSON.stringify(hiddenProjectKeyFactKeys)}</code></div>
+                    {Object.keys(hiddenReasonPerField).length > 0 && (
+                      <div style={{ marginTop: 4 }}><strong>hiddenReasonPerField:</strong> <code style={{ fontSize: 10 }}>{JSON.stringify(hiddenReasonPerField)}</code></div>
+                    )}
+                  </div>
+                  {keyFactsDebug?.llmFallbackUsed && (
+                    <>
+                      <div><strong>llmFallbackUsed:</strong> true</div>
+                      <div><strong>llmFieldsRequested:</strong> {Array.isArray(keyFactsDebug.llmFieldsRequested) ? keyFactsDebug.llmFieldsRequested.join(", ") : "—"}</div>
+                      <div><strong>llmFieldsAccepted:</strong> {Array.isArray(keyFactsDebug.llmFieldsAccepted) ? keyFactsDebug.llmFieldsAccepted.join(", ") : "—"}</div>
+                      <div><strong>llmFieldsRejected:</strong> {Array.isArray(keyFactsDebug.llmFieldsRejected) ? keyFactsDebug.llmFieldsRejected.join(", ") : "—"}</div>
+                      {keyFactsDebug.llmRawResponse != null && (
+                        <details style={{ marginTop: 4 }}>
+                          <summary style={{ cursor: "pointer", fontWeight: 600 }}>llmRawResponse</summary>
+                          <pre style={{ marginTop: 4, fontSize: 10, overflow: "auto", maxHeight: 180, whiteSpace: "pre-wrap" }}>{String(keyFactsDebug.llmRawResponse).slice(0, 3000)}{(keyFactsDebug.llmRawResponse?.length ?? 0) > 3000 ? "…" : ""}</pre>
+                        </details>
+                      )}
+                      {keyFactsDebug.llmParsedResponse != null && (
+                        <details style={{ marginTop: 4 }}>
+                          <summary style={{ cursor: "pointer", fontWeight: 600 }}>llmParsedResponse</summary>
+                          <pre style={{ marginTop: 4, fontSize: 10, overflow: "auto", maxHeight: 180 }}>{JSON.stringify(keyFactsDebug.llmParsedResponse, null, 2)}</pre>
+                        </details>
+                      )}
+                      {keyFactsDebug.llmFallbackDebugPerField && Object.keys(keyFactsDebug.llmFallbackDebugPerField).length > 0 && (
+                        <details style={{ marginTop: 4 }}>
+                          <summary style={{ cursor: "pointer", fontWeight: 600 }}>llmFallbackDebugPerField</summary>
+                          <table style={{ marginTop: 6, fontSize: 10, width: "100%", borderCollapse: "collapse" }}>
+                            <thead>
+                              <tr style={{ borderBottom: "1px solid #b6d4fe" }}>
+                                <th style={{ textAlign: "left", padding: 4 }}>field</th>
+                                <th style={{ textAlign: "left", padding: 4 }}>llmWasRequested</th>
+                                <th style={{ textAlign: "left", padding: 4 }}>llmRawValue</th>
+                                <th style={{ textAlign: "left", padding: 4 }}>llmValidated</th>
+                                <th style={{ textAlign: "left", padding: 4 }}>llmRejectedReason</th>
+                                <th style={{ textAlign: "left", padding: 4 }}>garbageCheckReason</th>
+                                <th style={{ textAlign: "left", padding: 4 }}>llmRejectedByNegativePattern</th>
+                                <th style={{ textAlign: "left", padding: 4 }}>llmRejectedByRequiredSignal</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {Object.entries(keyFactsDebug.llmFallbackDebugPerField).map(([field, d]) => (
+                                <tr key={field} style={{ borderBottom: "1px solid #dee2e6" }}>
+                                  <td style={{ padding: 4, verticalAlign: "top" }}>{field}</td>
+                                  <td style={{ padding: 4, verticalAlign: "top" }}>{d.llmWasRequested ? "true" : "false"}</td>
+                                  <td style={{ padding: 4, verticalAlign: "top", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", fontSize: 9 }} title={d.llmRawValue ?? ""}>{d.llmRawValue ?? "—"}</td>
+                                  <td style={{ padding: 4, verticalAlign: "top" }}>{d.llmValidated ? "true" : "false"}</td>
+                                  <td style={{ padding: 4, verticalAlign: "top", fontSize: 9 }}>{d.llmRejectedReason ?? "—"}</td>
+                                  <td style={{ padding: 4, verticalAlign: "top", fontSize: 9 }}>{d.garbageCheckReason ?? "—"}</td>
+                                  <td style={{ padding: 4, verticalAlign: "top" }}>{d.llmRejectedByNegativePattern === true ? "true" : d.llmRejectedByNegativePattern === false ? "false" : "—"}</td>
+                                  <td style={{ padding: 4, verticalAlign: "top" }}>{d.llmRejectedByRequiredSignal === true ? "true" : d.llmRejectedByRequiredSignal === false ? "false" : "—"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </details>
+                      )}
+                    </>
+                  )}
+                  {keyFactsDebug?.keyFactsWithSource && keyFactsDebug.keyFactsWithSource.length > 0 && (
+                    <details style={{ marginTop: 6 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 600 }}>keyFactsWithSource ({keyFactsDebug.keyFactsWithSource.length} Einträge)</summary>
+                      <table style={{ marginTop: 6, fontSize: 10, width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ borderBottom: "1px solid #b6d4fe" }}>
+                            <th style={{ textAlign: "left", padding: 4 }}>field</th>
+                            <th style={{ textAlign: "left", padding: 4 }}>value</th>
+                            <th style={{ textAlign: "left", padding: 4 }}>sourcePath</th>
+                            <th style={{ textAlign: "left", padding: 4 }}>extractionMode</th>
+                            <th style={{ textAlign: "left", padding: 4 }}>llmConfidence</th>
+                            <th style={{ textAlign: "left", padding: 4 }}>llmReason</th>
+                            <th style={{ textAlign: "left", padding: 4 }}>validationReason</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {keyFactsDebug.keyFactsWithSource.map((row, i) => (
+                            <tr key={i} style={{ borderBottom: "1px solid #dee2e6" }}>
+                              <td style={{ padding: 4, verticalAlign: "top" }}>{row.field}</td>
+                              <td style={{ padding: 4, verticalAlign: "top", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }} title={row.value}>{row.value}</td>
+                              <td style={{ padding: 4, verticalAlign: "top", fontSize: 9 }}>{row.sourcePath}</td>
+                              <td style={{ padding: 4, verticalAlign: "top" }}>{row.extractionMode ?? "—"}</td>
+                              <td style={{ padding: 4, verticalAlign: "top", fontSize: 9 }}>{row.llmConfidence ?? "—"}</td>
+                              <td style={{ padding: 4, verticalAlign: "top", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", fontSize: 9 }} title={row.llmReason ?? ""}>{row.llmReason ?? "—"}</td>
+                              <td style={{ padding: 4, verticalAlign: "top", fontSize: 9 }}>{row.validationReason ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </details>
+                  )}
+                </div>
+              )}
               <div style={{ marginBottom: 16 }}>
                 <label htmlFor="positionen-suche" style={{ display: "block", fontSize: 13, fontWeight: 600, color: customerRoute ? CUSTOMER_DESIGN.textSecondary : "#475569", marginBottom: 6 }}>
                   In Positionen suchen
@@ -2458,13 +2892,21 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                   )}
                 </div>
               )}
-              <VorbemerkungenDocumentView
-                content={positionsForDocumentView}
-                maxHeight="420px"
-                variant="positionen"
-                searchQuery={positionenSearchQuery.trim() || undefined}
-                theme={customerRoute ? { textPrimary: CUSTOMER_DESIGN.textPrimary, textSecondary: CUSTOMER_DESIGN.textSecondary, cardBorder: CUSTOMER_DESIGN.cardBorder } : undefined}
-              />
+              {isGaebXml && (gaebPreview?.normalized?.displayNodes?.length ?? 0) > 0 ? (
+                <PositionenNodeView
+                  nodes={gaebPreview.normalized.displayNodes as import("@/lib/gaebPreviewModel").GaebPreviewDisplayNode[]}
+                  maxHeight="420px"
+                  theme={customerRoute ? { textPrimary: CUSTOMER_DESIGN.textPrimary, textSecondary: CUSTOMER_DESIGN.textSecondary, cardBorder: CUSTOMER_DESIGN.cardBorder } : undefined}
+                />
+              ) : (
+                <VorbemerkungenDocumentView
+                  content={positionsForDocumentView}
+                  maxHeight="420px"
+                  variant="positionen"
+                  searchQuery={positionenSearchQuery.trim() || undefined}
+                  theme={customerRoute ? { textPrimary: CUSTOMER_DESIGN.textPrimary, textSecondary: CUSTOMER_DESIGN.textSecondary, cardBorder: CUSTOMER_DESIGN.cardBorder } : undefined}
+                />
+              )}
             </div>
           </div>
           )}

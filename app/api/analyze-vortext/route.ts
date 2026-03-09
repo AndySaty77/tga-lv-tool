@@ -16,6 +16,58 @@ type RiskClause = {
 type KeyFacts = Record<string, string>;
 type KeyFactConfidence = Record<string, number>;
 
+/** Quelle des Vortexts für KeyFacts – zur klaren Zuordnung im Debug. */
+export type VortextSourceTextType =
+  | "normalized-global-remarks"
+  | "normalized-top-label"
+  | "normalized-groups"
+  | "normalized-group-remarks"
+  | "normalized-items"
+  | "displayNodes"
+  | "legacy-preface-text"
+  | "legacy-cleaned-text"
+  | "raw-text";
+
+export type KeyFactsSourceMode = "normalized-structure" | "legacy-text" | "mixed" | "llm-fallback";
+
+export type KeyFactWithSource = {
+  field: string;
+  value: string;
+  sourceTextType: VortextSourceTextType;
+  sourcePath: string;
+  confidence: number;
+  acceptedByPositivePattern?: boolean;
+  rejectedByNegativePattern?: boolean;
+  validationReason?: string;
+  /** "label" | "heuristic" | "llm" | "none" */
+  extractionMode?: "label" | "heuristic" | "llm" | "none";
+  matchedLabel?: string;
+  rawMatchedText?: string;
+  cleanedCandidateValue?: string;
+  /** Nur bei extractionMode "llm" */
+  llmConfidence?: string;
+  llmReason?: string;
+  llmRawValue?: string;
+};
+
+type FieldMatrixEntry = {
+  maxLength: number;
+  /** Mindestens ein Pattern muss auf den Wert zutreffen (echtes Feld-Signal). */
+  positivePatterns: RegExp[];
+  /** Kein Pattern darf zutreffen (Fehlzuordnungen ausschließen). */
+  negativePatterns: RegExp[];
+  /** Optional: Zusätzliches Pflicht-Signal (z. B. Orts-/Datums-Signal). */
+  requiredSignal?: RegExp;
+};
+
+type ValidationResult = {
+  valid: boolean;
+  acceptedByPositivePattern?: boolean;
+  rejectedByNegativePattern?: boolean;
+  rejectedByRequiredSignal?: boolean;
+  validationReason?: string;
+};
+
 type LlmOut = {
   riskClauses: RiskClause[];
   keyFacts: KeyFacts;
@@ -167,6 +219,9 @@ function isGarbageValue(v: string) {
   if (/\s(oder|und)\s*$/i.test(s) && s.length < 50) return true;
   // einzelne Verben ohne Kontext (z. B. "einzubehalten" aus Schlussrechnung)
   if (/^[a-zA-ZÄÖÜäöüß]+$/.test(s) && s.length >= 10 && /(halten|behalten|einhalten)$/i.test(s)) return true;
+
+  // KW-Angaben (z. B. "11. KW 2026") sind gültig, auch wenn nur "KW" als Wort (2 Buchstaben)
+  if (/\d{1,2}\.\s*KW\s*\d{4}\b/i.test(s)) return false;
 
   // muss wenigstens ein Wort mit Buchstaben haben
   if (!/[a-zA-ZÄÖÜäöüß]{3,}/.test(s)) return true;
@@ -722,48 +777,789 @@ ${vortextSlice}`;
   return keyFacts;
 }
 
+// ================= LLM KeyFacts Fallback (nur strukturierte Quellen, nur Lücken füllen) =================
+type LlmKeyFactsFallbackEntry = { value: string; confidence: "high" | "medium" | "low"; reason: string };
+type LlmKeyFactsFallbackResult = Partial<Record<KeyFactKey, LlmKeyFactsFallbackEntry>>;
+
+function buildStructuredPromptForKeyFacts(input: {
+  globalRemarks: string[];
+  topLabelForPreface?: string;
+  groups: string[];
+}): string {
+  const payload = {
+    globalRemarks: input.globalRemarks.filter((t) => (t ?? "").trim().length > 0),
+    topLabelForPreface: (input.topLabelForPreface ?? "").trim() || undefined,
+    groups: input.groups.filter((g) => (g ?? "").trim().length > 0),
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+async function llmKeyFactsFallback(
+  structuredInput: { globalRemarks: string[]; topLabelForPreface?: string; groups: string[] },
+  fieldsToRequest: KeyFactKey[]
+): Promise<{ result: LlmKeyFactsFallbackResult; raw: string; parsed: Record<string, unknown> | null }> {
+  const empty = { result: {} as LlmKeyFactsFallbackResult, raw: "", parsed: null };
+  if (fieldsToRequest.length === 0) return empty;
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const promptPayload = buildStructuredPromptForKeyFacts(structuredInput);
+  const fieldList = fieldsToRequest.join(", ");
+
+  const systemPrompt = `Du erhältst strukturierte Vorbemerkungen aus einem GAEB-Leistungsverzeichnis (globalRemarks, topLabelForPreface, groups).
+Deine Aufgabe: Extrahiere NUR die angefragten Projektdaten. Gib AUSSCHLIESSLICH gültiges JSON im erwarteten Schema zurück. Kein Markdown, keine Erklärungen außerhalb des JSON.
+Regeln: Wenn ein Feld nicht eindeutig im Text steht, gib für value leeren String "" zurück. Erfinde nichts. Verwende nur Informationen aus dem bereitgestellten Text. Keine Rückschlüsse aus allgemeinem Bauwissen.`;
+
+  const userPrompt = `Extrahiere nur diese Felder: ${fieldList}.
+
+Feldspezifische Regeln:
+- bauherr_ag: nur Auftraggeber/Bauherr, nicht Bieter oder Empfänger
+- ort: nur Bauort/Standort (z.B. Straße, PLZ Ort), nicht allgemeine Beschreibungen
+- bindefrist: nur Fristangabe (z.B. "6 Wochen")
+- submission_einreichung: nur Angebotsabgabe/Einreichung/Submission mit Datum/Uhrzeit/Frist (z.B. "30. Oktober 2025")
+- baubeginn: nur Ausführungsbeginn/Baubeginn (z.B. "11. KW 2026")
+- vob_bgb: nur Vertragsgrundlage (z.B. "VOB, Teile A, B und C")
+- bauvorhaben: nur kurzer Projektname/Titel (z.B. "Neubau Rettungszentrum Rebland"), NICHT lange Beschreibung
+
+Antworte NUR mit einem JSON-Objekt. Pro Feld: { "value": "...", "confidence": "high"|"medium"|"low", "reason": "..." }. Bei Unklarheit value: "".
+
+Strukturierte Vorbemerkungen:
+${promptPayload}`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model,
+      temperature: 0,
+      max_tokens: 800,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const raw = completion.choices?.[0]?.message?.content ?? "";
+    const parsed = safeParseJson(raw);
+    if (!parsed || typeof parsed !== "object") return { result: {}, raw, parsed: null };
+
+    const out: LlmKeyFactsFallbackResult = {};
+    for (const field of fieldsToRequest) {
+      const entry = parsed[field];
+      if (!entry || typeof entry !== "object") continue;
+      const value = typeof entry.value === "string" ? entry.value.trim() : "";
+      const confidence = entry.confidence === "high" || entry.confidence === "medium" || entry.confidence === "low" ? entry.confidence : "low";
+      const reason = typeof entry.reason === "string" ? entry.reason.trim() : "";
+      out[field] = { value, confidence, reason };
+    }
+    return { result: out, raw, parsed };
+  } catch {
+    return empty;
+  }
+}
+
 // ================= Route =================
+const LEGACY_SOURCE: { sourceTextType: VortextSourceTextType; sourcePath: string; keyFactsSourceMode: KeyFactsSourceMode } = {
+  sourceTextType: "legacy-preface-text",
+  sourcePath: "unknown",
+  keyFactsSourceMode: "legacy-text",
+};
+
+// ================= Normalisierte GAEB-Struktur (KeyFacts primär daraus) =================
+export type NormalizedPayload = {
+  globalRemarks: string[];
+  topLabelForPreface?: string;
+  groups: { label: string }[];
+  groupRemarks?: string[];
+};
+
+/** Felder, die zuerst aus strukturierten Quellen extrahiert werden (bei gaeb-xml). */
+const STRUCTURED_KEYFACT_FIELDS: KeyFactKey[] = [
+  "bauherr_ag",
+  "ort",
+  "bauvorhaben",
+  "gewerk",
+  "submission_einreichung",
+  "bindefrist",
+  "baubeginn",
+  "fertigstellung",
+  "vob_bgb",
+  "vertragsgrundlagen",
+];
+
+/** Phase-1-Felder für LLM-Fallback (nur fehlende/unsichere aus strukturierten Quellen ergänzen). */
+const LLM_FALLBACK_FIELDS: KeyFactKey[] = ["bauherr_ag", "ort", "bindefrist", "submission_einreichung", "baubeginn", "vob_bgb", "bauvorhaben"];
+
+// ================= Stufe A: Label-basierte Extraktion (Wert nur rechts vom Label) =================
+const LABEL_EXTRACTION_FIELDS: KeyFactKey[] = ["bauherr_ag", "ort", "bauvorhaben", "bindefrist", "submission_einreichung", "baubeginn"];
+
+/** Pro Feld: Regex mit einer Capturing-Gruppe für den Wert rechts vom Label. */
+const LABEL_PATTERNS: Record<string, Array<{ regex: RegExp; labelName: string }>> = {
+  bauherr_ag: [
+    { regex: /\bBauherr\s*[:\-]\s*([^\n\r;]{1,120})/i, labelName: "Bauherr:" },
+    { regex: /\bAuftraggeber\s*[:\-]\s*([^\n\r;]{1,120})/i, labelName: "Auftraggeber:" },
+    { regex: /\bAG\s*[:\-]\s*([^\n\r;]{1,120})/i, labelName: "AG:" },
+  ],
+  ort: [
+    { regex: /\bBauort\s*[:\-]\s*([^\n\r;]{1,120})/i, labelName: "Bauort:" },
+    { regex: /\bOrt\s*[:\-]\s*([^\n\r;]{1,120})/i, labelName: "Ort:" },
+    { regex: /\bStandort\s*[:\-]\s*([^\n\r;]{1,120})/i, labelName: "Standort:" },
+    { regex: /\bOrt\s+der\s+Leistung\s*[:\-]\s*([^\n\r;]{1,120})/i, labelName: "Ort der Leistung:" },
+  ],
+  bindefrist: [
+    { regex: /\bBindefrist\s*(?:beträgt\s*)?[:\-]?\s*([^\n\r;]{1,80})/i, labelName: "Bindefrist" },
+    { regex: /\bBindefrist\s*[:\-]\s*([^\n\r;]{1,80})/i, labelName: "Bindefrist:" },
+  ],
+  submission_einreichung: [
+    { regex: /\bAngebotsabgabefrist\s*[:\-]\s*([^\n\r;]{1,80})/i, labelName: "Angebotsabgabefrist:" },
+    { regex: /\bSubmission\s*[:\-]\s*([^\n\r;]{1,80})/i, labelName: "Submission:" },
+    { regex: /\bEinreichung\s*[:\-]\s*([^\n\r;]{1,80})/i, labelName: "Einreichung:" },
+    { regex: /\bAngebotsfrist\s*[:\-]\s*([^\n\r;]{1,80})/i, labelName: "Angebotsfrist:" },
+  ],
+  baubeginn: [
+    { regex: /\bAusführungsbeginn\s*[:\-]\s*([^\n\r;]{1,80})/i, labelName: "Ausführungsbeginn:" },
+    { regex: /\bBaubeginn\s*[:\-]\s*([^\n\r;]{1,80})/i, labelName: "Baubeginn:" },
+  ],
+  bauvorhaben: [
+    { regex: /\bBauvorhaben\s*[:\-]\s*([^\n\r;]{1,120})/i, labelName: "Bauvorhaben:" },
+    { regex: /\bProjekt\s*[:\-]\s*([^\n\r;]{1,120})/i, labelName: "Projekt:" },
+    { regex: /\bObjekt\s*[:\-]\s*([^\n\r;]{1,120})/i, labelName: "Objekt:" },
+  ],
+};
+
+/** Felder, bei denen 1–2 folgende Zeilen mitgenommen werden, sofern keine neue Feldbezeichnung beginnt. */
+const MULTILINE_LABEL_FIELDS: KeyFactKey[] = ["ort", "bauvorhaben", "submission_einreichung", "baubeginn", "bindefrist"];
+/** Zeilenanfang, der eine neue KeyFact-Bezeichnung einleitet → nächste Zeile nicht anhängen. */
+const LINE_START_LABEL = /^(?:Bauherr|Auftraggeber|\bAG\b|Bauort|Ort\s|Standort|Ort\s+der\s+Leistung|Bindefrist|Angebotsabgabefrist|Submission|Einreichung|Angebotsfrist|Ausführungsbeginn|Baubeginn|Bauvorhaben|Projekt|Objekt|Angebotssumme|Angebotsumme|Summe\s+netto|Summe\s+brutto)\s*[:\-]?/i;
+
+function extractValueByLabel(text: string, field: string): { value: string; matchedLabel: string; rawMatchedText: string } | null {
+  const patterns = LABEL_PATTERNS[field];
+  if (!patterns) return null;
+  for (const { regex, labelName } of patterns) {
+    const m = text.match(regex);
+    if (m && m[1]) {
+      let raw = m[1].trim();
+      if (raw.length === 0) continue;
+      if (MULTILINE_LABEL_FIELDS.includes(field as KeyFactKey)) {
+        const lines = text.split(/\r?\n/);
+        const charIndex = m.index ?? 0;
+        const lineIndex = text.slice(0, charIndex).split(/\r?\n/).length - 1;
+        const extra: string[] = [];
+        for (let i = lineIndex + 1; i < lines.length && extra.length < 2; i++) {
+          const line = lines[i].trim();
+          if (!line) break;
+          if (LINE_START_LABEL.test(line)) break;
+          extra.push(line);
+        }
+        if (extra.length > 0) raw = [raw, ...extra].join(", ");
+      }
+      // Baubeginn (und ähnliche): Wert nicht über bekannte Folgelabels hinaus mitnehmen (z. B. ", Angebotssumme netto:")
+      if (field === "baubeginn" && /\s*,?\s*Angebotssumme\s/i.test(raw)) {
+        const idx = raw.search(/\s*,?\s*Angebotssumme\s/i);
+        raw = raw.slice(0, idx).replace(/\s*,\s*$/, "").trim();
+      }
+      return { value: raw, matchedLabel: labelName, rawMatchedText: raw };
+    }
+  }
+  return null;
+}
+
+// ================= Feld-Matrix: feldspezifische Validierung =================
+const FIELD_MATRIX: Partial<Record<KeyFactKey, FieldMatrixEntry>> = {
+  bauherr_ag: {
+    maxLength: 120,
+    positivePatterns: [
+      /[A-Za-zÄÖÜäöüß\-\.]{2,}/,
+      /\b(?:GmbH|AG|KG|e\.?V\.?)\b/i,
+    ],
+    negativePatterns: [
+      /(?:vob|vertrag|gemäß|leistung|qng|anforderung)/i,
+      /zur\s+Einhaltung|zu\s+benennen/,
+    ],
+  },
+  ort: {
+    maxLength: 120,
+    positivePatterns: [
+      /\b(?:Bau)?ort\s*[:\-]\s*/i,
+      /\bStandort\s*[:\-]\s*/i,
+      /\bOrt\s+der\s+Leistung\s*[:\-]\s*/i,
+      /\b(?:Straße|Str\.|Platz|Weg)\s*[:\-]?\s*\S/i,
+      /\d{5}\s+[A-Za-zÄÖÜäöüß\-]/,
+      /[A-Za-zäöüß\-]+\s+\d+\s*[,\s]+[\d]{5}/,
+      /,\s*\d{5}\s+[A-Za-zÄÖÜäöüß\-]/, // "Berliner Straße, 79211 Denzlingen"
+    ],
+    negativePatterns: [
+      /\bVOB\b/i,
+      /\bvertrags?\w*/i,
+      /\bleistung\s+(?:ist|sind|wird|werden|gemäß|nach)/i,
+      /\bder\s+leistung\s+(?:eingereicht|vorzulegen|zu\s+erbringen)/i,
+      /\ballgemein|maßgebend|vertragsbestimmungen/i,
+      /gemäß\s+(?:vob|§)/i,
+    ],
+    requiredSignal: /(?:ort|standort|straße|str\.|platz|adresse|plz|\d{5}\s|[A-Za-zÄÖÜäöüß\-]{2,})/i,
+  },
+  bauvorhaben: {
+    maxLength: 120,
+    positivePatterns: [
+      /\b(?:Neubau|Sanierung|Umbau|Erweiterung|Bauvorhaben|Projekt)\b/i,
+      /[A-Za-zÄÖÜäöüß\-]{4,}\s+[A-Za-zÄÖÜäöüß\-]{4,}/, // mind. 2 Wörter (z.B. "Neubau Rettungszentrum Rebland")
+    ],
+    negativePatterns: [
+      /^(?:Bei dem|Es handelt sich|Das Bauvorhaben)\s/i,
+      /\b(?:vob|vertrag|§|gemäß)\b/i,
+    ],
+    requiredSignal: /.{10,}/,
+  },
+  gewerk: {
+    maxLength: 120,
+    positivePatterns: [
+      /\bGewerk\s*[:\-]\s*/i,
+      /\bTeilgewerk\s*[:\-]\s*/i,
+      /\bLeistungsbereich\s*[:\-]\s*/i,
+      /\d{4}\s+(?:Heizungs|Sanitär|Lüftungs|MSR|Elektro|Kälte)arbeiten/i,
+    ],
+    negativePatterns: [
+      /(?:vob|vertrag|abnahme|zahlung|gewährleistung)/i,
+    ],
+  },
+  bindefrist: {
+    maxLength: 100,
+    positivePatterns: [
+      /\bBindefrist\s*(?:beträgt|:)?\s*/i,
+      /\d+\s*(?:Tage?|Wochen?|Wochten?|Monate?)/i,
+      /\d{1,2}[.\-/]\d{1,2}/,
+    ],
+    negativePatterns: [
+      /^(?:und|oder|von|bis|nach)\s+/i,
+      /(?:vob|vertrag)\s/i,
+    ],
+  },
+  submission_einreichung: {
+    maxLength: 100,
+    positivePatterns: [
+      /\b(?:Submission|Einreichung|Angebotsabgabe|Abgabefrist)\s*[:\-]?\s*/i,
+      /\d{1,2}[.\-/]\d{1,2}([.\-/]\d{2,4})?/,
+      /\d{1,2}\.\s*(?:Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+\d{4}/i, // "30. Oktober 2025"
+      /\b(?:bis|zum|bis\s+zum)\s+\d/i,
+      /\bKW\s*\d+/i,
+      /\b(?:Uhr|:\d{2})/,
+      /\bFrist\b/i,
+    ],
+    negativePatterns: [
+      /\b(GmbH|AG|Co\.\s*KG|KG\b|UG\b)\b/i,
+      /^[A-Z][a-z]+(?:\s+[A-Za-z]+)*(?:\s+GmbH)?\s*$/,
+    ],
+    requiredSignal: /\d|frist|abgabe|einreichung|bis\s+zum|uhr|kw|oktober|januar|februar|märz|april|mai|juni|juli|august|september|november|dezember/i,
+  },
+  baubeginn: {
+    maxLength: 100,
+    positivePatterns: [
+      /\b(?:Baubeginn|Ausführungsbeginn)\s*[:\-]?\s*/i,
+      /\d{1,2}[.\-/]\d{1,2}([.\-/]\d{2,4})?/,
+      /\d{1,2}\.\s*KW\s*\d{4}/i, // "11. KW 2026"
+      /\bKW\s*\d+/i,
+      /\b(?:Frist|Dauer|Zeitraum)\b/i,
+      /siehe\s+(?:Termin|Bauzeiten)/i,
+    ],
+    negativePatterns: [
+      /^(?:und|oder|von\s+der|der\s+leistung|eingereicht|vorzulegen)\s+/i,
+      /\bVOB\b|\bvertrags?\w*/i,
+    ],
+    requiredSignal: /\d|kw|frist|dauer|termin|siehe/i,
+  },
+  fertigstellung: {
+    maxLength: 100,
+    positivePatterns: [
+      /\b(?:Fertigstellung|Abnahme|Übergabe)\s*[:\-]?\s*/i,
+      /\d{1,2}[.\-/]\d{1,2}([.\-/]\d{2,4})?/,
+      /\bKW\s*\d+/i,
+      /\d+\s*(?:Wochten?|Monate?|Jahre?)/i,
+      /siehe\s+(?:Termin|Bauzeiten|Abnahme)/i,
+      /\bFrist\b/i,
+    ],
+    negativePatterns: [
+      /^(?:und|oder|von\s+der|bis\s+zur)\s+/i,
+      /\bder\s+leistung\s+eingereicht\b/i,
+      /\bVOB\b|\ballgemein|vertragsbestimmungen/i,
+      /(?:teile\s+in\s+betrieb|teilabnahmen).{30,}/i,
+    ],
+    requiredSignal: /\d|kw|frist|dauer|termin|siehe|abnahme\s+bis|bis\s+zum/i,
+  },
+  bauzeit: {
+    maxLength: 100,
+    positivePatterns: [
+      /\b(?:Bauzeit|Ausführungszeit|Ausführungsdauer|Dauer)\s*[:\-]?\s*/i,
+      /\d+\s*(?:Wochten?|Monate?|Jahre?)/i,
+      /\d{1,2}[.\-/]\d{1,2}/,
+      /siehe\s+(?:Termin|Bauzeiten)/i,
+    ],
+    negativePatterns: [
+      /^(?:und|oder|von\s+der)\s+/i,
+      /\bVOB\b|\bvertrags?\w*/i,
+    ],
+    requiredSignal: /\d|frist|dauer|siehe|wochten?|monate?|jahre?/i,
+  },
+  vob_bgb: {
+    maxLength: 30,
+    positivePatterns: [
+      /^(?:VOB|BGB|VOB\/B|VOB\s*B|VOB\/C)(?:\s*\+\s*BGB)?$/i,
+      /VOB/i,
+      /BGB/i,
+    ],
+    negativePatterns: [],
+  },
+  vertragsgrundlagen: {
+    maxLength: 180,
+    positivePatterns: [
+      /VOB,?\s*Teile?\s*A,?\s*B\s*und\s*C/i,
+      /\bVertragsgrundlage(?:n)?\s*[:\-]?\s*/i,
+      /\bMaßgebende\s+Unterlagen\s*[:\-]?\s*/i,
+    ],
+    negativePatterns: [
+      /^(?:Gewährleistung|Mängelhaftung|Zahlung|Abnahme)\s*$/i,
+    ],
+  },
+  schlussrechnung: {
+    maxLength: 120,
+    positivePatterns: [
+      /\b(?:Schlussrechnung|Zahlungsziel|Schlusszahlung)\s*[:\-]?\s*/i,
+      /%\s*|\d+\s*(?:Tage?|Wochten?|Monate?)/i,
+      /\bFrist\b.*\b(?:Zahlung|Rechnung)/i,
+    ],
+    negativePatterns: [
+      /\bund\/?oder\s+von\s+der\s+schlussrechnung\b/i,
+      /^(?:und|oder|sowie)\s+/i,
+    ],
+    requiredSignal: /%|\d|zahlungsziel|frist|rechnung|tage?|wochten?|monate?/i,
+  },
+  gewaerhleistung: {
+    maxLength: 120,
+    positivePatterns: [
+      /\d+\s*(?:Jahre?|Monate?|Jahres?frist)/i,
+      /\bGewährleistung(?:sfrist)?\s*[:\-]?\s*.{5,}/i,
+      /\bMängel(?:haftung|ansprüche)?\s*[:\-]?\s*.{5,}/i,
+    ],
+    negativePatterns: [
+      /^(?:Gewährleistung|Mängelhaftung)(?:\s+und\s+Abnahme)?\s*$/i,
+      /\bVOB\b.*\b(?:§|Abschnitt)\s/i,
+    ],
+    requiredSignal: /\d|frist|jahre?|monate?|regelung/i,
+  },
+  abschlagszahlung: {
+    maxLength: 120,
+    positivePatterns: [
+      /\bAbschlagszahlung(?:en)?\s*[:\-]?\s*/i,
+      /\bAbschlagsrechn(?:ung|ungen)\s*[:\-]?\s*/i,
+      /%\s*|\d+\s*(?:Tage?|Wochten?|Monate?)/i,
+    ],
+    negativePatterns: [
+      /\bund\/?oder\s+von\s+der\s+schlussrechnung\b/i,
+      /^(?:und|oder|sowie)\s+/i,
+    ],
+    requiredSignal: /%|\d|frist|tage?|wochten?|monate?|zahlung|rechnung/i,
+  },
+  vertragsstrafe: {
+    maxLength: 120,
+    positivePatterns: [
+      /\bVertragsstrafe\s*[:\-]?\s*.{5,}/i,
+      /\bPönale\s*[:\-]?\s*.{5,}/i,
+      /\d+[\s,%]/,
+    ],
+    negativePatterns: [
+      /^(?:Vertragsstrafe|Pönale)\s*$/i,
+    ],
+    requiredSignal: /.{10,}|\d/,
+  },
+};
+
+function validateKeyFactValue(field: string, value: string): ValidationResult {
+  const s = (value ?? "").trim();
+  if (!s) return { valid: false, validationReason: "empty" };
+  const entry = FIELD_MATRIX[field as KeyFactKey];
+  if (!entry) return { valid: true };
+  if (s.length > entry.maxLength) return { valid: false, validationReason: "maxLength" };
+  const rejectedByNegativePattern = entry.negativePatterns.some((r) => r.test(s));
+  if (rejectedByNegativePattern) return { valid: false, rejectedByNegativePattern: true, validationReason: "negativePattern" };
+  const acceptedByPositivePattern = entry.positivePatterns.some((r) => r.test(s));
+  if (!acceptedByPositivePattern) return { valid: false, acceptedByPositivePattern: false, validationReason: "noPositiveMatch" };
+  const failedRequiredSignal = entry.requiredSignal && !entry.requiredSignal.test(s);
+  if (failedRequiredSignal) return { valid: false, rejectedByRequiredSignal: true, validationReason: "requiredSignal" };
+  return { valid: true, acceptedByPositivePattern: true, rejectedByNegativePattern: false };
+}
+
+/** Generische/Platzhalter-Werte nicht als gültiges KeyFact übernehmen. */
+function isInvalidOrGenericValue(value: string, field: string): boolean {
+  const s = (value ?? "").trim();
+  if (!s) return true;
+  const lower = s.toLowerCase();
+  if (/^(zu\s+benennen|noch\s+zu\s+benennen|wird\s+(noch\s+)?bekannt\s+gegeben|siehe\s+anlage|\.\.\.|n\.\s*b\.|tbd|k\.\s*a\.)$/i.test(lower)) return true;
+  if (/^(n\.?\s*v\.?|n\/a|–|—|-)$/i.test(lower)) return true;
+  // Lange Satzfetzen bei Termin/Frist-Feldern nicht übernehmen
+  const dateLikeFields = ["baubeginn", "fertigstellung", "bauzeit", "ausfuehrungsfrist", "ausfuehrungszeit", "bindefrist", "submission_einreichung"];
+  if (dateLikeFields.includes(field) && s.length > 100) return true;
+  if (dateLikeFields.includes(field) && /(vorzulegen|zu bestätigen|entnommen werden|der die zeitliche)/i.test(s)) return true;
+  return false;
+}
+
+/** Harte Validierung: Feld-Matrix hat Vorrang; sonst Fallback-Logik für Felder ohne Matrix. */
+function isWeakOrInvalidFieldValue(value: string, field: string): boolean {
+  const result = validateKeyFactValue(field, value);
+  if (FIELD_MATRIX[field as KeyFactKey]) return !result.valid;
+  const s = (value ?? "").trim();
+  if (!s) return true;
+  if (field === "gewaerhleistung" && s.length < 25 && !/\d/.test(s)) return true;
+  if ((field === "abschlagszahlung" || field === "schlussrechnung") && /\bund\/?oder\s+von\s+der\s+schlussrechnung\b/i.test(s)) return true;
+  return false;
+}
+
+type ExtractionDebugEntry = {
+  extractionMode: "label" | "heuristic" | "llm" | "none";
+  matchedLabel?: string;
+  rawMatchedText?: string;
+  cleanedCandidateValue?: string;
+  llmConfidence?: string;
+  llmReason?: string;
+  llmRawValue?: string;
+};
+
+/** KeyFacts aus normalisierter Struktur extrahieren. Stufe A: label-basiert (5 Felder); Stufe B: Heuristik. */
+function extractKeyFactsFromNormalized(normalized: NormalizedPayload): {
+  keyFacts: KeyFacts;
+  sources: Record<string, { sourceTextType: VortextSourceTextType; sourcePath: string }>;
+  extractionDebug: Record<string, ExtractionDebugEntry>;
+} {
+  const keyFacts: KeyFacts = {};
+  const sources: Record<string, { sourceTextType: VortextSourceTextType; sourcePath: string }> = {};
+  const extractionDebug: Record<string, ExtractionDebugEntry> = {};
+  const segments: { text: string; sourceTextType: VortextSourceTextType; sourcePath: string }[] = [];
+
+  (normalized.globalRemarks ?? []).forEach((t, i) => {
+    if ((t ?? "").trim()) segments.push({ text: t.trim(), sourceTextType: "normalized-global-remarks", sourcePath: `normalized.globalRemarks[${i}]` });
+  });
+  if ((normalized.topLabelForPreface ?? "").trim()) {
+    segments.push({ text: normalized.topLabelForPreface!.trim(), sourceTextType: "normalized-top-label", sourcePath: "normalized.topLabelForPreface" });
+  }
+  (normalized.groups ?? []).forEach((g, i) => {
+    const label = (g?.label ?? "").trim();
+    if (label) segments.push({ text: label, sourceTextType: "normalized-groups", sourcePath: `normalized.groups[${i}].label` });
+  });
+  (normalized.groupRemarks ?? []).forEach((t, i) => {
+    if ((t ?? "").trim()) segments.push({ text: t.trim(), sourceTextType: "normalized-group-remarks", sourcePath: `normalized.groupRemarks[${i}]` });
+  });
+
+  for (const seg of segments) {
+    const partial = extractKeyFactsRegex(seg.text);
+    for (const field of STRUCTURED_KEYFACT_FIELDS) {
+      if (keyFacts[field]) continue;
+      let candidate: string | null = null;
+      let mode: "label" | "heuristic" | "none" = "none";
+      let matchedLabel: string | undefined;
+      let rawMatchedText: string | undefined;
+
+      if (LABEL_EXTRACTION_FIELDS.includes(field)) {
+        const labelResult = extractValueByLabel(seg.text, field);
+        if (labelResult) {
+          const cleaned = normVal(labelResult.value);
+          if (cleaned && !isGarbageValue(cleaned) && !isInvalidOrGenericValue(cleaned, field) && !isWeakOrInvalidFieldValue(cleaned, field)) {
+            candidate = cleaned;
+            mode = "label";
+            matchedLabel = labelResult.matchedLabel;
+            rawMatchedText = labelResult.rawMatchedText;
+          }
+        }
+      }
+      if (!candidate) {
+        const v = normVal(partial[field] ?? "");
+        if (v && !isGarbageValue(v) && !isInvalidOrGenericValue(v, field) && !isWeakOrInvalidFieldValue(v, field)) {
+          candidate = v;
+          mode = "heuristic";
+          rawMatchedText = partial[field] ?? undefined;
+        }
+      }
+      if (candidate) {
+        keyFacts[field] = candidate;
+        sources[field] = { sourceTextType: seg.sourceTextType, sourcePath: seg.sourcePath };
+        extractionDebug[field] = {
+          extractionMode: mode,
+          matchedLabel,
+          rawMatchedText,
+          cleanedCandidateValue: candidate,
+        };
+      }
+    }
+    if (!keyFacts.vob_bgb && /(vob\/b|vob b|vob\/c|vob c|\bvob\/?b\b|\bvob\/?c\b)/i.test(seg.text)) keyFacts.vob_bgb = "VOB";
+    if (!keyFacts.vob_bgb && /\bBGB\b/i.test(seg.text)) keyFacts.vob_bgb = "BGB";
+    if (keyFacts.vob_bgb && !sources.vob_bgb) sources.vob_bgb = { sourceTextType: seg.sourceTextType, sourcePath: seg.sourcePath };
+  }
+
+  for (const k of Object.keys(keyFacts)) {
+    if (isGarbageValue(keyFacts[k]) || isInvalidOrGenericValue(keyFacts[k], k) || isWeakOrInvalidFieldValue(keyFacts[k], k)) {
+      delete keyFacts[k];
+      delete sources[k];
+      delete extractionDebug[k];
+    }
+  }
+  return { keyFacts, sources, extractionDebug };
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const vortext = sanitizeVortext((body?.text ?? "").toString());
 
-    if (!vortext) {
-      return NextResponse.json({ riskClauses: [], keyFacts: {}, keyFactsDebug: { empty: true } }, { status: 200 });
+    const rawSrc = body?.vortextSource && typeof body.vortextSource === "object" ? body.vortextSource : null;
+    const srcTypeOk = rawSrc && ["normalized-global-remarks", "normalized-top-label", "normalized-groups", "normalized-group-remarks", "normalized-items", "displayNodes", "legacy-preface-text", "legacy-cleaned-text", "raw-text"].includes(rawSrc.sourceTextType);
+    const modeOk = rawSrc && ["normalized-structure", "legacy-text", "mixed", "llm-fallback"].includes(rawSrc.keyFactsSourceMode);
+    const vortextSource = rawSrc
+      ? {
+          sourceTextType: srcTypeOk ? (rawSrc.sourceTextType as VortextSourceTextType) : LEGACY_SOURCE.sourceTextType,
+          sourcePath: rawSrc.sourcePath != null ? String(rawSrc.sourcePath) : "unknown",
+          keyFactsSourceMode: modeOk ? (rawSrc.keyFactsSourceMode as KeyFactsSourceMode) : LEGACY_SOURCE.keyFactsSourceMode,
+        }
+      : LEGACY_SOURCE;
+
+    const useNormalizedStructure =
+      body?.formatDetected === "gaeb-xml" &&
+      body?.normalized &&
+      typeof body.normalized === "object" &&
+      Array.isArray((body.normalized as NormalizedPayload).globalRemarks);
+
+    let keyFacts: KeyFacts = {};
+    const keyFactsSourceByField: Record<string, { sourceTextType: VortextSourceTextType; sourcePath: string }> = {};
+    const keyFactsExtractionDebug: Record<string, ExtractionDebugEntry> = {};
+    let keyFactsSourceMode: KeyFactsSourceMode = "legacy-text";
+    let llmFallbackUsed = false;
+    const llmFieldsRequested: KeyFactKey[] = [];
+    const llmFieldsAccepted: KeyFactKey[] = [];
+    const llmFieldsRejected: KeyFactKey[] = [];
+    let llmRawResponse = "";
+    let llmParsedResponse: Record<string, unknown> | null = null;
+    const llmFallbackDebugPerField: Record<string, { llmWasRequested: boolean; llmRawValue?: string; llmValidated: boolean; llmRejectedReason?: string; llmRejectedByNegativePattern?: boolean; llmRejectedByRequiredSignal?: boolean; garbageCheckReason?: string }> = {};
+    const mergeWinnerPerField: Record<string, string> = {};
+    const overwrittenByLegacy: Record<string, boolean> = {};
+    const previousValueBeforeLegacyMerge: Record<string, string> = {};
+
+    if (useNormalizedStructure) {
+      const normalized = body.normalized as NormalizedPayload;
+      const payload = {
+        globalRemarks: Array.isArray(normalized.globalRemarks) ? normalized.globalRemarks : [],
+        topLabelForPreface: normalized.topLabelForPreface,
+        groups: Array.isArray(normalized.groups) ? normalized.groups : [],
+        groupRemarks: Array.isArray(normalized.groupRemarks) ? normalized.groupRemarks : [],
+      };
+      const hasAnySegment =
+        payload.globalRemarks.some((t) => (t ?? "").trim().length > 0) ||
+        (payload.topLabelForPreface ?? "").trim().length > 0 ||
+        payload.groups.some((g) => (g?.label ?? "").trim().length > 0) ||
+        (payload.groupRemarks ?? []).some((t) => (t ?? "").trim().length > 0);
+
+      if (hasAnySegment) {
+        const { keyFacts: structuredFacts, sources: structuredSources, extractionDebug: structuredExtractionDebug } = extractKeyFactsFromNormalized(payload);
+        keyFacts = { ...structuredFacts };
+        Object.assign(keyFactsSourceByField, structuredSources);
+        Object.assign(keyFactsExtractionDebug, structuredExtractionDebug);
+      }
+
+      // LLM-Fallback nur für fehlende Phase-1-Felder, nur strukturierte Quellen (kein Rohtext)
+      const fieldsToRequest = LLM_FALLBACK_FIELDS.filter((f) => !keyFacts[f] || (keyFacts[f] ?? "").trim() === "");
+      if (fieldsToRequest.length > 0) {
+        const structuredInput = {
+          globalRemarks: payload.globalRemarks ?? [],
+          topLabelForPreface: payload.topLabelForPreface,
+          groups: (payload.groups ?? []).map((g: { label?: string }) => (g?.label ?? "").trim()).filter(Boolean),
+        };
+        llmFieldsRequested.push(...fieldsToRequest);
+        llmFallbackUsed = true;
+        const { result: llmFallbackResult, raw: llmRaw, parsed: llmParsed } = await llmKeyFactsFallback(structuredInput, fieldsToRequest);
+        llmRawResponse = llmRaw;
+        llmParsedResponse = llmParsed;
+        for (const field of fieldsToRequest) {
+          const entry = llmFallbackResult[field];
+          const rawValue = entry?.value ?? "";
+          const val = normVal(rawValue);
+          const validation = validateKeyFactValue(field, val);
+          const garbageFail = !val || isGarbageValue(val);
+          const invalidFail = !garbageFail && isInvalidOrGenericValue(val, field);
+          const weakFail = !garbageFail && !invalidFail && isWeakOrInvalidFieldValue(val, field);
+          const notGarbage = !!val && !garbageFail && !invalidFail && !weakFail;
+          const accepted = !!(entry && rawValue.trim() !== "" && validation.valid && notGarbage);
+          const garbageCheckReason =
+            garbageFail ? "isGarbageValue" : invalidFail ? "isInvalidOrGenericValue" : weakFail ? "isWeakOrInvalidFieldValue" : undefined;
+          llmFallbackDebugPerField[field] = {
+            llmWasRequested: true,
+            llmRawValue: rawValue || undefined,
+            llmValidated: validation.valid && notGarbage,
+            llmRejectedReason: accepted ? undefined : (validation.validationReason ?? (notGarbage ? undefined : "garbage_or_invalid")),
+            llmRejectedByNegativePattern: validation.rejectedByNegativePattern,
+            llmRejectedByRequiredSignal: validation.rejectedByRequiredSignal,
+            garbageCheckReason: accepted ? undefined : garbageCheckReason,
+          };
+          if (accepted) {
+            keyFacts[field] = val;
+            keyFactsSourceByField[field] = { sourceTextType: "normalized-global-remarks", sourcePath: "llm-fallback" };
+            keyFactsExtractionDebug[field] = {
+              extractionMode: "llm",
+              cleanedCandidateValue: val,
+              llmConfidence: entry!.confidence,
+              llmReason: entry!.reason,
+              llmRawValue: entry!.value,
+            };
+            llmFieldsAccepted.push(field);
+          } else if (entry && rawValue.trim() !== "") {
+            llmFieldsRejected.push(field);
+          }
+        }
+        if (llmFieldsAccepted.length > 0) keyFactsSourceMode = "llm-fallback";
+      }
     }
 
-    // 1) Regex-Facts (nur sichere)
-    const regexFacts = extractKeyFactsRegex(vortext);
+    let riskClauses: RiskClause[] = [];
+    let llmResult: { ok: boolean; data?: LlmOut; raw?: string; mode: "responses" | "chat" } | null = null;
+    let regexFactsLegacy: KeyFacts = {};
+    const legacyVortext = vortext || "";
+    if (legacyVortext) {
+      regexFactsLegacy = extractKeyFactsRegex(legacyVortext);
+      llmResult = await llmExtract(legacyVortext);
+      const llmFacts = llmResult.ok ? llmResult.data!.keyFacts : {};
+      const llmConf = llmResult.ok ? llmResult.data!.keyFactConfidence : {};
+      const llmRisk = llmResult.ok ? llmResult.data!.riskClauses : [];
+      riskClauses = llmRisk.length ? llmRisk : fallbackRiskClausesRegex(legacyVortext);
 
-    // 2) LLM Extract (komplett: KeyFacts + Risks + Confidence)
-    const llm = await llmExtract(vortext);
-
-    const llmFacts = llm.ok ? llm.data!.keyFacts : {};
-    const llmConf = llm.ok ? llm.data!.keyFactConfidence : {};
-    const llmRisk = llm.ok ? llm.data!.riskClauses : [];
-
-    // 3) Merge Facts: Regex first, dann LLM nur wenn confidence passt
-    let keyFacts = mergeKeyFactsPreferRegex(regexFacts, llmFacts, llmConf);
-
-    // 4) LLM Repair: Fragmente, falsche Zuordnungen und Platzhalter korrigieren
-    if (Object.keys(keyFacts).length > 0) {
-      keyFacts = await llmRepairKeyFacts(vortext, keyFacts);
+      if (useNormalizedStructure && (Object.keys(keyFacts).length > 0 || Object.keys(keyFactsSourceByField).length > 0)) {
+        const keyFactsBeforeLegacy: KeyFacts = { ...keyFacts };
+        const keyFactsSourceBeforeLegacy: Record<string, { sourceTextType: VortextSourceTextType; sourcePath: string }> = { ...keyFactsSourceByField };
+        for (const field of KEYSET) {
+          if (keyFacts[field]) continue;
+          if (keyFactsSourceByField[field]?.sourcePath === "llm-fallback") continue;
+          if (keyFactsSourceByField[field]?.sourcePath?.startsWith("normalized")) continue;
+          let v: string | null = null;
+          let fallbackDebug: ExtractionDebugEntry = { extractionMode: "heuristic", cleanedCandidateValue: undefined };
+          if (LABEL_EXTRACTION_FIELDS.includes(field)) {
+            const labelResult = extractValueByLabel(legacyVortext, field);
+            if (labelResult) {
+              const cleaned = normVal(labelResult.value);
+              if (cleaned && !isGarbageValue(cleaned) && !isInvalidOrGenericValue(cleaned, field) && !isWeakOrInvalidFieldValue(cleaned, field)) {
+                v = cleaned;
+                fallbackDebug = {
+                  extractionMode: "label",
+                  matchedLabel: labelResult.matchedLabel,
+                  rawMatchedText: labelResult.rawMatchedText,
+                  cleanedCandidateValue: cleaned,
+                };
+              }
+            }
+          }
+          if (!v) {
+            const fromRegex = normVal(regexFactsLegacy[field] ?? "");
+            const fromLlm = normVal(llmFacts[field] ?? "");
+            const conf = clamp01(llmConf[field] ?? 0);
+            v = fromRegex;
+            if (LLM_PREFERRED_FIELDS.has(field) && fromLlm && conf >= 0.55 && (isGarbageValue(fromRegex) || !fromRegex)) v = fromLlm;
+            else if (!v && fromLlm && conf >= 0.55) v = fromLlm;
+            fallbackDebug.cleanedCandidateValue = v ?? undefined;
+          }
+          if (!v || isGarbageValue(v) || isInvalidOrGenericValue(v, field) || isWeakOrInvalidFieldValue(v, field)) continue;
+          keyFacts[field] = v;
+          keyFactsSourceByField[field] = { sourceTextType: "legacy-preface-text", sourcePath: "legacy-fallback" };
+          if (!keyFactsExtractionDebug[field]) keyFactsExtractionDebug[field] = fallbackDebug;
+        }
+        if (Object.keys(keyFacts).length > 0) {
+          keyFacts = await llmRepairKeyFacts(legacyVortext, keyFacts);
+          for (const k of Object.keys(keyFacts)) {
+            if (llmFieldsAccepted.includes(k as KeyFactKey)) continue;
+            if (isGarbageValue(keyFacts[k]) || isInvalidOrGenericValue(keyFacts[k], k) || isWeakOrInvalidFieldValue(keyFacts[k], k)) delete keyFacts[k], delete keyFactsSourceByField[k];
+          }
+        }
+        for (const field of Object.keys(keyFacts)) {
+          const src = keyFactsSourceByField[field]?.sourcePath ?? "unknown";
+          mergeWinnerPerField[field] = src;
+          const hadBefore = keyFactsBeforeLegacy[field] != null && String(keyFactsBeforeLegacy[field] ?? "").trim() !== "";
+          const srcBefore = keyFactsSourceBeforeLegacy[field]?.sourcePath;
+          const wasNonLegacy = srcBefore && srcBefore !== "legacy-fallback";
+          if (src === "legacy-fallback" && hadBefore && wasNonLegacy) {
+            overwrittenByLegacy[field] = true;
+            previousValueBeforeLegacyMerge[field] = String(keyFactsBeforeLegacy[field] ?? "").trim();
+          } else {
+            overwrittenByLegacy[field] = false;
+          }
+        }
+        keyFactsSourceMode = Object.values(keyFactsSourceByField).some((s) => s.sourcePath === "legacy-fallback") ? "mixed" : "normalized-structure";
+      } else {
+        keyFacts = mergeKeyFactsPreferRegex(regexFactsLegacy, llmFacts, llmConf);
+        if (Object.keys(keyFacts).length > 0) keyFacts = await llmRepairKeyFacts(legacyVortext, keyFacts);
+        for (const [field, val] of Object.entries(keyFacts)) {
+          keyFactsSourceByField[field] = { sourceTextType: vortextSource.sourceTextType, sourcePath: vortextSource.sourcePath };
+          keyFactsExtractionDebug[field] = { extractionMode: "heuristic", cleanedCandidateValue: val };
+        }
+        keyFactsSourceMode = vortextSource.keyFactsSourceMode;
+      }
+    } else if (useNormalizedStructure && Object.keys(keyFacts).length > 0) {
+      keyFactsSourceMode = "normalized-structure";
     }
 
-    // 5) Risks: wenn LLM leer -> Regex-Fallback (damit nie „immer 0“ bleibt)
-    const riskClauses = llmRisk.length ? llmRisk : fallbackRiskClausesRegex(vortext);
+    for (const k of Object.keys(keyFacts)) {
+      if (llmFieldsAccepted.includes(k as KeyFactKey)) continue;
+      if (isGarbageValue(keyFacts[k]) || isInvalidOrGenericValue(keyFacts[k], k) || isWeakOrInvalidFieldValue(keyFacts[k], k)) delete keyFacts[k], delete keyFactsSourceByField[k];
+    }
+
+    if (llmFallbackUsed && llmFieldsAccepted.length > 0) keyFactsSourceMode = "llm-fallback";
+
+    for (const field of Object.keys(keyFacts)) {
+      mergeWinnerPerField[field] = keyFactsSourceByField[field]?.sourcePath ?? "unknown";
+    }
+
+    const keyFactConfidenceOut: KeyFactConfidence = {};
+    for (const [k, val] of Object.entries(keyFacts)) {
+      keyFactConfidenceOut[k] = keyFactsSourceByField[k]?.sourcePath === "legacy-fallback" ? 0.75 : 0.85;
+    }
+
+    const keyFactsWithSource: KeyFactWithSource[] = Object.entries(keyFacts).map(([field, value]) => {
+      const v = String(value ?? "");
+      const valResult = validateKeyFactValue(field, v);
+      const ext = keyFactsExtractionDebug[field];
+      const out: KeyFactWithSource = {
+        field,
+        value: v,
+        sourceTextType: keyFactsSourceByField[field]?.sourceTextType ?? vortextSource.sourceTextType,
+        sourcePath: keyFactsSourceByField[field]?.sourcePath ?? vortextSource.sourcePath,
+        confidence: keyFactConfidenceOut[field] ?? 0,
+        acceptedByPositivePattern: valResult.acceptedByPositivePattern,
+        rejectedByNegativePattern: valResult.rejectedByNegativePattern,
+        validationReason: valResult.valid ? undefined : valResult.validationReason,
+        extractionMode: ext?.extractionMode ?? "heuristic",
+        matchedLabel: ext?.matchedLabel,
+        rawMatchedText: ext?.rawMatchedText,
+        cleanedCandidateValue: ext?.cleanedCandidateValue,
+      };
+      if (ext?.extractionMode === "llm") {
+        out.llmConfidence = ext.llmConfidence;
+        out.llmReason = ext.llmReason;
+        out.llmRawValue = ext.llmRawValue;
+      }
+      return out;
+    });
 
     return NextResponse.json(
       {
         riskClauses,
         keyFacts,
+        keyFactConfidence: keyFactConfidenceOut,
         keyFactsDebug: {
-          mode: llm.mode,
-          llmOk: llm.ok,
-          regexFound: Object.keys(regexFacts),
-          llmRawPreview: llm.raw ? String(llm.raw).slice(0, 260) : "",
+          mode: llmResult?.mode,
+          llmOk: llmResult?.ok,
+          regexFound: Object.keys(regexFactsLegacy),
+          llmRawPreview: llmResult?.raw ? String(llmResult.raw).slice(0, 260) : "",
           filteredLowConfidence: true,
           repairApplied: true,
+          keyFactsSourceMode,
+          keyFactsWithSource,
+          llmFallbackUsed,
+          llmFieldsRequested,
+          llmFieldsAccepted,
+          llmFieldsRejected,
+          llmRawResponse,
+          llmParsedResponse,
+          llmFallbackDebugPerField,
+          mergeWinnerPerField,
+          overwrittenByLegacy,
+          previousValueBeforeLegacyMerge,
         },
       },
       { status: 200 }
