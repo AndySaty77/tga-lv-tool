@@ -70,6 +70,7 @@ export async function POST(req: Request) {
     const riskClauses = Array.isArray(body.riskClauses) ? body.riskClauses : [];
     const keyFacts = body.keyFacts && typeof body.keyFacts === "object" ? body.keyFacts : {};
     const clarificationQuestions = Array.isArray(body.clarificationQuestions) ? body.clarificationQuestions : [];
+    const changePotentialSummary = body.changePotentialSummary && typeof body.changePotentialSummary === "object" ? body.changePotentialSummary : undefined;
     const useLlm = body.useLlm !== false && !!process.env.OPENAI_API_KEY;
 
     const result = generateOfferAssumptions({
@@ -77,6 +78,7 @@ export async function POST(req: Request) {
       riskClauses,
       keyFacts,
       clarificationQuestions,
+      ...(changePotentialSummary && { changePotentialSummary }),
     });
 
     let assumptions = result.assumptions;

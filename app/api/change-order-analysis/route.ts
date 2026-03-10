@@ -14,7 +14,9 @@ export async function POST(req: Request) {
     const keyFacts = body.keyFacts && typeof body.keyFacts === "object" ? body.keyFacts : {};
     const vortext = String(body.vortext ?? "").trim();
     const lvPositions = String(body.lvPositions ?? "").trim();
-    const useLlm = body.useLlm === true && !!process.env.OPENAI_API_KEY;
+    const rawUseLlm = body.useLlm === true;
+    // Neue, sprechende Steuerung für ChangePotential-LLM; für Alt-Clients fällt auf useLlm zurück.
+    const useChangePotentialLlm = body.useChangePotentialLlm === true || (body.useChangePotentialLlm == null && rawUseLlm);
 
     const result = await runChangeOrderAnalysis({
       findings,
@@ -22,14 +24,26 @@ export async function POST(req: Request) {
       keyFacts,
       vortext: vortext || undefined,
       lvPositions: lvPositions || undefined,
-      useLlm,
+      // Alt-Feld bleibt für Backwards-Compat erhalten; wird intern nur noch als Fallback interpretiert.
+      useLlm: rawUseLlm,
+      useChangePotentialLlm,
     });
 
-    return NextResponse.json({
+    const payload: Record<string, unknown> = {
       opportunities: result.opportunities,
       byCluster: result.byCluster,
       debug: result.debug,
-    });
+    };
+    if (result.changePotentialSummary != null) {
+      payload.changePotentialSummary = result.changePotentialSummary;
+    }
+    if (result.commercialActionsFromChangePotential != null) {
+      payload.commercialActionsFromChangePotential = result.commercialActionsFromChangePotential;
+    }
+    if (result.offerStrategySummary != null) {
+      payload.offerStrategySummary = result.offerStrategySummary;
+    }
+    return NextResponse.json(payload);
   } catch (e: unknown) {
     return NextResponse.json(
       {

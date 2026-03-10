@@ -12,11 +12,13 @@ export async function POST(req: Request) {
     const findings = Array.isArray(body.findings) ? body.findings : [];
     const riskClauses = Array.isArray(body.riskClauses) ? body.riskClauses : [];
     const keyFacts = body.keyFacts && typeof body.keyFacts === "object" ? body.keyFacts : {};
+    const changePotentialSummary = body.changePotentialSummary && typeof body.changePotentialSummary === "object" ? body.changePotentialSummary : undefined;
 
     const result = generateClarificationQuestions({
       findings,
       riskClauses,
       keyFacts,
+      ...(changePotentialSummary && { changePotentialSummary }),
     });
 
     return NextResponse.json({

@@ -37,6 +37,7 @@ function mapCategoryTo5(cat: string, title?: string, detail?: string): CategoryK
   if (c === "normen") return "vertrags_lv_risiken";
   if (c === "vollstaendigkeit") return "technische_vollstaendigkeit";
   if (c === "vortext") return "vertrags_lv_risiken";
+  // Strang A: Weichwörter-Finding (nachtrag) → Score-Kategorie; echtes Nachtragspotenzial (Strang B) ist getrennt.
   if (c === "nachtrag") return "vertrags_lv_risiken";
   if (c === "ausfuehrung") return "technische_vollstaendigkeit";
 

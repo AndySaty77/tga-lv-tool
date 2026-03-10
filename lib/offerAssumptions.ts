@@ -1,10 +1,16 @@
 /**
  * Angebots-Annahmen-Generator.
  * Erzeugt Annahmen aus Findings, Rückfragen, Vortext-Risiken, KeyFacts.
+ * Optional: ChangePotentialSummary → CP-Klarstellungen werden als Annahmen ergänzt (CP bevorzugt bei Duplikaten).
  * LLM optional für Textoptimierung und Plausibilität.
  */
 
 import type { ScoreCategory, QuestionGroup } from "./clarificationQuestions";
+import {
+  deriveCommercialActionsFromChangePotential,
+  isSimilarToExistingClarification,
+} from "./changePotentialCommercialActions";
+import type { ChangePotentialSummary } from "./changePotentialModel";
 
 export type OfferAssumption = {
   id: string;
@@ -14,6 +20,8 @@ export type OfferAssumption = {
   reason: string;
   sourceFindingId?: string;
   sourceQuestionId?: string;
+  /** Aus Nachtragspotenzial-Engine (ChangePotentialItem). */
+  sourceChangePotentialItemId?: string;
 };
 
 export type ClarificationQuestionInput = {
@@ -42,6 +50,8 @@ export type OfferAssumptionInput = {
   }>;
   keyFacts?: Record<string, string>;
   clarificationQuestions?: ClarificationQuestionInput[];
+  /** Optional: Nachtragspotenzial-Summary; wenn gesetzt, werden CP-Klarstellungen als Annahmen ergänzt (CP bevorzugt bei Duplikaten). */
+  changePotentialSummary?: ChangePotentialSummary;
 };
 
 export type OfferAssumptionOutput = {
@@ -156,13 +166,39 @@ function genId(prefix: string): string {
   return `oa_${prefix}_${idCounter}_${Date.now().toString(36)}`;
 }
 
+function fieldTypeToCategory(fieldType?: string): ScoreCategory {
+  if (!fieldType) return "vertrags_lv_risiken";
+  if (fieldType === "schnittstelle" || fieldType === "nebenleistung" || fieldType === "mengenrisiko") return "schnittstellen_nebenleistungen";
+  if (fieldType === "bestand_erschwernis" || fieldType === "bauablauf" || fieldType === "provisorium") return "technische_vollstaendigkeit";
+  return "vertrags_lv_risiken";
+}
+
 /**
  * Erzeugt Annahmen regelbasiert aus Findings, Rückfragen, Vortext-Risiken, KeyFacts.
+ * Wenn changePotentialSummary übergeben: CP-Klarstellungen werden als Annahmen vorangestellt (CP bevorzugt bei Duplikaten).
  */
 export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssumptionOutput {
   idCounter = 0;
   const assumptions: OfferAssumption[] = [];
   const debug: OfferAssumptionOutput["debug"] = [];
+
+  if (input.changePotentialSummary?.items?.length) {
+    const actions = deriveCommercialActionsFromChangePotential(input.changePotentialSummary);
+    for (const c of actions.clarifications) {
+      const a: OfferAssumption = {
+        id: c.id,
+        category: fieldTypeToCategory(c.fieldType),
+        severity: c.severity,
+        assumption: c.clarification,
+        reason: c.reason,
+        sourceChangePotentialItemId: c.itemId,
+      };
+      assumptions.push(a);
+      debug.push({ assumptionId: a.id, assumption: a.assumption });
+    }
+  }
+
+  const existingClarificationTexts = assumptions.map((a) => ({ assumption: a.assumption }));
 
   const questionByFindingId = new Map<string, ClarificationQuestionInput>();
   for (const q of input.clarificationQuestions ?? []) {
@@ -174,11 +210,12 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
     if (q.sourceKeyFact) questionByKeyFact.set(q.sourceKeyFact, q);
   }
 
-  // 1) Aus Trigger-Findings (+ ggf. zugehörige Rückfrage)
+  // 1) Aus Trigger-Findings (+ ggf. zugehörige Rückfrage) (nur wenn nicht Dublette zu CP)
   for (const f of input.findings ?? []) {
     const cat = normalizeCategory(f.category);
     const sev = normalizeSeverity(f.severity);
     const assumption = `Wir gehen davon aus, dass die Anforderungen gemäß ${f.title} im Sinne der anerkannten Regeln der Technik ausgeführt werden, sofern keine abweichende Klarstellung erfolgt.`;
+    if (existingClarificationTexts.length > 0 && isSimilarToExistingClarification(assumption, existingClarificationTexts)) continue;
     const reason = `Finding: ${f.title}`;
     const q = questionByFindingId.get(f.id);
     const a: OfferAssumption = {
@@ -191,6 +228,7 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
       sourceQuestionId: q?.id,
     };
     assumptions.push(a);
+    existingClarificationTexts.push({ assumption: a.assumption });
     debug.push({
       findingId: f.id,
       questionId: q?.id,
@@ -199,7 +237,7 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
     });
   }
 
-  // 2) Aus Vortext-Risiken (ohne zugehöriges Finding)
+  // 2) Aus Vortext-Risiken (ohne zugehöriges Finding) (nur wenn nicht Dublette zu CP)
   for (const r of input.riskClauses ?? []) {
     const sev = normalizeSeverity(r.riskLevel);
     const cat: ScoreCategory = "vertrags_lv_risiken";
@@ -207,6 +245,7 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
       r.interpretation && r.interpretation.length > 30
         ? `Wir gehen davon aus: ${r.interpretation}`
         : `Wir gehen davon aus, dass die Vertragsklausel im üblichen Sinne ausgelegt wird, sofern keine Klarstellung erfolgt.`;
+    if (existingClarificationTexts.length > 0 && isSimilarToExistingClarification(assumption, existingClarificationTexts)) continue;
     const a: OfferAssumption = {
       id: genId("r"),
       category: cat,
@@ -216,6 +255,7 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
       sourceQuestionId: input.clarificationQuestions?.find((q) => q.reason.includes(r.type || "Vertragsklausel"))?.id,
     };
     assumptions.push(a);
+    existingClarificationTexts.push({ assumption: a.assumption });
     debug.push({
       questionId: a.sourceQuestionId,
       assumptionId: a.id,
@@ -223,7 +263,7 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
     });
   }
 
-  // 3) Fehlende KeyFacts
+  // 3) Fehlende KeyFacts (nur wenn nicht Dublette zu CP)
   const keyFacts = input.keyFacts ?? {};
   for (const key of IMPORTANT_KEYFACTS) {
     const val = (keyFacts[key] ?? "").trim();
@@ -253,6 +293,7 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
       const assumption =
         standardAssumption[key] ??
         `Wir gehen davon aus, dass ${label} gemäß den Vertragsunterlagen bzw. anerkannten Regeln gilt.`;
+      if (existingClarificationTexts.length > 0 && isSimilarToExistingClarification(assumption, existingClarificationTexts)) continue;
       const q = questionByKeyFact.get(key);
       const a: OfferAssumption = {
         id: genId("k"),
@@ -263,6 +304,7 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
         sourceQuestionId: q?.id,
       };
       assumptions.push(a);
+      existingClarificationTexts.push({ assumption: a.assumption });
       debug.push({
         questionId: q?.id,
         assumptionId: a.id,
@@ -271,7 +313,7 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
     }
   }
 
-  // 4) Aus Rückfragen ohne bisherige Annahme (z. B. nur aus riskClause)
+  // 4) Aus Rückfragen ohne bisherige Annahme (z. B. nur aus riskClause) (nur wenn nicht Dublette zu CP)
   const assumedQuestionIds = new Set(assumptions.map((a) => a.sourceQuestionId).filter(Boolean));
   for (const q of input.clarificationQuestions ?? []) {
     if (assumedQuestionIds.has(q.id)) continue;
@@ -279,6 +321,7 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
     const cat = normalizeCategory(q.category ?? "vertrags_lv_risiken");
     const sev = normalizeSeverity(q.severity ?? "medium");
     const assumption = `Wir gehen davon aus, dass die Klarstellung zu „${q.question.slice(0, 80)}…" im üblichen Sinne beantwortet wird.`;
+    if (existingClarificationTexts.length > 0 && isSimilarToExistingClarification(assumption, existingClarificationTexts)) continue;
     const a: OfferAssumption = {
       id: genId("q"),
       category: cat,
@@ -288,6 +331,7 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
       sourceQuestionId: q.id,
     };
     assumptions.push(a);
+    existingClarificationTexts.push({ assumption: a.assumption });
     debug.push({
       questionId: q.id,
       assumptionId: a.id,

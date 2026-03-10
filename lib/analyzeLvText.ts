@@ -399,7 +399,7 @@ export function analyzeLvText(
       penalty: 6,
     });
 
-  // Nachtrag-/Weichwörter (aus zentraler Konfiguration)
+  // Strang A: Weichwörter-Finding für Score (Kategorie „nachtrag“ → vertrags_lv_risiken). Nicht verwechseln mit Strang B (echtes Nachtragspotenzial /api/change-order-analysis).
   const lower = text.toLowerCase();
   const countNachtrag = NACHTRAG_WEICHWOERTER.reduce(
     (acc, w) => acc + (lower.split(w).length - 1),

@@ -1,10 +1,25 @@
 /**
- * Nachtragsanalyse – hybrid (regelbasiert + optional LLM).
- * Nutzt Findings, Vortext-Risiken, KeyFacts als harte Basis.
- * LLM optional für komplexe/indirekte Nachtragshinweise.
+ * Nachtragsanalyse – Strang B: echtes Nachtragspotenzial (Claim-Potenzial).
+ * Intern führend: ChangePotentialEngine (lib/changePotentialModel.ts) → ChangePotentialSummary.
+ * Nach außen: Legacy-Format (ChangeOrderOpportunity, byCluster) über Mapping für API/UI.
+ *
+ * Produktive Pipeline (einziger führender Strang):
+ *   runChangePotentialEngine → optional refineChangePotentialWithLlm → mapChangePotentialSummaryToLegacy
+ *   → opportunities / byCluster (kein Legacy-LLM mehr in den finalen Daten).
+ * Legacy-LLM (runLlmChangeOrderAnalysis): nur noch für Debug/Vergleich bei input.useLlm,
+ * Ergebnis fließt nicht mehr in opportunities/byCluster ein.
  */
 
 import OpenAI from "openai";
+import { runChangePotentialEngine, mapChangePotentialSummaryToLegacy, type ChangePotentialSummary } from "./changePotentialModel";
+import { refineChangePotentialWithLlm } from "./changePotentialLlmRefinement";
+import { enrichChangePotentialWithCommercialStrategy } from "./changePotentialCommercialStrategy";
+import { buildNegotiationClusters } from "./changePotentialNegotiationClusters";
+import { deriveCommercialActionsFromChangePotential } from "./changePotentialCommercialActions";
+import { buildOfferStrategySummary } from "./offerStrategySummary";
+export type { ChangePotentialSummary } from "./changePotentialModel";
+export type { OfferStrategySummary } from "./changePotentialModel";
+export type { CommercialActionsFromChangePotential } from "./changePotentialCommercialActions";
 
 // ================= Types =================
 
@@ -48,12 +63,15 @@ export type ChangeOrderInput = {
   keyFacts: Record<string, string>;
   vortext?: string;
   lvPositions?: string;
+  /** @deprecated Nur noch für Legacy-LLM-Debug; UI steuert useChangePotentialLlm. */
   useLlm?: boolean;
+  /** Steuert die neue LLM-Veredelung der ChangePotential-Engine (refineChangePotentialWithLlm). */
+  useChangePotentialLlm?: boolean;
 };
 
-// ================= 25 Nachtragsquellen → Cluster-Mapping =================
+// ================= 25 Nachtragsquellen → Cluster-Mapping (Strang B: echtes Nachtragspotenzial) =================
 
-const NIGHTRAG_SOURCES: Array<{
+const NACHTRAG_SOURCES: Array<{
   id: number;
   title: string;
   cluster: ChangeOrderCluster;
@@ -99,9 +117,9 @@ const KEYFACTS_NACHTRAG_RELEVANT: Record<string, { cluster: ChangeOrderCluster; 
 
 // ================= Regelbasierte Baseline =================
 
-function matchSource(text: string): { source: typeof NIGHTRAG_SOURCES[0]; snippet: string } | null {
+function matchSource(text: string): { source: typeof NACHTRAG_SOURCES[0]; snippet: string } | null {
   const lower = `${text}`.toLowerCase();
-  for (const src of NIGHTRAG_SOURCES) {
+  for (const src of NACHTRAG_SOURCES) {
     for (const re of src.keywords) {
       const m = text.match(re);
       if (m) {
@@ -146,17 +164,18 @@ function nextId() {
   return `NACHTRAG_${_idCounter}`;
 }
 
+/** @deprecated Intern ersetzt durch runChangePotentialEngine + mapChangePotentialSummaryToLegacy (changePotentialModel). Nur noch für Referenz/Tests vorhanden. */
 export function runRuleBasedBaseline(input: ChangeOrderInput): ChangeOrderOpportunity[] {
   const out: ChangeOrderOpportunity[] = [];
   _idCounter = 0;
 
-  // 1) Findings → Opportunities
+  // 1) Findings → Opportunities (Legacy)
   for (const f of input.findings) {
     const cluster = findingToCluster(f);
     if (!cluster) continue;
 
     const match = matchSource(`${f.title} ${f.detail ?? ""}`);
-    const source = match?.source ?? NIGHTRAG_SOURCES.find((s) => s.cluster === cluster);
+    const source = match?.source ?? NACHTRAG_SOURCES.find((s) => s.cluster === cluster);
     if (!source) continue;
 
     const riskLevel = (f as any).severity === "high" ? "high" : (f as any).severity === "medium" ? "medium" : "low";
@@ -180,7 +199,7 @@ export function runRuleBasedBaseline(input: ChangeOrderInput): ChangeOrderOpport
   // 2) RiskClauses (Vortext-Risiken) → Opportunities
   for (const r of input.riskClauses) {
     const match = matchSource(`${r.type} ${r.text} ${r.interpretation ?? ""}`);
-    const source = match?.source ?? NIGHTRAG_SOURCES[0];
+    const source = match?.source ?? NACHTRAG_SOURCES[0];
     const cluster = source.cluster;
 
     const riskLevel = r.riskLevel === "high" ? "high" : r.riskLevel === "medium" ? "medium" : "low";
@@ -304,6 +323,11 @@ Antworte NUR mit gültigem JSON:
 
 Maximal 12 opportunities.`;
 
+/**
+ * Legacy-LLM-Nachtragsanalyse (freie LLM-Suche). Wird nur noch für Debug/Vergleich aufgerufen;
+ * Ergebnis fließt nicht mehr in die produktiven opportunities/byCluster.
+ * @deprecated Nur noch Debug/Compare; produktiv ist die ChangePotential-Engine + optionale refineChangePotentialWithLlm führend.
+ */
 export async function runLlmChangeOrderAnalysis(
   vortext: string,
   lvPositions?: string
@@ -386,25 +410,220 @@ export async function runLlmChangeOrderAnalysis(
 
 // ================= Hauptfunktion =================
 
+/** Grund, warum die KI-Veredelung trotz Anforderung nicht ausgeführt wurde (für transparente UI-Anzeige). */
+export type ChangePotentialLlmReasonNotUsed =
+  | "disabled_by_env"
+  | "missing_api_key"
+  | "not_requested"
+  | "error"
+  | null;
+
 export type ChangeOrderResult = {
   opportunities: ChangeOrderOpportunity[];
   byCluster: Record<ChangeOrderCluster, ChangeOrderOpportunity[]>;
   debug: {
     ruleBasedCount: number;
+    /** Legacy-LLM-Anzahl (nur gesetzt wenn Legacy-LLM für Debug/Vergleich lief; nicht mehr in opportunities gemischt). */
     llmCount: number;
     deduplicatedCount: number;
+    /** true wenn refineChangePotentialWithLlm (neue LLM-Veredelung) ausgeführt wurde. */
+    usedChangePotentialLlm?: boolean;
+    /** true wenn runLlmChangeOrderAnalysis (Legacy) für Debug/Vergleich ausgeführt wurde. */
+    usedLegacyLlm?: boolean;
+    /** true wenn der Request die KI-Veredelung angefordert hat (useChangePotentialLlm bzw. Fallback useLlm). */
+    requestedChangePotentialLlm?: boolean;
+    /** true wenn serverseitig Env + API-Key die Veredelung erlauben würden. */
+    changePotentialLlmAvailable?: boolean;
+    /** Wenn angefordert, aber nicht ausgeführt: Grund (für Statusanzeige im UI). */
+    reasonIfNotUsed?: ChangePotentialLlmReasonNotUsed;
+    /** Experten-Diagnose: Env-Flag CHANGE_POTENTIAL_LLM_ENABLED === "true". */
+    changePotentialLlmEnvEnabled?: boolean;
+    /** Experten-Diagnose: Rohwert des Env-Flags (niemals API-Key). "true" | "false" | "" | null. */
+    changePotentialLlmEnvRaw?: string | null;
+    /** Experten-Diagnose: OPENAI_API_KEY gesetzt (nur true/false, niemals Key-Wert). */
+    openAiApiKeyPresent?: boolean;
+    /** Wenn angefordert, aber nicht ausgeführt: alle zutreffenden Blocker (z. B. env + api_key). */
+    reasonDetails?: ("disabled_by_env" | "missing_api_key" | "error")[];
+    /** KI-Veredelung: Timeout überschritten (Fallback auf Regel-Engine). */
+    llmRefinementTimedOut?: boolean;
+    /** KI-Veredelung: Dauer in ms (nur gesetzt wenn Veredelung angefragt/gestartet). */
+    llmRefinementDurationMs?: number;
+    /** KI-Veredelung: Aufruf fehlgeschlagen (Timeout oder anderer Fehler). */
+    llmRefinementFailed?: boolean;
+    /** KI-Veredelung: Fehlergrund (z. B. LLM_REFINEMENT_TIMEOUT oder Exception-Message). */
+    llmRefinementFailureReason?: string | null;
+    /** Anzahl der zur KI geschickten Items (Verschlankung). */
+    refinedItemAttemptCount?: number;
+    /** Zeichenzahl des gesamten Prompts. */
+    promptCharCount?: number;
+    /** Zeichenzahl Kontext (Vortext/Positionen/KeyFacts). */
+    contextCharCount?: number;
+    /** Verwendetes Modell für KI-Veredelung. */
+    modelUsed?: string;
+    /** Modus der Veredelung (z. B. top3_text_only). */
+    llmRefinementMode?: string;
+    /** Anzahl der Items, die die KI erfolgreich veredelt hat. */
+    refinedItemSuccessCount?: number;
+    /** Anzahl der Items, die pro Item-Timeout abgebrochen wurden. */
+    perItemTimeoutCount?: number;
+    /** Gesamtdauer aller LLM-Aufrufe in ms (innerhalb der Veredelung). */
+    totalLlmDurationMs?: number;
   };
-};
+  /** Neue Engine-Struktur (additiv); für API/Frontend. Fehlt bei reinem LLM-Pfad. */
+  changePotentialSummary?: ChangePotentialSummary;
+  /** Aus ChangePotentialItems abgeleitete Maßnahmen (Rückfragen, Klarstellungen, Kalkulation, Monitoring). */
+  commercialActionsFromChangePotential?: import("./changePotentialCommercialActions").CommercialActionsFromChangePotential;
+  /** Management Summary + Strategievarianten auf Dokumentebene (KI, nur auf Basis bestehender CP-Ergebnisse). */
+  offerStrategySummary?: import("./changePotentialModel").OfferStrategySummary;
+}
+
+/** Intern: neues Kernmodell (ChangePotentialSummary) für spätere Erweiterungen/API. */
+export function getChangePotentialSummary(input: ChangeOrderInput): ChangePotentialSummary {
+  return runChangePotentialEngine({
+    findings: input.findings,
+    riskClauses: input.riskClauses,
+    keyFacts: input.keyFacts,
+    vortext: input.vortext,
+    lvPositions: input.lvPositions,
+  });
+}
+
+/** Max. Wartezeit für die KI-Veredelung; danach Fallback auf regelbasierte Summary. */
+const LLM_REFINEMENT_TIMEOUT_MS = 20000;
+
+function timeoutPromise<T>(ms: number, message: string): Promise<T> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(message)), ms);
+  });
+}
 
 export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<ChangeOrderResult> {
-  const baseline = runRuleBasedBaseline(input);
-  let llmOpps: ChangeOrderOpportunity[] = [];
-
-  if (input.useLlm && process.env.OPENAI_API_KEY && (input.vortext?.trim() || input.lvPositions?.trim())) {
-    llmOpps = await runLlmChangeOrderAnalysis(input.vortext ?? "", input.lvPositions);
+  const t0Engine = Date.now();
+  let summary = runChangePotentialEngine({
+    findings: input.findings,
+    riskClauses: input.riskClauses,
+    keyFacts: input.keyFacts,
+    vortext: input.vortext,
+    lvPositions: input.lvPositions,
+  });
+  if (process.env.NODE_ENV !== "test") {
+    console.log("[changeOrderAnalysis] regelbasierte Engine fertig, Dauer ms:", Date.now() - t0Engine);
   }
 
-  const merged = [...baseline, ...llmOpps];
+  const requestedChangePotentialLlm =
+    input.useChangePotentialLlm === true ||
+    (input.useChangePotentialLlm == null && input.useLlm === true);
+
+  const envRaw = process.env.CHANGE_POTENTIAL_LLM_ENABLED ?? null;
+  const changePotentialLlmEnvEnabled = process.env.CHANGE_POTENTIAL_LLM_ENABLED === "true";
+  const openAiApiKeyPresent = !!process.env.OPENAI_API_KEY;
+  const changePotentialLlmAvailable = changePotentialLlmEnvEnabled && openAiApiKeyPresent;
+
+  let usedChangePotentialLlm = false;
+  let reasonIfNotUsed: ChangePotentialLlmReasonNotUsed = null;
+  const reasonDetails: ("disabled_by_env" | "missing_api_key" | "error")[] = [];
+
+  let llmRefinementTimedOut = false;
+  let llmRefinementDurationMs: number | undefined;
+  let llmRefinementFailed = false;
+  let llmRefinementFailureReason: string | null = null;
+
+  if (!requestedChangePotentialLlm) {
+    reasonIfNotUsed = "not_requested";
+  } else {
+    if (process.env.CHANGE_POTENTIAL_LLM_ENABLED !== "true") {
+      reasonIfNotUsed = reasonIfNotUsed ?? "disabled_by_env";
+      reasonDetails.push("disabled_by_env");
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      reasonIfNotUsed = reasonIfNotUsed ?? "missing_api_key";
+      reasonDetails.push("missing_api_key");
+    }
+  }
+
+  if (requestedChangePotentialLlm && changePotentialLlmAvailable) {
+    const t0Llm = Date.now();
+    if (process.env.NODE_ENV !== "test") {
+      console.log("[changeOrderAnalysis] LLM-Veredelung start");
+    }
+    try {
+      summary = await Promise.race([
+        refineChangePotentialWithLlm(summary, {
+          vortext: input.vortext,
+          lvPositions: input.lvPositions,
+          keyFacts: input.keyFacts,
+          findings: input.findings,
+          riskClauses: input.riskClauses,
+        }),
+        timeoutPromise<ChangePotentialSummary>(
+          LLM_REFINEMENT_TIMEOUT_MS,
+          "LLM_REFINEMENT_TIMEOUT"
+        ),
+      ]);
+      usedChangePotentialLlm = true;
+      reasonIfNotUsed = null;
+      reasonDetails.length = 0;
+      llmRefinementDurationMs = Date.now() - t0Llm;
+      if (process.env.NODE_ENV !== "test") {
+        console.log("[changeOrderAnalysis] LLM-Veredelung Ende, Dauer ms:", llmRefinementDurationMs);
+      }
+    } catch (e) {
+      llmRefinementDurationMs = Date.now() - t0Llm;
+      llmRefinementFailed = true;
+      llmRefinementFailureReason = e instanceof Error ? e.message : String(e);
+      llmRefinementTimedOut = llmRefinementFailureReason.includes("LLM_REFINEMENT_TIMEOUT");
+      if (requestedChangePotentialLlm) {
+        reasonIfNotUsed = "error";
+        reasonDetails.push("error");
+      }
+      if (process.env.NODE_ENV !== "test") {
+        console.warn(
+          "[changeOrderAnalysis] LLM-Veredelung Fallback, Dauer ms:",
+          llmRefinementDurationMs,
+          "Timeout:",
+          llmRefinementTimedOut,
+          "Grund:",
+          llmRefinementFailureReason
+        );
+      }
+      // Summary bleibt die regelbasierte Version (kein Overwrite).
+    }
+  }
+
+  // Optionale KI-Strategiebewertung pro Item (Top 5–8); bei Fehler läuft Pipeline weiter.
+  try {
+    summary = await enrichChangePotentialWithCommercialStrategy(summary);
+  } catch (e) {
+    if (process.env.NODE_ENV !== "test") {
+      console.warn("[changeOrderAnalysis] Commercial-Strategy-Anreicherung Fehler:", e);
+    }
+  }
+
+  try {
+    summary = await buildNegotiationClusters(summary);
+  } catch (e) {
+    if (process.env.NODE_ENV !== "test") {
+      console.warn("[changeOrderAnalysis] Negotiation-Clusters Fehler:", e);
+    }
+  }
+
+  const baseline = mapChangePotentialSummaryToLegacy(summary);
+
+  // Legacy-LLM nur noch für Debug/Vergleich; NICHT mehr an die UI-Checkbox gekoppelt.
+  let legacyLlmCount = 0;
+  let usedLegacyLlm = false;
+  if (
+    process.env.CHANGE_ORDER_LEGACY_LLM_DEBUG === "true" &&
+    process.env.OPENAI_API_KEY &&
+    (input.vortext?.trim() || input.lvPositions?.trim())
+  ) {
+    const llmOpps = await runLlmChangeOrderAnalysis(input.vortext ?? "", input.lvPositions);
+    legacyLlmCount = llmOpps.length;
+    usedLegacyLlm = true;
+    // llmOpps bewusst nicht in produktive Daten mischen
+  }
+
+  const merged = baseline;
   const deduped = deduplicate(merged);
 
   const byCluster: Record<ChangeOrderCluster, ChangeOrderOpportunity[]> = {
@@ -414,13 +633,49 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
     erschwernis: deduped.filter((o) => o.cluster === "erschwernis"),
   };
 
+  const commercialActionsFromChangePotential = deriveCommercialActionsFromChangePotential(summary);
+
+  let offerStrategySummary: import("./changePotentialModel").OfferStrategySummary | undefined;
+  try {
+    const oss = await buildOfferStrategySummary(summary, commercialActionsFromChangePotential);
+    if (oss) offerStrategySummary = oss;
+  } catch (e) {
+    if (process.env.NODE_ENV !== "test") {
+      console.warn("[changeOrderAnalysis] Offer-Strategy-Summary Fehler:", e);
+    }
+  }
+
   return {
     opportunities: deduped,
     byCluster,
     debug: {
       ruleBasedCount: baseline.length,
-      llmCount: llmOpps.length,
+      llmCount: legacyLlmCount,
       deduplicatedCount: deduped.length,
+      usedChangePotentialLlm,
+      usedLegacyLlm,
+      requestedChangePotentialLlm,
+      changePotentialLlmAvailable,
+      reasonIfNotUsed,
+      changePotentialLlmEnvEnabled,
+      changePotentialLlmEnvRaw: envRaw,
+      openAiApiKeyPresent,
+      ...(reasonDetails.length > 0 && { reasonDetails }),
+      ...(llmRefinementDurationMs != null && { llmRefinementDurationMs }),
+      ...(llmRefinementTimedOut && { llmRefinementTimedOut }),
+      ...(llmRefinementFailed && { llmRefinementFailed }),
+      ...(llmRefinementFailureReason != null && { llmRefinementFailureReason }),
+      ...(summary.llmMeta?.refinedItemAttemptCount != null && { refinedItemAttemptCount: summary.llmMeta.refinedItemAttemptCount }),
+      ...(summary.llmMeta?.promptCharCount != null && { promptCharCount: summary.llmMeta.promptCharCount }),
+      ...(summary.llmMeta?.contextCharCount != null && { contextCharCount: summary.llmMeta.contextCharCount }),
+      ...(summary.llmMeta?.usedModel && { modelUsed: summary.llmMeta.usedModel }),
+      ...(summary.llmMeta?.llmRefinementMode && { llmRefinementMode: summary.llmMeta.llmRefinementMode }),
+      ...(summary.llmMeta?.refinedItemSuccessCount != null && { refinedItemSuccessCount: summary.llmMeta.refinedItemSuccessCount }),
+      ...(summary.llmMeta?.perItemTimeoutCount != null && { perItemTimeoutCount: summary.llmMeta.perItemTimeoutCount }),
+      ...(summary.llmMeta?.totalLlmDurationMs != null && { totalLlmDurationMs: summary.llmMeta.totalLlmDurationMs }),
     },
+    changePotentialSummary: summary,
+    commercialActionsFromChangePotential,
+    ...(offerStrategySummary && { offerStrategySummary }),
   };
 }

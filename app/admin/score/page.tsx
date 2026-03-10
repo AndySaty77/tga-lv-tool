@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useRef, useState, type DragEvent } from "rea
 import { Lesansicht } from "@/components/Lesansicht";
 import { PositionenNodeView } from "@/components/PositionenNodeView";
 import { VorbemerkungenDocumentView } from "@/components/VorbemerkungenDocumentView";
+import { NachtragspotenzialBlock } from "@/components/NachtragspotenzialBlock";
 import { VortextDetailModal } from "@/components/VortextDetailModal";
 import { sanitizeForDisplay, stripTechnicalNoiseForDisplay } from "@/lib/displayText";
 import { normalizeViewerPositionenText, normalizeViewerVorbemerkungenText } from "@/lib/gaebViewerNormalize";
@@ -526,11 +527,15 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
   // ===== NACHTRAGSANALYSE =====
   const [clarificationQuestionsLoading, setClarificationQuestionsLoading] = useState(false);
   const [changeOrderLoading, setChangeOrderLoading] = useState(false);
-  const [changeOrderUseLlm, setChangeOrderUseLlm] = useState(false);
+  // Steuert die neue KI-Veredelung der Nachtragspotenziale (ChangePotential-LLM).
+  const [useChangePotentialLlm, setUseChangePotentialLlm] = useState(false);
   const [changeOrderAnalysis, setChangeOrderAnalysis] = useState<{
     opportunities: ChangeOrderOpp[];
     byCluster: Record<string, ChangeOrderOpp[]>;
     debug?: { ruleBasedCount: number; llmCount: number; deduplicatedCount: number };
+    changePotentialSummary?: import("@/lib/changePotentialModel").ChangePotentialSummary;
+    /** Aus ChangePotential abgeleitet: Rückfragen, Klarstellungen, Kalkulationshinweise, Monitoring. */
+    commercialActionsFromChangePotential?: import("@/lib/changePotentialCommercialActions").CommercialActionsFromChangePotential;
   } | null>(null);
 
   // ===== ANGEBOTS-ANNAHMEN =====
@@ -626,6 +631,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           findings,
           riskClauses,
           keyFacts,
+          ...(changeOrderAnalysis?.changePotentialSummary && { changePotentialSummary: changeOrderAnalysis.changePotentialSummary }),
         }),
       });
       const data = await res.json();
@@ -661,7 +667,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           keyFacts,
           vortext: vortextForCo,
           lvPositions: positionsForCo,
-          useLlm: changeOrderUseLlm,
+          useChangePotentialLlm,
         }),
       });
       const data = await res.json();
@@ -690,6 +696,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           riskClauses,
           keyFacts,
           clarificationQuestions: questions,
+          ...(changeOrderAnalysis?.changePotentialSummary && { changePotentialSummary: changeOrderAnalysis.changePotentialSummary }),
           useLlm: true,
         }),
       });
@@ -2164,16 +2171,21 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                   <span style={{ fontSize: 18, fontWeight: 700, color: totalAmp.tone }}>{totalAmp.text}</span>
                 </div>
               </div>
+              {/* Claim-Potenzial: nur aus Nachtragsanalyse (Strang B), nicht aus Gesamt-Score – sonst "Nicht ermittelt" */}
               <div style={{ background: customerRoute ? CUSTOMER_DESIGN.cardBg : "#fff", border: customerRoute ? `1px solid ${CUSTOMER_DESIGN.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? CUSTOMER_DESIGN.cardRadius : 12, padding: customerRoute ? "18px 20px" : "14px 16px", boxShadow: customerRoute ? CUSTOMER_DESIGN.cardShadow : undefined }}>
                 <div style={{ fontSize: 11, color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.claimPotential}</div>
                 <div style={{ marginTop: 4, fontSize: 16, fontWeight: 700, color: customerRoute ? CUSTOMER_DESIGN.textPrimary : "#111" }}>
-                  {result.findingsSorted?.length === 0
-                    ? DEFAULT_TEXTS_CONFIG.internal.severityLabels.low
-                    : (result.total ?? 0) >= 70
-                      ? DEFAULT_TEXTS_CONFIG.internal.severityLabels.high
-                      : (result.total ?? 0) >= 40
-                        ? DEFAULT_TEXTS_CONFIG.internal.severityLabels.medium
-                        : DEFAULT_TEXTS_CONFIG.internal.severityLabels.low}
+                  {(() => {
+                    if (!changeOrderAnalysis) {
+                      return <span style={{ color: customerRoute ? CUSTOMER_DESIGN.textMuted : "#9ca3af", fontWeight: 600 }}>Nicht ermittelt</span>;
+                    }
+                    const opps = deduplicatedOpportunities;
+                    const hasHigh = opps.some((o) => (o.potential ?? "").toString().toLowerCase() === "high");
+                    const hasMedium = opps.some((o) => (o.potential ?? "").toString().toLowerCase() === "medium");
+                    const level = opps.length === 0 ? "Keine" : hasHigh ? "Hoch" : hasMedium ? "Mittel" : "Gering";
+                    const tone = level === "Hoch" ? "#b00020" : level === "Mittel" ? "#a36b00" : level === "Keine" ? "#0a7a2f" : "#666";
+                    return <span style={{ color: tone }}>{level}</span>;
+                  })()}
                 </div>
               </div>
             </div>
@@ -2404,124 +2416,27 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             </div>
           </div>
 
-          {/* ===== NACHTRAGSANALYSE (Tab Risiken) ===== */}
+          {/* Nachtragspotenzial (Strang B): nur Hinweis, Darstellung im Tab „Nachtragspotenzial“ */}
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>NACHTRAGSANALYSE</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                {isExpertMode && (
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 700 }}>
-                    <input
-                      type="checkbox"
-                      checked={changeOrderUseLlm}
-                      onChange={(e) => setChangeOrderUseLlm(e.target.checked)}
-                    />
-                    KI ergänzen
-                  </label>
-                )}
-                <button
-                  onClick={generateChangeOrderAnalysis}
-                  disabled={changeOrderLoading}
-                  style={{
-                    padding: "10px 16px",
-                    borderRadius: 12,
-                    border: "1px solid #333",
-                    background: changeOrderLoading ? "#666" : "#111",
-                    color: "#fff",
-                    fontWeight: 800,
-                    cursor: changeOrderLoading ? "wait" : "pointer",
-                    opacity: changeOrderLoading ? 0.9 : 1,
-                  }}
-                >
-                  {changeOrderLoading ? DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmittelnLoading : DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmitteln}
-                </button>
-              </div>
-            </div>
-
-            {changeOrderAnalysis && (
-              <>
-                {isExpertMode && !customerRoute && (
-                  <div style={{ marginTop: 14, color: "#666", fontSize: 12, fontWeight: 700 }}>
-                    {changeOrderAnalysis.debug && (
-                      <>Regeln: {changeOrderAnalysis.debug.ruleBasedCount} • KI: {changeOrderAnalysis.debug.llmCount} • Nach Bereinigung: {changeOrderAnalysis.debug.deduplicatedCount}</>
-                    )}
-                  </div>
-                )}
-
-                {deduplicatedOpportunities.length === 0 ? (
-                  <div style={{ marginTop: 14, color: "#666", fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noNachtragspotenziale}</div>
-                ) : (
-                <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
-                  {(["leistungsaenderung", "leistungsmehrung", "schnittstelle", "erschwernis"] as const).map((cluster) => {
-                    const rawItems = changeOrderAnalysis.byCluster?.[cluster] ?? [];
-                    const seen = new Set<string>();
-                    const items = rawItems.filter((o) => {
-                      const k = (o.title ?? "").trim().toLowerCase();
-                      if (seen.has(k)) return false;
-                      seen.add(k);
-                      return true;
-                    });
-                    const labels: Record<string, string> = {
-                      leistungsaenderung: "Leistungsänderung",
-                      leistungsmehrung: "Leistungsmehrung",
-                      schnittstelle: "Schnittstelle",
-                      erschwernis: "Erschwernis",
-                    };
-                    if (items.length === 0) return null;
-                    return (
-                      <div key={cluster} style={{ border: "1px solid #eee", borderRadius: 12, padding: 14, background: "#fafafa" }}>
-                        <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 10 }}>
-                          {labels[cluster]} ({items.length})
-                        </div>
-                        <div style={{ display: "grid", gap: 10 }}>
-                          {items.map((o) => (
-                            <div key={o.id} style={{ border: "1px solid #e5e5e5", borderRadius: 10, padding: 12, background: "#fff" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                <span style={{ fontWeight: 800, color: "#111" }}>{sanitizeForDisplay(o.title ?? "")}</span>
-                                <div style={{ display: "flex", gap: 8, fontSize: 11, fontWeight: 700 }}>
-                                  <span style={{ color: o.potential === "high" ? "#b00020" : o.potential === "medium" ? "#a36b00" : "#666" }}>
-                                    Potential: {o.potential}
-                                  </span>
-                                  {o.riskLevel && <span style={{ color: "#666" }}>Risiko: {o.riskLevel}</span>}
-                                  {o.assertiveness && <span style={{ color: "#666" }}>Assertiv: {o.assertiveness}</span>}
-                                </div>
-                              </div>
-                              <div style={{ marginTop: 8, fontSize: 13, color: "#333", whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(o.reason ?? "")}</div>
-                              {o.sourceTextSnippets && o.sourceTextSnippets.length > 0 && (
-                                <div style={{ marginTop: 8, fontSize: 11, color: "#999", fontFamily: "ui-monospace, monospace" }}>
-                                  {o.sourceTextSnippets.slice(0, 2).map((s, i) => (
-                                    <div key={i} style={{ marginTop: 4 }}>&quot;{sanitizeForDisplay(String(s).slice(0, 100))}{s.length > 100 ? "…" : ""}&quot;</div>
-                                  ))}
-                                </div>
-                              )}
-                              {o.sourceFindingIds && o.sourceFindingIds.length > 0 && (
-                                <div style={{ marginTop: 6, fontSize: 11, color: "#777" }}>
-                                  Quellen: {o.sourceFindingIds.join(", ")}
-                                  {o.sourceType && o.sourceType.length > 0 && ` [${o.sourceType.join(", ")}]`}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                )}
-              </>
-            )}
-
-            {!changeOrderAnalysis && !changeOrderLoading && (
-              <div style={{ marginTop: 12, color: "#666", fontSize: 13, fontWeight: 700 }}>
-                Kombinierte Analyse aus Regeln und KI (Projektdaten, Risiken im Einleitungstext). Optional KI für komplexere Hinweise. Klicke „Nachtragspotenziale ermitteln".
-              </div>
-            )}
-
-            {changeOrderLoading && (
-              <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: "#666", fontWeight: 700 }}>
-                Nachtragsanalyse läuft…
-              </div>
-            )}
+            <div style={{ fontSize: 14, color: "#666", fontWeight: 900, marginBottom: 8 }}>NACHTRAGSPOTENZIAL (CLAIM-POTENZIAL)</div>
+            <p style={{ margin: 0, fontSize: 13, color: "#555", lineHeight: 1.5 }}>
+              Die Nachtragsanalyse (echtes Nachtragspotenzial) wird im Tab „{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}" ermittelt und angezeigt.
+            </p>
+            <button
+              type="button"
+              onClick={() => setResultTab("nachtragspotenzial")}
+              style={{
+                marginTop: 12,
+                padding: "8px 14px",
+                borderRadius: 10,
+                border: "1px solid #333",
+                background: "#fff",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Zum Tab {DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}
+            </button>
           </div>
 
           </div>
@@ -2920,102 +2835,32 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             />
           )}
 
-          {/* Tab-Inhalt: Nachtragspotenzial – Darstellung aus vorhandener Nachtragsanalyse, keine neue Logik */}
+          {/* Tab-Inhalt: Nachtragspotenzial (Strang B) – eine gemeinsame Komponente, keine Dopplung */}
           {resultTab === "nachtragspotenzial" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
-          <div
-            style={{
-              padding: "14px 18px",
-              borderRadius: 12,
-              background: "#f0f4f8",
-              border: "1px solid #e2e8f0",
-              marginBottom: 4,
-            }}
-          >
-            <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
-              <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.nachtragspotenzial}
-            </p>
-          </div>
-          <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>NACHTRAGSPOTENZIAL</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                {isExpertMode && (
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 700 }}>
-                    <input
-                      type="checkbox"
-                      checked={changeOrderUseLlm}
-                      onChange={(e) => setChangeOrderUseLlm(e.target.checked)}
-                    />
-                    KI ergänzen
-                  </label>
-                )}
-                <button
-                  onClick={generateChangeOrderAnalysis}
-                  disabled={changeOrderLoading}
-                  style={{
-                    padding: "10px 16px",
-                    borderRadius: 12,
-                    border: "1px solid #333",
-                    background: changeOrderLoading ? "#666" : "#111",
-                    color: "#fff",
-                    fontWeight: 800,
-                    cursor: changeOrderLoading ? "wait" : "pointer",
-                    opacity: changeOrderLoading ? 0.9 : 1,
-                  }}
-                >
-                  {changeOrderLoading ? DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmittelnLoading : DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmitteln}
-                </button>
-              </div>
+            <div
+              style={{
+                padding: "14px 18px",
+                borderRadius: 12,
+                background: "#f0f4f8",
+                border: "1px solid #e2e8f0",
+                marginBottom: 4,
+              }}
+            >
+              <p style={{ margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.65 }}>
+                <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.nachtragspotenzial}
+              </p>
             </div>
-
-            {changeOrderLoading && (
-              <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: "#666", fontWeight: 700 }}>
-                Analyse läuft…
-              </div>
-            )}
-
-            {!changeOrderLoading && !changeOrderAnalysis && (
-              <div style={{ marginTop: 14, color: "#666", fontSize: 13, fontWeight: 700 }}>
-                Klicke „Nachtragspotenziale ermitteln", um mögliche Nachtragstreiber aus der Analyse abzuleiten. Keine neue Berechnung – es werden die vorhandenen Ergebnisse der Nachtragsanalyse dargestellt.
-              </div>
-            )}
-
-            {!changeOrderLoading && changeOrderAnalysis && (
-              <>
-                {/* Gesamtbewertung: aus deduplizierten opportunities abgeleitet */}
-                {(() => {
-                  const opps = deduplicatedOpportunities;
-                  const hasHigh = opps.some((o) => (o.potential ?? "").toString().toLowerCase() === "high");
-                  const hasMedium = opps.some((o) => (o.potential ?? "").toString().toLowerCase() === "medium");
-                  const level = opps.length === 0 ? "Keine" : hasHigh ? "Hoch" : hasMedium ? "Mittel" : "Gering";
-                  const levelTone = level === "Hoch" ? "#b00020" : level === "Mittel" ? "#a36b00" : level === "Keine" ? "#666" : "#0a7a2f";
-                  return (
-                    <div style={{ marginTop: 14 }}>
-                      <div style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>
-                        Nachtragspotenzial: <span style={{ color: levelTone }}>{level}</span>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {deduplicatedOpportunities.length > 0 && (
-                  <>
-                    <div style={{ marginTop: 14, fontWeight: 800, color: "#333", fontSize: 14 }}>Mögliche Ursachen:</div>
-                    <ul style={{ marginTop: 8, paddingLeft: 20, color: "#333", fontSize: 14, lineHeight: 1.6 }}>
-                      {deduplicatedOpportunities.map((o) => (
-                        <li key={o.id} style={{ marginBottom: 4 }}>{sanitizeForDisplay(o.title ?? "")}</li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-
-                <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #eee", color: "#666", fontSize: 13, lineHeight: 1.5 }}>
-                  Unklare oder fehlende Leistungsbeschreibungen, Schnittstellen und Erschwernisse können zu Nachtragsansprüchen führen. Die Liste zeigt identifizierte Treiber aus der bestehenden Analyse.
-                </div>
-              </>
-            )}
-          </div>
+            <NachtragspotenzialBlock
+              analysis={changeOrderAnalysis}
+              loading={changeOrderLoading}
+            useChangePotentialLlm={useChangePotentialLlm}
+            onUseChangePotentialLlmChange={setUseChangePotentialLlm}
+              onGenerate={generateChangeOrderAnalysis}
+              deduplicatedOpportunities={deduplicatedOpportunities}
+              isExpertMode={isExpertMode}
+              customerRoute={!!customerRoute}
+            />
           </div>
           )}
 

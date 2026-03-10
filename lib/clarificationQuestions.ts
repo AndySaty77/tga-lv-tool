@@ -1,7 +1,14 @@
 /**
  * Rückfragen-Generator für Bieterfragen / Klarstellungen.
  * Regelbasiert; LLM nur optional für Umformulierung.
+ * Optional: ChangePotentialSummary → CP-Rückfragen werden abgeleitet und mit Trigger-Fragen zusammengeführt (CP bevorzugt).
  */
+
+import {
+  deriveCommercialActionsFromChangePotential,
+  isSimilarToExistingQuestion,
+} from "./changePotentialCommercialActions";
+import type { ChangePotentialSummary } from "./changePotentialModel";
 
 export type ScoreCategory =
   | "vertrags_lv_risiken"
@@ -20,6 +27,8 @@ export type ClarificationQuestion = {
   sourceTextSnippet?: string;
   /** Bei fehlendem KeyFact: Key für Gruppierung */
   sourceKeyFact?: string;
+  /** Aus Nachtragspotenzial-Engine (ChangePotentialItem). */
+  sourceChangePotentialItemId?: string;
 };
 
 export type QuestionGroup = "technisch" | "vertraglich" | "terminlich";
@@ -41,6 +50,8 @@ export type ClarificationInput = {
     confidence?: number;
   }>;
   keyFacts?: Record<string, string>;
+  /** Optional: Nachtragspotenzial-Summary; wenn gesetzt, werden CP-Rückfragen abgeleitet und mit Trigger-Fragen zusammengeführt (CP bevorzugt bei Duplikaten). */
+  changePotentialSummary?: ChangePotentialSummary;
 };
 
 export type ClarificationOutput = {
@@ -156,19 +167,49 @@ function genId(prefix: string): string {
   return `cq_${prefix}_${idCounter}_${Date.now().toString(36)}`;
 }
 
+function fieldTypeToCategory(fieldType?: string): ScoreCategory {
+  if (!fieldType) return "vertrags_lv_risiken";
+  if (fieldType === "schnittstelle" || fieldType === "nebenleistung" || fieldType === "mengenrisiko") return "schnittstellen_nebenleistungen";
+  if (fieldType === "bestand_erschwernis" || fieldType === "bauablauf" || fieldType === "provisorium") return "technische_vollstaendigkeit";
+  return "vertrags_lv_risiken";
+}
+
 /**
  * Erzeugt strukturierte Rückfragen aus Findings, Vortext-Risiken, fehlenden KeyFacts.
+ * Wenn changePotentialSummary übergeben wird: CP-Rückfragen werden abgeleitet und mit Trigger-Fragen zusammengeführt (CP bevorzugt bei Duplikaten).
  */
 export function generateClarificationQuestions(input: ClarificationInput): ClarificationOutput {
   idCounter = 0;
   const questions: ClarificationQuestion[] = [];
   const debug: ClarificationOutput["debug"] = [];
 
-  // 1) Aus Trigger-Findings
+  const cpSummary = input.changePotentialSummary;
+
+  if (cpSummary?.items?.length) {
+    const actions = deriveCommercialActionsFromChangePotential(cpSummary);
+    for (const q of actions.questions) {
+      const cq: ClarificationQuestion = {
+        id: q.id,
+        category: fieldTypeToCategory(q.fieldType),
+        severity: q.severity,
+        question: q.question,
+        reason: q.reason,
+        sourceTextSnippet: q.sourceQuote,
+        sourceChangePotentialItemId: q.itemId,
+      };
+      questions.push(cq);
+      debug.push({ source: "changePotential", sourceId: q.itemId, questionId: cq.id, question: cq.question });
+    }
+  }
+
+  const cpQuestionTexts = questions.map((q) => ({ question: q.question }));
+
+  // 1) Aus Trigger-Findings (nur wenn nicht Dublette zu CP)
   for (const f of input.findings ?? []) {
     const cat = normalizeCategory(f.category);
     const sev = normalizeSeverity(f.severity);
     const question = `Bitte Klarstellung zu: ${f.title}. ${(f.detail ?? "").split("|")[0]?.trim() ?? ""}`.trim();
+    if (cpQuestionTexts.length > 0 && isSimilarToExistingQuestion(question, cpQuestionTexts)) continue;
     const reason = `Trigger-Finding: ${f.title}`;
     const q: ClarificationQuestion = {
       id: genId("f"),
@@ -180,10 +221,11 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
       sourceTextSnippet: snippet(f.detail ?? ""),
     };
     questions.push(q);
+    cpQuestionTexts.push({ question: q.question });
     debug.push({ source: "finding", sourceId: f.id, questionId: q.id, question: q.question });
   }
 
-  // 2) Aus Vortext-Risiken (riskClauses)
+  // 2) Aus Vortext-Risiken (riskClauses) (nur wenn nicht Dublette zu CP)
   for (const r of input.riskClauses ?? []) {
     const sev = normalizeSeverity(r.riskLevel);
     const cat: ScoreCategory = "vertrags_lv_risiken";
@@ -191,6 +233,7 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
       r.interpretation && r.interpretation.length > 20
         ? r.interpretation
         : `Bitte Klarstellung zur Vertragsklausel: ${snippet(r.text, 80)}`;
+    if (cpQuestionTexts.length > 0 && isSimilarToExistingQuestion(question, cpQuestionTexts)) continue;
     const q: ClarificationQuestion = {
       id: genId("r"),
       category: cat,
@@ -200,10 +243,11 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
       sourceTextSnippet: snippet(r.text),
     };
     questions.push(q);
+    cpQuestionTexts.push({ question: q.question });
     debug.push({ source: "riskClause", sourceId: r.type, questionId: q.id, question: q.question });
   }
 
-  // 3) Fehlende KeyFacts (nur wichtige)
+  // 3) Fehlende KeyFacts (nur wichtige) (nur wenn nicht Dublette zu CP)
   const keyFacts = input.keyFacts ?? {};
   for (const key of IMPORTANT_KEYFACTS) {
     const val = (keyFacts[key] ?? "").trim();
@@ -217,6 +261,7 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
             ? "technische_vollstaendigkeit"
             : "vertrags_lv_risiken";
       const question = `Bitte Angabe zu ${label}: Keine klare Angabe im Vortext gefunden.`;
+      if (cpQuestionTexts.length > 0 && isSimilarToExistingQuestion(question, cpQuestionTexts)) continue;
       const q: ClarificationQuestion = {
         id: genId("k"),
         category: cat,
@@ -226,6 +271,7 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
         sourceKeyFact: key,
       };
       questions.push(q);
+      cpQuestionTexts.push({ question: q.question });
       debug.push({ source: "missingKeyFact", sourceId: key, questionId: q.id, question: q.question });
     }
   }
