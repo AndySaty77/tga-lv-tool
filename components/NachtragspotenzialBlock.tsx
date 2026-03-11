@@ -1201,40 +1201,6 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
         )}
       </div>
 
-      {showDebug && (
-        <div style={{ marginTop: 12, padding: 10, background: "#f1f5f9", borderRadius: 8, fontSize: 11, color: "#475569" }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Debug Erkennung</div>
-          {debugEntries.map((e, i) => (
-            <div key={i} style={{ marginBottom: 6 }}>
-              <span style={{ fontWeight: 600 }}>{e?.label ?? e?.systemKey ?? "—"}</span>
-              {" · "}
-              <span>Treffer: {e?.detectionHitCount ?? 0}</span>
-              {" · "}
-              <span>Quelle: {e?.detectionSource ?? "—"}</span>
-              {e?.detectionReason != null && e.detectionReason !== "" && (
-                <span> · {e.detectionReason}</span>
-              )}
-              {Array.isArray(e?.matchedStrongTerms) && e.matchedStrongTerms.length > 0 && (
-                <div style={{ marginTop: 2, paddingLeft: 8 }}>Stark: {e.matchedStrongTerms.slice(0, 6).join(", ")}{e.matchedStrongTerms.length > 6 ? "…" : ""}</div>
-              )}
-              {((Array.isArray(e?.matchedWeakTerms) && e.matchedWeakTerms.length > 0) || (Array.isArray(e?.matchedAbbreviationTerms) && e.matchedAbbreviationTerms.length > 0)) && (
-                <div style={{ marginTop: 2, paddingLeft: 8 }}>
-                  {Array.isArray(e?.matchedWeakTerms) && e.matchedWeakTerms.length > 0 && (
-                    <span>Verstärker: {e.matchedWeakTerms.slice(0, 4).join(", ")}{e.matchedWeakTerms.length > 4 ? "…" : ""}</span>
-                  )}
-                  {Array.isArray(e?.matchedWeakTerms) && e.matchedWeakTerms.length > 0 && Array.isArray(e?.matchedAbbreviationTerms) && e.matchedAbbreviationTerms.length > 0 && " · "}
-                  {Array.isArray(e?.matchedAbbreviationTerms) && e.matchedAbbreviationTerms.length > 0 && (
-                    <span>Abk.: {e.matchedAbbreviationTerms.join(", ")}</span>
-                  )}
-                </div>
-              )}
-              {Array.isArray(e?.matchedDetectionTerms) && e.matchedDetectionTerms.length > 0 && (e?.matchedStrongTerms?.length === 0 && e?.matchedWeakTerms?.length === 0 && e?.matchedAbbreviationTerms?.length === 0) && (
-                <div style={{ marginTop: 2, paddingLeft: 8 }}>Begriffe: {e.matchedDetectionTerms.slice(0, 8).join(", ")}{e.matchedDetectionTerms.length > 8 ? "…" : ""}</div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -1252,6 +1218,20 @@ type Props = {
   isExpertMode: boolean;
   /** Kundenroute /analyse: optional andere Styles. */
   customerRoute?: boolean;
+  /** Optionale Design-Tokens (z. B. PAGE_DESIGN) für einheitliche Karten/Typo/Farben. */
+  designTokens?: {
+    cardBorder: string;
+    cardBg: string;
+    textPrimary: string;
+    textSecondary: string;
+    textMuted: string;
+    primary: string;
+    spacingCard: string;
+    radiusButton: number;
+    cardRadius: string;
+    fontSizeSectionTitle: number;
+    fontWeightSection: number;
+  };
 };
 
 /**
@@ -1268,26 +1248,36 @@ export function NachtragspotenzialBlock({
   deduplicatedOpportunities,
   isExpertMode,
   customerRoute = false,
+  designTokens,
 }: Props) {
   const [systemOpen, setSystemOpen] = useState(false);
-  const cardBorder = customerRoute ? "1px solid #e2e8f0" : "1px solid #e5e5e5";
-  const cardBg = customerRoute ? "#ffffff" : "#fff";
+  const D = designTokens;
+  const cardBorder = D ? `1px solid ${D.cardBorder}` : (customerRoute ? "1px solid #e2e8f0" : "1px solid #e5e5e5");
+  const cardBg = D ? D.cardBg : (customerRoute ? "#ffffff" : "#fff");
+  const textPrimary = D?.textPrimary ?? "#334155";
+  const textSecondary = D?.textSecondary ?? "#475569";
+  const textMuted = D?.textMuted ?? "#64748b";
+  const primary = D?.primary ?? "#334155";
+  const radius = D?.radiusButton ?? 8;
+  const cardRadius = D?.cardRadius ?? "12px";
+  const fontSizeTitle = D?.fontSizeSectionTitle ?? 14;
+  const fontWeightTitle = D?.fontWeightSection ?? 700;
 
   return (
-    <div style={{ border: cardBorder, borderRadius: 14, padding: 16, background: cardBg, marginTop: 24 }}>
+    <div style={{ border: cardBorder, borderRadius: D?.cardRadius ?? 14, padding: D ? 20 : 16, background: cardBg, marginTop: D ? 0 : 24 }}>
       <div
         style={{
           display: "flex",
           flexWrap: "wrap",
           alignItems: "center",
-          gap: 16,
+          gap: D ? 16 : 16,
           rowGap: 12,
           marginBottom: 24,
         }}
       >
-        <div style={{ fontSize: 14, color: "#334155", fontWeight: 600 }}>Nachtragspotenzial</div>
+        <div style={{ fontSize: fontSizeTitle, color: textPrimary, fontWeight: fontWeightTitle }}>Nachtragspotenzial</div>
         {isExpertMode && (
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#475569", fontWeight: 500 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: textSecondary, fontWeight: 500 }}>
             <input
               type="checkbox"
               checked={useChangePotentialLlm}
@@ -1300,10 +1290,10 @@ export function NachtragspotenzialBlock({
           onClick={onGenerate}
           disabled={loading}
           style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: "1px solid #64748b",
-            background: loading ? "#94a3b8" : "#334155",
+            padding: "10px 18px",
+            borderRadius: radius,
+            border: "none",
+            background: loading ? textMuted : primary,
             color: "#fff",
             fontSize: 13,
             fontWeight: 600,
@@ -1318,19 +1308,19 @@ export function NachtragspotenzialBlock({
       </div>
 
       {loading && (
-        <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: "#666", fontWeight: 700 }}>
+        <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: textSecondary, fontWeight: fontWeightTitle }}>
           Analyse läuft…
         </div>
       )}
 
       {!loading && !analysis && (
-        <div style={{ marginTop: 14, color: "#666", fontSize: 13, fontWeight: 700 }}>
+        <div style={{ marginTop: 14, color: textSecondary, fontSize: 13, fontWeight: 600 }}>
           Klicke „Nachtragspotenziale ermitteln", um mögliche Nachtragstreiber aus der Analyse abzuleiten (Strang B).
         </div>
       )}
 
       {isExpertMode && !customerRoute && (
-        <div style={{ marginTop: 8, color: "#64748b", fontSize: 11 }}>
+        <div style={{ marginTop: 8, color: textMuted, fontSize: 11 }}>
           Die KI verfeinert die erkannten Nachtragspotenziale fachlich/präziser, erzeugt aber keine völlig freien neuen
           Haupttreffer.
         </div>
@@ -1339,15 +1329,6 @@ export function NachtragspotenzialBlock({
       {!loading && analysis && (
         <>
           <NachtragExecutivePanel analysis={analysis} sanitize={sanitizeForDisplay} />
-
-          {SHOW_DEBUG_UI && (
-            <div style={{ marginTop: 8, fontSize: 11, color: "#94a3b8" }}>
-              [Debug] systemLogic: {analysis.systemLogic != null ? "vorhanden" : "fehlt"}
-              {analysis.systemLogic != null && (
-                <> · Systeme: {analysis.systemLogic.systemsDetected?.length ?? 0} · Findings: {analysis.systemLogic.findings?.length ?? 0}</>
-              )}
-            </div>
-          )}
 
           {/* Klare Statusanzeige: KI-Veredelung aktiv vs. angefordert aber nicht ausgeführt */}
           {analysis.debug && (
@@ -1376,99 +1357,6 @@ export function NachtragspotenzialBlock({
                 </div>
               )}
             </div>
-          )}
-
-          {SHOW_DEBUG_UI && isExpertMode && analysis.debug && (
-            <>
-              <div style={{ marginTop: 14, color: "#666", fontSize: 12, fontWeight: 700 }}>
-                Regeln: {analysis.debug.ruleBasedCount} • Legacy-KI (Debug): {analysis.debug.llmCount} • Nach Bereinigung:{" "}
-                {analysis.debug.deduplicatedCount} • Legacy-LLM: {analysis.debug.usedLegacyLlm ? "aktiv (Debug)" : "inaktiv"}
-              </div>
-              {/* Präzise KI-Veredelung-Diagnose (ohne Secrets) */}
-              {(analysis.debug.requestedChangePotentialLlm != null ||
-                analysis.debug.changePotentialLlmEnvEnabled != null ||
-                analysis.debug.openAiApiKeyPresent != null ||
-                analysis.debug.llmRefinementDurationMs != null ||
-                analysis.debug.llmRefinementTimedOut ||
-                analysis.debug.llmRefinementFailed ||
-                analysis.debug.refinedItemAttemptCount != null ||
-                analysis.debug.promptCharCount != null ||
-                analysis.debug.modelUsed ||
-                analysis.debug.llmRefinementMode ||
-                analysis.debug.refinedItemSuccessCount != null ||
-                analysis.debug.totalLlmDurationMs != null) && (
-                <div
-                  style={{
-                    marginTop: 10,
-                    padding: "10px 12px",
-                    background: "#f8fafc",
-                    borderRadius: 8,
-                    border: "1px solid #e2e8f0",
-                    fontSize: 12,
-                    color: "#334155",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  <div style={{ fontWeight: 800, marginBottom: 6, color: "#475569" }}>KI-Veredelung Diagnose</div>
-                  <div>
-                    Request angefordert: {analysis.debug.requestedChangePotentialLlm === true ? "ja" : "nein"}
-                  </div>
-                  <div>
-                    Env-Flag aktiv (CHANGE_POTENTIAL_LLM_ENABLED):{" "}
-                    {analysis.debug.changePotentialLlmEnvEnabled === true ? "ja" : "nein"}
-                  </div>
-                  <div>
-                    Env-Rohwert: &quot;{analysis.debug.changePotentialLlmEnvRaw ?? "—"}&quot;
-                  </div>
-                  <div>API-Key vorhanden: {analysis.debug.openAiApiKeyPresent === true ? "ja" : "nein"}</div>
-                  <div>
-                    LLM tatsächlich genutzt: {analysis.debug.usedChangePotentialLlm === true ? "ja" : "nein"}
-                  </div>
-                  <div>reasonIfNotUsed: {String(analysis.debug.reasonIfNotUsed ?? "—")}</div>
-                  {analysis.debug.reasonDetails && analysis.debug.reasonDetails.length > 0 && (
-                    <div style={{ marginTop: 4 }}>Blocker: {analysis.debug.reasonDetails.join(", ")}</div>
-                  )}
-                  {analysis.debug.llmRefinementDurationMs != null && (
-                    <div>LLM-Veredelung Dauer: {analysis.debug.llmRefinementDurationMs} ms</div>
-                  )}
-                  {analysis.debug.llmRefinementTimedOut && (
-                    <div style={{ color: "#b45309" }}>Timeout: ja (Fallback Regel-Engine)</div>
-                  )}
-                  {analysis.debug.llmRefinementFailed && (
-                    <div style={{ color: "#b45309" }}>
-                      Fehlgeschlagen: ja
-                      {analysis.debug.llmRefinementFailureReason
-                        ? ` — ${String(analysis.debug.llmRefinementFailureReason).slice(0, 80)}`
-                        : ""}
-                    </div>
-                  )}
-                  {analysis.debug.refinedItemAttemptCount != null && (
-                    <div>Items an KI: {analysis.debug.refinedItemAttemptCount}</div>
-                  )}
-                  {analysis.debug.promptCharCount != null && (
-                    <div>Prompt (Zeichen): {analysis.debug.promptCharCount}</div>
-                  )}
-                  {analysis.debug.contextCharCount != null && (
-                    <div>Kontext (Zeichen): {analysis.debug.contextCharCount}</div>
-                  )}
-                  {analysis.debug.modelUsed && (
-                    <div>Modell: {analysis.debug.modelUsed}</div>
-                  )}
-                  {analysis.debug.llmRefinementMode && (
-                    <div>Modus: {analysis.debug.llmRefinementMode}</div>
-                  )}
-                  {analysis.debug.refinedItemSuccessCount != null && (
-                    <div>Erfolgreich veredelt: {analysis.debug.refinedItemSuccessCount}</div>
-                  )}
-                  {analysis.debug.perItemTimeoutCount != null && analysis.debug.perItemTimeoutCount > 0 && (
-                    <div style={{ color: "#b45309" }}>Pro-Item-Timeout: {analysis.debug.perItemTimeoutCount}</div>
-                  )}
-                  {analysis.debug.totalLlmDurationMs != null && (
-                    <div>LLM-Gesamtdauer: {analysis.debug.totalLlmDurationMs} ms</div>
-                  )}
-                </div>
-              )}
-            </>
           )}
 
           {analysis.offerStrategySummary && (

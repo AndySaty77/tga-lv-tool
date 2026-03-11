@@ -1,0 +1,375 @@
+"use client";
+
+import React, { useState } from "react";
+import {
+  PageShell,
+  MetricCard,
+  AccentCard,
+  SectionCard,
+  ScoreBadge,
+  AccordionSection,
+  InsightList,
+} from "@/components/ui";
+import { colors, spacing, radius, shadows } from "@/lib/ui/theme";
+import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
+
+type CategoryKey =
+  | "vertrags_lv_risiken"
+  | "mengen_massenermittlung"
+  | "technische_vollstaendigkeit"
+  | "schnittstellen_nebenleistungen"
+  | "kalkulationsunsicherheit";
+
+const CATEGORY_ORDER: CategoryKey[] = [
+  "vertrags_lv_risiken",
+  "mengen_massenermittlung",
+  "technische_vollstaendigkeit",
+  "schnittstellen_nebenleistungen",
+  "kalkulationsunsicherheit",
+];
+
+const CATEGORY_COLORS: Record<CategoryKey, string> = {
+  vertrags_lv_risiken: colors.danger,
+  mengen_massenermittlung: "#F59E0B",
+  technische_vollstaendigkeit: colors.primary,
+  schnittstellen_nebenleistungen: colors.secondary,
+  kalkulationsunsicherheit: "#EAB308",
+};
+
+function catLabel(k: string) {
+  return DEFAULT_TEXTS_CONFIG.internal.categoryLabels[k as keyof typeof DEFAULT_TEXTS_CONFIG.internal.categoryLabels] ?? k;
+}
+
+function clamp0_100(n: number) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Math.max(0, Math.min(100, Math.round(x)));
+}
+
+export type AnalyseCockpitViewProps = {
+  /** Projektname (z. B. aus KeyFacts) */
+  projectName?: string;
+  /** Dateiname */
+  fileName?: string;
+  /** Dateigröße in Bytes */
+  fileSize?: number;
+  /** Projektart (optional) */
+  projectType?: string;
+  /** Analysezeitpunkt (optional, z. B. "06.03.2025 14:30") */
+  analysisTimestamp?: string;
+  /** Score-Ergebnis */
+  result: {
+    total: number;
+    perCategory?: Record<string, number>;
+    level?: string;
+    findingsSorted?: Array<{ id: string; title?: string; severity?: string; category?: string }>;
+  };
+  /** Nachtragsanalyse (Claim-Potenzial, Management Summary) */
+  changeOrderAnalysis?: {
+    offerStrategySummary?: {
+      executiveSummary?: string;
+      immediateActions?: string[];
+      topRisks?: string[];
+    };
+  } | null;
+  /** Rückfragen (gruppiert) */
+  clarificationQuestions?: { questions?: unknown[]; byGroup?: Record<string, Array<{ question?: string; title?: string }>> } | null;
+  /** Angebotsklarstellungen (gruppiert) */
+  offerAssumptions?: { assumptions?: unknown[]; byGroup?: Record<string, Array<{ assumption?: string; title?: string }>> } | null;
+  /** KeyFacts / Projektdaten für Detailanalyse */
+  keyFactsProjektdaten?: Array<[string, string]>;
+  keyFactLabels?: Record<string, string>;
+  /** Sanitize-Funktion für Text */
+  sanitize: (s: string) => string;
+  /** Wechsel zu anderem Tab (z. B. "nachtragspotenzial", "rueckfragen") */
+  onTabChange?: (tab: string) => void;
+};
+
+function fmtKB(bytes: number) {
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  return `${(kb / 1024).toFixed(2)} MB`;
+}
+
+/**
+ * Analyse-Cockpit: moderne Darstellung der Hauptanalyse-Seite.
+ * Nur Layout/UI – keine Business-Logik. Daten kommen ausschließlich über Props.
+ */
+export function AnalyseCockpitView({
+  projectName,
+  fileName,
+  fileSize,
+  projectType,
+  analysisTimestamp,
+  result,
+  changeOrderAnalysis,
+  clarificationQuestions,
+  offerAssumptions,
+  keyFactsProjektdaten = [],
+  keyFactLabels = {},
+  sanitize,
+  onTabChange,
+}: AnalyseCockpitViewProps) {
+  const [keyFactsOpen, setKeyFactsOpen] = useState(false);
+  const total = clamp0_100(result?.total ?? 0);
+  const perCategory = result?.perCategory ?? {};
+  const findings = result?.findingsSorted ?? [];
+  const criticalCount = findings.filter((f) => f.severity === "high" || f.severity === "critical").length;
+
+  const claimLevel = (() => {
+    if (!changeOrderAnalysis) return null;
+    const opps = changeOrderAnalysis as { opportunities?: Array<{ potential?: string }> };
+    const list = opps.opportunities ?? [];
+    const hasHigh = list.some((o) => (o.potential ?? "").toString().toLowerCase() === "high");
+    const hasMedium = list.some((o) => (o.potential ?? "").toString().toLowerCase() === "medium");
+    if (list.length === 0) return { text: "Keine", variant: "success" as const };
+    if (hasHigh) return { text: "Hoch", variant: "danger" as const };
+    if (hasMedium) return { text: "Mittel", variant: "warning" as const };
+    return { text: "Gering", variant: "success" as const };
+  })();
+
+  const offerSummary = changeOrderAnalysis?.offerStrategySummary;
+
+  return (
+    <PageShell maxWidth="1280px" compact>
+      {/* 1 Header – kompakt für Cockpit-Ansicht */}
+      <header
+        style={{
+          marginBottom: spacing[4],
+          paddingBottom: spacing[2],
+          borderBottom: `1px solid ${colors.border}`,
+        }}
+      >
+        <div style={{ display: "grid", gap: spacing[2], gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+          {projectName && (
+            <div>
+              <div style={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Projekt</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: colors.text }}>{sanitize(projectName)}</div>
+            </div>
+          )}
+          {fileName && (
+            <div>
+              <div style={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Datei</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>{sanitize(fileName)}{fileSize ? ` · ${fmtKB(fileSize)}` : ""}</div>
+            </div>
+          )}
+          {projectType && (
+            <div>
+              <div style={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Projektart</div>
+              <div style={{ fontSize: 14, color: colors.text }}>{sanitize(projectType)}</div>
+            </div>
+          )}
+          {analysisTimestamp && (
+            <div>
+              <div style={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Analysezeitpunkt</div>
+              <div style={{ fontSize: 14, color: colors.text }}>{analysisTimestamp}</div>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* 2 Kennzahlen-Row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: spacing[3], marginBottom: spacing[4] }}>
+        <MetricCard
+          title={DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.complexity}
+          value={total}
+          subtitle="von 100 Punkten"
+          variant={total >= 70 ? "danger" : total >= 40 ? "warning" : "success"}
+        />
+        <MetricCard
+          title={DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.totalRisk}
+          value={<ScoreBadge value={total} max={100} />}
+          variant="neutral"
+        />
+        <MetricCard
+          title={DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.claimPotential}
+          value={claimLevel ? claimLevel.text : "—"}
+          variant={claimLevel?.variant ?? "neutral"}
+        />
+        <MetricCard
+          title="Kritische Trigger"
+          value={criticalCount}
+          subtitle={criticalCount === 1 ? "hoher Befund" : "hohe Befunde"}
+          variant={criticalCount > 0 ? "danger" : "success"}
+        />
+      </div>
+
+      {/* 3 Management Summary – kompakt, managementtauglich */}
+      {offerSummary?.executiveSummary && (
+        <div style={{ marginBottom: spacing[4] }}>
+          <AccentCard title="Management Summary" variant="primary" thick padding="14px 18px">
+            <div style={{ fontSize: 14, lineHeight: 1.6, color: colors.text, whiteSpace: "pre-wrap", maxWidth: "72ch" }}>
+              {sanitize(offerSummary.executiveSummary)}
+            </div>
+          </AccentCard>
+        </div>
+      )}
+
+      {/* 4 Risiko-Kategorien als Karten-Grid */}
+      <div style={{ marginBottom: spacing[4] }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: colors.text, marginBottom: spacing[3] }}>Risiko-Kategorien</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: spacing[4] }}>
+          {CATEGORY_ORDER.map((k) => {
+            const v = clamp0_100(perCategory[k] ?? 0);
+            const accentColor = CATEGORY_COLORS[k];
+            return (
+              <SectionCard key={k} accent="none" style={{ borderLeftWidth: 4, borderLeftColor: accentColor }}>
+                <div style={{ fontSize: 12, color: colors.textMuted, fontWeight: 600, marginBottom: 4 }}>{catLabel(k)}</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: accentColor }}>{v}</div>
+                <div style={{ fontSize: 11, color: colors.textMuted }}>von 100</div>
+              </SectionCard>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Einheitliche Übersichtskarten: Header-Band + Body + Button (wie Referenz) */}
+      {(() => {
+        const cardStyle = {
+          background: colors.card,
+          border: `1px solid ${colors.border}`,
+          borderRadius: radius.lg,
+          boxShadow: shadows.md,
+          overflow: "hidden" as const,
+        };
+        const headerBandStyle = (accent: string) => ({
+          background: accent,
+          padding: "10px 16px",
+        });
+        const titleStyle = {
+          fontSize: "1rem",
+          fontWeight: 700,
+          color: "#fff",
+          margin: 0,
+        };
+        const bodyStyle = {
+          padding: "12px 16px",
+        };
+        const bodyTextStyle = {
+          margin: 0,
+          fontSize: 14,
+          color: colors.textMuted,
+          lineHeight: 1.5,
+        };
+        const buttonStyle = (accent: string) => ({
+          marginTop: spacing[3],
+          padding: "10px 16px",
+          borderRadius: 8,
+          border: "none" as const,
+          background: accent,
+          color: "#fff",
+          fontWeight: 600,
+          fontSize: 13,
+          cursor: "pointer" as const,
+          display: "block" as const,
+          width: "100%",
+          maxWidth: 280,
+          marginLeft: "auto" as const,
+          marginRight: "auto" as const,
+        });
+
+        return (
+          <>
+            {/* 5 Nachtragspotenzial */}
+            <div style={{ marginBottom: spacing[4] }}>
+              <div style={cardStyle}>
+                <div style={headerBandStyle(colors.secondary)}>
+                  <h2 style={titleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}</h2>
+                </div>
+                <div style={bodyStyle}>
+                  <p style={bodyTextStyle}>
+                    Die detaillierte Nachtragsanalyse mit Hebel und Sofortmaßnahmen finden Sie im Tab „{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}".
+                  </p>
+                  {onTabChange && (
+                    <button type="button" onClick={() => onTabChange("nachtragspotenzial")} style={buttonStyle(colors.secondary)}>
+                      Zum Tab {DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 6 Rückfragen */}
+            <div style={{ marginBottom: spacing[4] }}>
+              <div style={cardStyle}>
+                <div style={headerBandStyle(colors.primary)}>
+                  <h2 style={titleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.rueckfragen}</h2>
+                </div>
+                <div style={bodyStyle}>
+                  {clarificationQuestions?.questions && clarificationQuestions.questions.length > 0 ? (
+                    <>
+                      <p style={{ ...bodyTextStyle, marginBottom: spacing[3] }}>{DEFAULT_TEXTS_CONFIG.explanation.rueckfragen}</p>
+                      <div style={{ display: "flex", flexDirection: "column", gap: spacing[2] }}>
+                        {(clarificationQuestions.byGroup && Object.keys(clarificationQuestions.byGroup).length > 0
+                          ? Object.entries(clarificationQuestions.byGroup).flatMap(([group, items]) =>
+                              (items ?? []).slice(0, 3).map((item: { question?: string; title?: string }, i: number) => (
+                                <div key={`${group}-${i}`} style={{ fontSize: 12, color: colors.textMuted, marginBottom: 2 }}>{DEFAULT_TEXTS_CONFIG.rueckfragen.groupLabels[group] ?? group}</div>
+                              ))
+                            )
+                          : null)}
+                        <p style={{ ...bodyTextStyle, fontSize: 13 }}>{clarificationQuestions.questions.length} Rückfragen vorhanden.</p>
+                      </div>
+                    </>
+                  ) : (
+                    <p style={bodyTextStyle}>{DEFAULT_TEXTS_CONFIG.rueckfragen.emptyState}</p>
+                  )}
+                  {onTabChange && (
+                    <button type="button" onClick={() => onTabChange("rueckfragen")} style={buttonStyle(colors.primary)}>
+                      {DEFAULT_TEXTS_CONFIG.rueckfragen.generateButton}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 7 Angebotsklarstellungen */}
+            <div style={{ marginBottom: spacing[4] }}>
+              <div style={cardStyle}>
+                <div style={headerBandStyle(colors.accent)}>
+                  <h2 style={titleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.angebotsklarstellungen}</h2>
+                </div>
+                <div style={bodyStyle}>
+                  {offerAssumptions?.assumptions && offerAssumptions.assumptions.length > 0 ? (
+                    <>
+                      <p style={{ ...bodyTextStyle, marginBottom: spacing[3] }}>{DEFAULT_TEXTS_CONFIG.explanation.angebotsklarstellungen}</p>
+                      <p style={{ ...bodyTextStyle, fontSize: 13 }}>{offerAssumptions.assumptions.length} Annahmen vorhanden.</p>
+                    </>
+                  ) : (
+                    <p style={bodyTextStyle}>{DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.emptyState}</p>
+                  )}
+                  {onTabChange && (
+                    <button type="button" onClick={() => onTabChange("angebotsklarstellungen")} style={buttonStyle(colors.accent)}>
+                      {DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.generateButton}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
+
+      {/* 8 KeyFacts / Detailanalyse – einklappbar */}
+      <AccordionSection
+        title="KeyFacts / Detailanalyse"
+        defaultOpen={false}
+        open={keyFactsOpen}
+        onToggle={setKeyFactsOpen}
+        accentColor={colors.accent}
+      >
+        {keyFactsProjektdaten.length > 0 ? (
+          <InsightList
+            items={keyFactsProjektdaten.map(([k, v]) => ({
+              label: keyFactLabels[k] ?? k,
+              value: sanitize(v).slice(0, 80) + (v.length > 80 ? "…" : ""),
+              variant: "neutral",
+            }))}
+            compact
+          />
+        ) : (
+          <p style={{ margin: 0, fontSize: 14, color: colors.textMuted }}>Keine Projektdaten extrahiert.</p>
+        )}
+      </AccordionSection>
+    </PageShell>
+  );
+}
