@@ -10,6 +10,7 @@ import { VortextDetailModal } from "@/components/VortextDetailModal";
 import { AnalyseCockpitView } from "@/components/AnalyseCockpitView";
 import { sanitizeForDisplay, stripTechnicalNoiseForDisplay } from "@/lib/displayText";
 import { normalizeViewerPositionenText, normalizeViewerVorbemerkungenText } from "@/lib/gaebViewerNormalize";
+import type { ChangeOrderResult } from "@/lib/changeOrderAnalysis";
 import { AMPEL_THRESHOLDS } from "@/lib/scoringConfig";
 import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
 import { PAGE_DESIGN } from "@/lib/ui/pageDesign";
@@ -223,20 +224,6 @@ type RiskClause = {
   riskLevel: "low" | "medium" | "high";
   text: string;
   interpretation: string;
-};
-
-type ChangeOrderOpp = {
-  id: string;
-  cluster: string;
-  title: string;
-  description: string;
-  potential: string;
-  riskLevel?: string;
-  assertiveness?: string;
-  reason: string;
-  sourceFindingIds?: string[];
-  sourceTextSnippets?: string[];
-  sourceType?: string[];
 };
 
 function riskIcon(level: "low" | "medium" | "high") {
@@ -513,14 +500,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
   const [changeOrderLoading, setChangeOrderLoading] = useState(false);
   // Steuert die neue KI-Veredelung der Nachtragspotenziale (ChangePotential-LLM).
   const [useChangePotentialLlm, setUseChangePotentialLlm] = useState(false);
-  const [changeOrderAnalysis, setChangeOrderAnalysis] = useState<{
-    opportunities: ChangeOrderOpp[];
-    byCluster: Record<string, ChangeOrderOpp[]>;
-    debug?: { ruleBasedCount: number; llmCount: number; deduplicatedCount: number };
-    changePotentialSummary?: import("@/lib/changePotentialModel").ChangePotentialSummary;
-    /** Aus ChangePotential abgeleitet: Rückfragen, Klarstellungen, Kalkulationshinweise, Monitoring. */
-    commercialActionsFromChangePotential?: import("@/lib/changePotentialCommercialActions").CommercialActionsFromChangePotential;
-  } | null>(null);
+  const [changeOrderAnalysis, setChangeOrderAnalysis] = useState<ChangeOrderResult | null>(null);
 
   // ===== ANGEBOTS-ANNAHMEN =====
   const [offerAssumptionsLoading, setOfferAssumptionsLoading] = useState(false);
@@ -656,7 +636,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || "Nachtragsanalyse fehlgeschlagen");
-      setChangeOrderAnalysis(data);
+      setChangeOrderAnalysis(data as ChangeOrderResult);
     } catch (e: unknown) {
       console.error("Change order analysis:", e);
       setChangeOrderAnalysis(null);

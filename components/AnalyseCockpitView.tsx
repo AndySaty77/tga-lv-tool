@@ -11,6 +11,7 @@ import {
   InsightList,
 } from "@/components/ui";
 import { colors, spacing, radius, shadows } from "@/lib/ui/theme";
+import type { ChangeOrderResult } from "@/lib/changeOrderAnalysis";
 import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
 
 type CategoryKey =
@@ -64,14 +65,8 @@ export type AnalyseCockpitViewProps = {
     level?: string;
     findingsSorted?: Array<{ id: string; title?: string; severity?: string; category?: string }>;
   };
-  /** Nachtragsanalyse (Claim-Potenzial, Management Summary) */
-  changeOrderAnalysis?: {
-    offerStrategySummary?: {
-      executiveSummary?: string;
-      immediateActions?: string[];
-      topRisks?: string[];
-    };
-  } | null;
+  /** Nachtragsanalyse (Claim-Potenzial, Management Summary) – vollständiger Typ aus API */
+  changeOrderAnalysis?: ChangeOrderResult | null;
   /** Rückfragen (gruppiert) */
   clarificationQuestions?: { questions?: unknown[]; byGroup?: Record<string, Array<{ question?: string; title?: string }>> } | null;
   /** Angebotsklarstellungen (gruppiert) */
