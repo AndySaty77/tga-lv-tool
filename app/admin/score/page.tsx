@@ -7,7 +7,7 @@ import { PositionenNodeView } from "@/components/PositionenNodeView";
 import { VorbemerkungenDocumentView } from "@/components/VorbemerkungenDocumentView";
 import { NachtragspotenzialBlock } from "@/components/NachtragspotenzialBlock";
 import { VortextDetailModal } from "@/components/VortextDetailModal";
-import { AnalyseCockpitView } from "@/components/AnalyseCockpitView";
+import { AnalyseCockpitView, type AnalyseCockpitViewProps } from "@/components/AnalyseCockpitView";
 import { sanitizeForDisplay, stripTechnicalNoiseForDisplay } from "@/lib/displayText";
 import { normalizeViewerPositionenText, normalizeViewerVorbemerkungenText } from "@/lib/gaebViewerNormalize";
 import type { ChangeOrderResult } from "@/lib/changeOrderAnalysis";
@@ -2139,12 +2139,12 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               fileSize={fileMeta?.size ?? undefined}
               result={result}
               changeOrderAnalysis={changeOrderAnalysis ?? undefined}
-              clarificationQuestions={clarificationQuestions ?? undefined}
-              offerAssumptions={offerAssumptions ?? undefined}
-              keyFactsProjektdaten={keyFactsProjektdaten}
+              clarificationQuestions={(clarificationQuestions ?? undefined) as AnalyseCockpitViewProps["clarificationQuestions"]}
+              offerAssumptions={(offerAssumptions ?? undefined) as AnalyseCockpitViewProps["offerAssumptions"]}
+              keyFactsProjektdaten={keyFactsProjektdaten as [string, string][]}
               keyFactLabels={KEYFACT_LABELS}
               sanitize={sanitizeForDisplay}
-              onTabChange={setResultTab}
+              onTabChange={(tab) => setResultTab(tab as ResultTabId)}
             />
           ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: customerRoute ? D.spacingCard : 12, maxHeight: "calc(100vh - 220px)", minHeight: 0 }}>
@@ -2338,7 +2338,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                       <div style={{ fontWeight: D.fontWeightSection, color: D.textPrimary, fontSize: D.fontSizeCardTitle }}>
                         {riskIcon(r.riskLevel)} {r.type || "Risiko"}
                       </div>
-                      <StatusBadge variant={r.riskLevel === "high" || r.riskLevel === "sehr_hoch" ? "danger" : r.riskLevel === "medium" || r.riskLevel === "mittel" ? "warning" : "success"} small>
+                      <StatusBadge variant={(() => { const l = String(r.riskLevel); return l === "high" || l === "sehr_hoch" ? "danger" : l === "medium" || l === "mittel" ? "warning" : "success"; })()} small>
                         {String(r.riskLevel).toUpperCase()}
                       </StatusBadge>
                     </div>
