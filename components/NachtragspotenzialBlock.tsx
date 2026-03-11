@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { sanitizeForDisplay } from "@/lib/displayText";
 import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
 import type {
@@ -77,7 +77,55 @@ export type NachtragspotenzialAnalysisResult = {
   commercialActionsFromChangePotential?: import("@/lib/changePotentialCommercialActions").CommercialActionsFromChangePotential;
   /** Management Summary + Strategievarianten auf Dokumentebene (KI). */
   offerStrategySummary?: import("@/lib/changePotentialModel").OfferStrategySummary;
+  /** Systemlogik-Lückenanalyse (LV-Text); nur gesetzt wenn Engine ohne Fehler lief. */
+  systemLogic?: {
+    systemsDetected: string[];
+    findings: Array<{
+      system: string;
+      type: string;
+      message: string;
+      severity: "low" | "medium" | "high" | "critical";
+      reasoningShort?: string;
+      recommendedHandling?: string;
+    }>;
+    querschnittDetected?: string[];
+    crossTopicsDetected?: string[];
+    debugDetection?: Array<{
+      systemKey: string;
+      label: string;
+      matchedDetectionTerms: string[];
+      matchedStrongTerms?: string[];
+      matchedWeakTerms?: string[];
+      matchedAbbreviationTerms?: string[];
+      detectionSource: string;
+      detectionHitCount: number;
+      detectionReason?: string;
+      detectionConfidenceLabel?: string;
+      detectionReasonShort?: string;
+      recommendedHandling?: string;
+    }>;
+    systemSummaries?: Array<{
+      system: string;
+      detectionConfidenceLabel?: string;
+      detectionReasonShort?: string;
+      findingCount: number;
+      highSeverityCount: number;
+      mediumSeverityCount: number;
+      topMissingComponents: string[];
+      overallAssessmentShort: string;
+      recommendedHandling: string;
+      commercialRelevance?: "niedrig" | "mittel" | "hoch";
+      procurementMeaning?: string;
+      actionType?: "rueckfrage" | "klarstellung" | "kalkulationsaufschlag" | "beobachten" | "ignorieren";
+      suggestedQuestion?: string;
+      suggestedOfferNote?: string;
+      nachtragspotenzialImpact?: "niedrig" | "mittel" | "hoch";
+    }>;
+  };
 };
+
+/** Debug-Infos (systemLogic, Regeln, KI-Veredelung Diagnose) im normalen UI ausblenden. */
+const SHOW_DEBUG_UI = false;
 
 const CLUSTER_LABELS: Record<string, string> = {
   leistungsaenderung: "Leistungsänderung",
@@ -218,103 +266,159 @@ function NewEngineView({
   labelForSourceType,
   sanitize,
 }: NewEngineViewProps) {
+  const [analysisOverviewOpen, setAnalysisOverviewOpen] = useState(false);
+  const [fieldsOpen, setFieldsOpen] = useState(false);
   const { overallIndex, totalItems, highImpactCount, veryHighImpactCount, strongEnforceabilityCount, items, topFields, topMechanisms, negotiationClusters } = summary;
   const indexTone = overallIndex >= 70 ? "#b00020" : overallIndex >= 40 ? "#a36b00" : "#0a7a2f";
 
   return (
     <>
-      {/* Abgeleitete Maßnahmen (Rückfragen/Klarstellungen/Kalkulation/Monitoring) */}
-      {commercialActions && (commercialActions.questions.length > 0 || commercialActions.clarifications.length > 0 || commercialActions.pricingHints.length > 0 || commercialActions.monitoringHints.length > 0) && (
-        <div style={{ marginTop: 14, padding: 10, background: "#f0f7ff", borderRadius: 10, fontSize: 12, color: "#333" }}>
-          <strong>Abgeleitete Maßnahmen:</strong>{" "}
-          {commercialActions.questions.length > 0 && <span>{commercialActions.questions.length} Rückfragen</span>}
-          {commercialActions.questions.length > 0 && commercialActions.clarifications.length > 0 && " · "}
-          {commercialActions.clarifications.length > 0 && <span>{commercialActions.clarifications.length} Klarstellungen</span>}
-          {(commercialActions.questions.length > 0 || commercialActions.clarifications.length > 0) && (commercialActions.pricingHints.length > 0 || commercialActions.monitoringHints.length > 0) && " · "}
-          {commercialActions.pricingHints.length > 0 && <span>{commercialActions.pricingHints.length} Kalkulationshinweise</span>}
-          {commercialActions.pricingHints.length > 0 && commercialActions.monitoringHints.length > 0 && " · "}
-          {commercialActions.monitoringHints.length > 0 && <span>{commercialActions.monitoringHints.length} Claim-Monitoring</span>}
-          {" — werden beim Generieren der Tabs „Rückfragen“ und „Angebotsklarstellungen“ einbezogen (CP bevorzugt bei Duplikaten)."}
-        </div>
-      )}
+      {/* Analyseübersicht – einklappbar (Abgeleitete Maßnahmen, Gesamtindex, Top-Feldtypen, Top-Mechanismen, Top-Verhandlungspunkte) */}
+      <div style={{ marginTop: 24 }}>
+        <button
+          type="button"
+          onClick={() => setAnalysisOverviewOpen((v) => !v)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            width: "100%",
+            padding: "8px 0",
+            background: "none",
+            border: "none",
+            borderBottom: "1px solid #e2e8f0",
+            cursor: "pointer",
+            fontWeight: 600,
+            color: "#334155",
+            fontSize: 14,
+            textAlign: "left",
+          }}
+        >
+          <span>Analyseübersicht</span>
+          <span style={{ fontSize: 12, color: "#64748b" }}>{analysisOverviewOpen ? "▼" : "▶"}</span>
+        </button>
+        {analysisOverviewOpen && (
+          <>
+            {/* Abgeleitete Maßnahmen (Rückfragen/Klarstellungen/Kalkulation/Monitoring) */}
+            {commercialActions && (commercialActions.questions.length > 0 || commercialActions.clarifications.length > 0 || commercialActions.pricingHints.length > 0 || commercialActions.monitoringHints.length > 0) && (
+              <div style={{ marginTop: 14, padding: 10, background: "#f0f7ff", borderRadius: 10, fontSize: 12, color: "#333" }}>
+                <strong>Abgeleitete Maßnahmen:</strong>{" "}
+                {commercialActions.questions.length > 0 && <span>{commercialActions.questions.length} Rückfragen</span>}
+                {commercialActions.questions.length > 0 && commercialActions.clarifications.length > 0 && " · "}
+                {commercialActions.clarifications.length > 0 && <span>{commercialActions.clarifications.length} Klarstellungen</span>}
+                {(commercialActions.questions.length > 0 || commercialActions.clarifications.length > 0) && (commercialActions.pricingHints.length > 0 || commercialActions.monitoringHints.length > 0) && " · "}
+                {commercialActions.pricingHints.length > 0 && <span>{commercialActions.pricingHints.length} Kalkulationshinweise</span>}
+                {commercialActions.pricingHints.length > 0 && commercialActions.monitoringHints.length > 0 && " · "}
+                {commercialActions.monitoringHints.length > 0 && <span>{commercialActions.monitoringHints.length} Claim-Monitoring</span>}
+                {" — werden beim Generieren der Tabs „Rückfragen“ und „Angebotsklarstellungen“ einbezogen (CP bevorzugt bei Duplikaten)."}
+              </div>
+            )}
 
-      {/* A) Überblick */}
-      <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
-        <div style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>
-          Gesamtindex: <span style={{ color: indexTone }}>{overallIndex}</span> / 100
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 16, fontSize: 13, color: "#444" }}>
-          <span><strong>{totalItems}</strong> Felder</span>
-          {(highImpactCount > 0 || veryHighImpactCount > 0) && (
-            <span style={{ color: "#b00020" }}>
-              <strong>{veryHighImpactCount + highImpactCount}</strong> hohe / sehr hohe Hebel
-            </span>
-          )}
-          {strongEnforceabilityCount > 0 && (
-            <span style={{ color: "#1565c0" }}>
-              <strong>{strongEnforceabilityCount}</strong> gut durchsetzbar
-            </span>
-          )}
-        </div>
-        {topFields.length > 0 && (
-          <div style={{ fontSize: 12, color: "#666" }}>
-            Top-Feldtypen: {topFields.slice(0, 4).map((f) => `${labelForFieldType(f.fieldType)} (${f.count})`).join(" · ")}
-          </div>
-        )}
-        {topMechanisms.length > 0 && (
-          <div style={{ fontSize: 12, color: "#666" }}>
-            Top-Mechanismen: {topMechanisms.slice(0, 3).map((m) => `${labelForMechanism(m.mechanism)} (${m.count})`).join(" · ")}
-          </div>
+            {/* A) Überblick */}
+            <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
+              <div style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>
+                Gesamtindex: <span style={{ color: indexTone }}>{overallIndex}</span> / 100
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 16, fontSize: 13, color: "#444" }}>
+                <span><strong>{totalItems}</strong> Felder</span>
+                {(highImpactCount > 0 || veryHighImpactCount > 0) && (
+                  <span style={{ color: "#b00020" }}>
+                    <strong>{veryHighImpactCount + highImpactCount}</strong> hohe / sehr hohe Hebel
+                  </span>
+                )}
+                {strongEnforceabilityCount > 0 && (
+                  <span style={{ color: "#1565c0" }}>
+                    <strong>{strongEnforceabilityCount}</strong> gut durchsetzbar
+                  </span>
+                )}
+              </div>
+              {topFields.length > 0 && (
+                <div style={{ fontSize: 12, color: "#666" }}>
+                  Top-Feldtypen: {topFields.slice(0, 4).map((f) => `${labelForFieldType(f.fieldType)} (${f.count})`).join(" · ")}
+                </div>
+              )}
+              {topMechanisms.length > 0 && (
+                <div style={{ fontSize: 12, color: "#666" }}>
+                  Top-Mechanismen: {topMechanisms.slice(0, 3).map((m) => `${labelForMechanism(m.mechanism)} (${m.count})`).join(" · ")}
+                </div>
+              )}
+            </div>
+
+            {/* Top-Verhandlungspunkte (gebündelte Cluster) */}
+            {negotiationClusters && negotiationClusters.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontWeight: 800, color: "#333", fontSize: 14, marginBottom: 10 }}>Top-Verhandlungspunkte</div>
+                <div style={{ display: "grid", gap: 12 }}>
+                  {negotiationClusters.map((cluster) => (
+                    <NegotiationClusterCard
+                      key={cluster.id}
+                      cluster={cluster}
+                      isExpertMode={isExpertMode}
+                      labelForFieldType={labelForFieldType}
+                      labelForMechanism={labelForMechanism}
+                      labelForImpact={labelForImpact}
+                      labelForEnforceability={labelForEnforceability}
+                      labelForClusterAction={(a) => labelFor(NEGOTIATION_CLUSTER_ACTION_LABELS, a)}
+                      impactTone={impactTone}
+                      actionTone={actionTone}
+                      sanitize={sanitize}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      {/* Top-Verhandlungspunkte (gebündelte Cluster) */}
-      {negotiationClusters && negotiationClusters.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <div style={{ fontWeight: 800, color: "#333", fontSize: 14, marginBottom: 10 }}>Top-Verhandlungspunkte</div>
-          <div style={{ display: "grid", gap: 12 }}>
-            {negotiationClusters.map((cluster) => (
-              <NegotiationClusterCard
-                key={cluster.id}
-                cluster={cluster}
-                isExpertMode={isExpertMode}
-                labelForFieldType={labelForFieldType}
-                labelForMechanism={labelForMechanism}
-                labelForImpact={labelForImpact}
-                labelForEnforceability={labelForEnforceability}
-                labelForClusterAction={(a) => labelFor(NEGOTIATION_CLUSTER_ACTION_LABELS, a)}
-                impactTone={impactTone}
-                actionTone={actionTone}
-                sanitize={sanitize}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* B) Pro Item */}
-      <div style={{ marginTop: 16, fontWeight: 800, color: "#333", fontSize: 14 }}>Erkannte Nachtragsfelder</div>
-      <div style={{ marginTop: 10, display: "grid", gap: 14 }}>
-        {items.map((it) => (
-          <ItemCard
-            key={it.id}
-            item={it}
-            isExpertMode={isExpertMode}
-            labelForFieldType={labelForFieldType}
-            labelForMechanism={labelForMechanism}
-            labelForImpact={labelForImpact}
-            labelForEnforceability={labelForEnforceability}
-            labelForAction={labelForAction}
-            labelForSourceType={labelForSourceType}
-            impactTone={impactTone}
-            actionTone={actionTone}
-            sanitize={sanitize}
-          />
-        ))}
-      </div>
-
-      <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #eee", color: "#666", fontSize: 13, lineHeight: 1.5 }}>
-        Darstellung basiert auf der neuen Nachtragspotenzial-Engine (Feldtypen, Mechanismus, Hebel, Durchsetzbarkeit, empfohlene Aktion).
+      {/* B) Pro Item – einklappbar */}
+      <div style={{ marginTop: 16 }}>
+        <button
+          type="button"
+          onClick={() => setFieldsOpen((v) => !v)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            width: "100%",
+            padding: "8px 0",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            fontWeight: 800,
+            color: "#333",
+            fontSize: 14,
+            textAlign: "left",
+          }}
+        >
+          <span>Erkannte Nachtragsfelder</span>
+          <span style={{ fontSize: 12, color: "#64748b" }}>{fieldsOpen ? "▼" : "▶"}</span>
+        </button>
+        {fieldsOpen && (
+          <>
+            <div style={{ marginTop: 10, display: "grid", gap: 14 }}>
+              {items.map((it) => (
+                <ItemCard
+                  key={it.id}
+                  item={it}
+                  isExpertMode={isExpertMode}
+                  labelForFieldType={labelForFieldType}
+                  labelForMechanism={labelForMechanism}
+                  labelForImpact={labelForImpact}
+                  labelForEnforceability={labelForEnforceability}
+                  labelForAction={labelForAction}
+                  labelForSourceType={labelForSourceType}
+                  impactTone={impactTone}
+                  actionTone={actionTone}
+                  sanitize={sanitize}
+                />
+              ))}
+            </div>
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #eee", color: "#666", fontSize: 13, lineHeight: 1.5 }}>
+              Darstellung basiert auf der neuen Nachtragspotenzial-Engine (Feldtypen, Mechanismus, Hebel, Durchsetzbarkeit, empfohlene Aktion).
+            </div>
+          </>
+        )}
       </div>
     </>
   );
@@ -623,6 +727,92 @@ function LegacyView({ analysis, deduplicatedOpportunities, isExpertMode, sanitiz
   );
 }
 
+// ================= Executive Panel (kompakte Managementübersicht) =================
+
+const RELEVANCE_ORDER: Record<string, number> = { sehr_hoch: 4, hoch: 3, mittel: 2, niedrig: 1 };
+
+function NachtragExecutivePanel({
+  analysis,
+  sanitize,
+}: {
+  analysis: NachtragspotenzialAnalysisResult;
+  sanitize: (s: string) => string;
+}) {
+  const summary = analysis?.changePotentialSummary;
+  const offerSummary = analysis?.offerStrategySummary;
+  const index = summary?.overallIndex ?? (analysis as { summaryIndex?: number; totalIndex?: number })?.summaryIndex ?? (analysis as { summaryIndex?: number; totalIndex?: number })?.totalIndex ?? 0;
+  const fieldCount = summary?.items?.length ?? (analysis as { fields?: unknown[] })?.fields?.length ?? 0;
+  const highLeverage =
+    (summary?.highImpactCount ?? 0) + (summary?.veryHighImpactCount ?? 0) ||
+    (analysis as { highLeverageCount?: number })?.highLeverageCount ||
+    0;
+  const goodFeasibility =
+    (summary?.strongEnforceabilityCount ?? (analysis as { goodFeasibilityCount?: number })?.goodFeasibilityCount) ?? 0;
+  const clusters = analysis?.changePotentialSummary?.negotiationClusters ?? [];
+  const sortedClusters = [...clusters].sort(
+    (a, b) => (RELEVANCE_ORDER[b?.commercialWeight ?? ""] ?? 0) - (RELEVANCE_ORDER[a?.commercialWeight ?? ""] ?? 0)
+  );
+  const topClusters = sortedClusters.slice(0, 3);
+  const immediateActions = offerSummary?.immediateActions ?? (analysis as { summary?: { immediateActions?: string[] } })?.summary?.immediateActions ?? [];
+  const topActions = Array.isArray(immediateActions) ? immediateActions.slice(0, 3) : [];
+
+  const cardStyle = {
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    padding: 16,
+    background: "#ffffff",
+  };
+  const titleStyle = { fontSize: 14, fontWeight: 600, marginBottom: 8, color: "#334155" };
+  const badgeStyle = { padding: "2px 8px", borderRadius: 999, fontSize: 12, background: "#eef2ff", color: "#3730a3" };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 48, alignItems: "stretch" }}>
+      {/* Karte 1: Nachtragspotenzial Index */}
+      <div style={{ ...cardStyle, height: "100%" }}>
+        <div style={titleStyle}>Nachtragspotenzial</div>
+        <div style={{ fontSize: 32, fontWeight: 700, color: "#334155", marginBottom: 4 }}>{index}</div>
+        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>von 100 Punkten</div>
+        <div style={{ fontSize: 12, color: "#475569", display: "flex", flexDirection: "column", gap: 4 }}>
+          <span>Anzahl Nachtragsfelder: {fieldCount}</span>
+          <span>Hohe Hebel: {highLeverage}</span>
+          <span>Gut durchsetzbar: {goodFeasibility}</span>
+        </div>
+      </div>
+      {/* Karte 2: Wichtigste Hebel */}
+      <div style={{ ...cardStyle, height: "100%" }}>
+        <div style={titleStyle}>Wichtigste Hebel</div>
+        {topClusters.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {topClusters.map((c) => (
+              <div key={c?.id ?? c?.title}>
+                <div style={{ fontSize: 13, color: "#334155", marginBottom: 4 }}>{sanitize(c?.title ?? "")}</div>
+                <span style={badgeStyle}>
+                  {c?.commercialWeight === "sehr_hoch" || c?.commercialWeight === "hoch" ? "Hoch" : "Mittel"}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span style={{ fontSize: 12, color: "#94a3b8" }}>Keine Hebel erkannt</span>
+        )}
+      </div>
+      {/* Karte 3: Sofortmaßnahmen */}
+      <div style={{ ...cardStyle, height: "100%" }}>
+        <div style={titleStyle}>Sofortmaßnahmen</div>
+        {topActions.length > 0 ? (
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#475569", lineHeight: 1.5 }}>
+            {topActions.map((a, i) => (
+              <li key={i} style={{ marginBottom: 4 }}>{sanitize(String(a))}</li>
+            ))}
+          </ul>
+        ) : (
+          <span style={{ fontSize: 12, color: "#94a3b8" }}>Keine Maßnahmen erkannt</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ================= Management Summary / Angebotsstrategie =================
 
 function OfferStrategyBlock({
@@ -636,7 +826,7 @@ function OfferStrategyBlock({
 }) {
   const approachLabel = labelFor(OFFER_STRATEGY_APPROACH_LABELS, data.recommendedApproach);
   return (
-    <div style={{ marginTop: 16, border: "1px solid #1e3a5f", borderRadius: 12, padding: 16, background: "#f0f7ff" }}>
+    <div style={{ marginTop: 32, marginBottom: 24, border: "1px solid #1e3a5f", borderRadius: 12, padding: 16, background: "#f0f7ff" }}>
       <div style={{ fontWeight: 800, fontSize: 15, color: "#1e3a5f", marginBottom: 12 }}>Management Summary</div>
       <div style={{ fontSize: 13, color: "#333", lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 12 }}>
         {sanitize(data.executiveSummary)}
@@ -737,6 +927,318 @@ function OfferStrategyBlock({
   );
 }
 
+function getSystemlogikSeverityLabel(severity: string | undefined): string {
+  if (severity === "critical" || severity === "high") return "Hoch";
+  if (severity === "medium") return "Mittel";
+  if (severity === "low") return "Niedrig";
+  return severity ?? "—";
+}
+
+function getSystemlogikSeverityStyle(severity: string | undefined): { color: string; fontWeight: number; background?: string } {
+  if (severity === "critical" || severity === "high") return { color: "#b91c1c", fontWeight: 700, background: "#fef2f2" };
+  if (severity === "medium") return { color: "#a36b00", fontWeight: 600, background: "#fffbeb" };
+  if (severity === "low") return { color: "#64748b", fontWeight: 500 };
+  return { color: "#64748b", fontWeight: 500 };
+}
+
+type SystemlogikSectionProps = {
+  systemLogic: NonNullable<NachtragspotenzialAnalysisResult["systemLogic"]>;
+  sanitize: (s: string) => string;
+  isExpertMode?: boolean;
+};
+
+function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: SystemlogikSectionProps) {
+  const systems = systemLogic?.systemsDetected ?? [];
+  const findings = systemLogic?.findings ?? [];
+  const querschnitt = systemLogic?.querschnittDetected ?? [];
+  const debugEntries = systemLogic?.debugDetection ?? [];
+  const systemSummaries = systemLogic?.systemSummaries ?? [];
+  const hasSystems = Array.isArray(systems) && systems.length > 0;
+  const hasFindings = Array.isArray(findings) && findings.length > 0;
+  const hasQuerschnitt = Array.isArray(querschnitt) && querschnitt.length > 0;
+  const showDebug = isExpertMode && Array.isArray(debugEntries) && debugEntries.length > 0;
+  const summariesForSystems = systemSummaries.filter((s) => systems.includes(s?.system ?? ""));
+  const summariesForQuerschnitt = systemSummaries.filter((s) => querschnitt.includes(s?.system ?? ""));
+  const hasSummaries = Array.isArray(summariesForSystems) && summariesForSystems.length > 0;
+  const hasQuerschnittSummaries = Array.isArray(summariesForQuerschnitt) && summariesForQuerschnitt.length > 0;
+
+  const relevanceOrder = (r: typeof summariesForSystems[0]) =>
+    r?.commercialRelevance === "hoch" ? 3 : r?.commercialRelevance === "mittel" ? 2 : r?.commercialRelevance === "niedrig" ? 1 : 0;
+  const sortedSummaries = [...summariesForSystems].sort((a, b) => relevanceOrder(b) - relevanceOrder(a));
+
+  const [findingsExpanded, setFindingsExpanded] = useState(false);
+
+  return (
+    <div
+      style={{
+        marginTop: 20,
+        border: "1px solid #e2e8f0",
+        borderRadius: 12,
+        padding: 20,
+        background: "#fff",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+      }}
+    >
+      <div style={{ marginBottom: 16 }}>
+        {hasSystems ? (
+          <>
+            {hasSummaries ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                {sortedSummaries.map((sum, i) => {
+                  const relevanceLabel =
+                    sum?.commercialRelevance === "hoch"
+                      ? "Relevanz: hoch"
+                      : sum?.commercialRelevance === "mittel"
+                        ? "Relevanz: mittel"
+                        : sum?.commercialRelevance === "niedrig"
+                          ? "Relevanz: niedrig"
+                          : null;
+                  const actionLabel =
+                    sum?.actionType === "rueckfrage"
+                      ? "Rückfrage"
+                      : sum?.actionType === "klarstellung"
+                        ? "Klarstellung"
+                        : sum?.actionType === "kalkulationsaufschlag"
+                          ? "Kalkulationsaufschlag"
+                          : sum?.actionType === "beobachten"
+                            ? "Beobachten"
+                            : sum?.actionType === "ignorieren"
+                              ? "Ignorieren"
+                              : sum?.recommendedHandling ?? "";
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        padding: 16,
+                        background: "#f8fafc",
+                        borderRadius: 10,
+                        border: "1px solid #e2e8f0",
+                        boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                      }}
+                    >
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                        <span style={{ fontWeight: 700, fontSize: 15, color: "#334155" }}>{sanitize(sum?.system ?? "")}</span>
+                        {sum?.detectionConfidenceLabel != null && sum.detectionConfidenceLabel !== "" && (
+                          <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 9999, background: "#e2e8f0", color: "#475569" }}>
+                            Erkennung: {sanitize(sum.detectionConfidenceLabel)}
+                          </span>
+                        )}
+                        {relevanceLabel && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              padding: "3px 8px",
+                              borderRadius: 9999,
+                              background:
+                                sum?.commercialRelevance === "hoch"
+                                  ? "#fef2f2"
+                                  : sum?.commercialRelevance === "mittel"
+                                    ? "#fffbeb"
+                                    : "#f0fdf4",
+                              color:
+                                sum?.commercialRelevance === "hoch"
+                                  ? "#b91c1c"
+                                  : sum?.commercialRelevance === "mittel"
+                                    ? "#a36b00"
+                                    : "#15803d",
+                            }}
+                          >
+                            {relevanceLabel}
+                          </span>
+                        )}
+                      </div>
+                      {sum?.detectionReasonShort != null && sum.detectionReasonShort !== "" && (
+                        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>{sanitize(sum.detectionReasonShort)}</div>
+                      )}
+                      {sum?.procurementMeaning != null && sum.procurementMeaning !== "" && (
+                        <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.5, marginBottom: 10 }}>
+                          {sanitize(sum.procurementMeaning)}
+                        </div>
+                      )}
+                      <div style={{ fontWeight: 600, fontSize: 12, color: "#1e40af", marginBottom: 10 }}>
+                        Empfohlene Aktion: {actionLabel}
+                      </div>
+                      {(sum?.suggestedQuestion != null && sum.suggestedQuestion !== "") ||
+                      (sum?.suggestedOfferNote != null && sum.suggestedOfferNote !== "") ? (
+                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
+                          {sum?.suggestedQuestion != null && sum.suggestedQuestion !== "" && (
+                            <div style={{ fontSize: 12, color: "#475569", marginBottom: 6, paddingLeft: 8, borderLeft: "3px solid #94a3b8" }}>
+                              <span style={{ fontWeight: 600, color: "#64748b" }}>Rückfrage: </span>
+                              {sanitize(sum.suggestedQuestion)}
+                            </div>
+                          )}
+                          {sum?.suggestedOfferNote != null && sum.suggestedOfferNote !== "" && (
+                            <div style={{ fontSize: 12, color: "#475569", paddingLeft: 8, borderLeft: "3px solid #94a3b8" }}>
+                              <span style={{ fontWeight: 600, color: "#64748b" }}>Angebotsklarstellung: </span>
+                              {sanitize(sum.suggestedOfferNote)}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              debugEntries.filter((e) => systems.includes(e?.label ?? "")).length > 0 && (
+                <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5 }}>
+                  {debugEntries.filter((e) => systems.includes(e?.label ?? "")).map((e, i) => (
+                    <div key={i} style={{ marginBottom: 6, padding: "6px 8px", background: "#f1f5f9", borderRadius: 6 }}>
+                      <span style={{ fontWeight: 600, color: "#334155" }}>{sanitize(e?.label ?? "")}</span>
+                      {e?.detectionConfidenceLabel != null && e.detectionConfidenceLabel !== "" && (
+                        <span style={{ marginLeft: 6, color: "#64748b" }}>· Konfidenz: {sanitize(e.detectionConfidenceLabel)}</span>
+                      )}
+                      {e?.detectionReasonShort != null && e.detectionReasonShort !== "" && (
+                        <div style={{ marginTop: 4, color: "#475569" }}>{sanitize(e.detectionReasonShort)}</div>
+                      )}
+                      {e?.recommendedHandling != null && e.recommendedHandling !== "" && (
+                        <div style={{ marginTop: 2, fontWeight: 600, color: "#1e40af" }}>Empfohlen: {sanitize(e.recommendedHandling)}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+          </>
+        ) : (
+          <span style={{ fontSize: 13, color: "#64748b" }}>Keine Systeme erkannt</span>
+        )}
+      </div>
+
+      {hasQuerschnitt && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600, marginBottom: 6 }}>Querschnittsthemen</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: hasQuerschnittSummaries ? 8 : 0 }}>
+            {querschnitt.map((name, i) => (
+              <span
+                key={`q-${name}-${i}`}
+                style={{
+                  display: "inline-block",
+                  padding: "4px 10px",
+                  borderRadius: 9999,
+                  background: "#f1f5f9",
+                  color: "#64748b",
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
+              >
+                {sanitize(name)}
+              </span>
+            ))}
+          </div>
+          {hasQuerschnittSummaries && (
+            <div style={{ display: "grid", gap: 8 }}>
+              {summariesForQuerschnitt.map((sum, i) => (
+                <div key={i} style={{ padding: 8, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+                  <div style={{ fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 4 }}>{sanitize(sum?.system ?? "")}</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 2 }}>{sanitize(sum?.overallAssessmentShort ?? "")}</div>
+                  {(sum?.findingCount ?? 0) > 0 && (
+                    <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                      {sum.findingCount} Findings · Empfohlen: {sanitize(sum?.recommendedHandling ?? "")}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ marginTop: 20 }}>
+        <button
+          type="button"
+          onClick={() => setFindingsExpanded((v) => !v)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            color: "#64748b",
+            fontWeight: 600,
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: "4px 0",
+          }}
+        >
+          {findingsExpanded ? "Details ausblenden" : "Details anzeigen"}
+          <span style={{ fontSize: 10 }}>{findingsExpanded ? " ▲" : " ▼"}</span>
+        </button>
+        {findingsExpanded && (
+          <div style={{ marginTop: 8 }}>
+            {hasFindings ? (
+              <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 6, fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+                {findings.map((f, i) => {
+                  const style = getSystemlogikSeverityStyle(f?.severity);
+                  return (
+                    <li
+                      key={i}
+                      style={{
+                        listStyleType: "disc",
+                        ...(style.background && { padding: "4px 6px", borderRadius: 4, background: style.background }),
+                      }}
+                    >
+                      <span style={{ fontWeight: 600, color: "#475569" }}>{sanitize(f?.system ?? "")}</span>
+                      {" — "}
+                      <span style={{ color: style.color, fontWeight: style.fontWeight }}>
+                        {getSystemlogikSeverityLabel(f?.severity)}
+                      </span>
+                      <div style={{ marginTop: 2, color: "#64748b" }}>{sanitize(f?.message ?? "")}</div>
+                      {(f?.reasoningShort != null && f.reasoningShort !== "") && (
+                        <div style={{ marginTop: 2, fontSize: 11, color: "#94a3b8" }}>{sanitize(f.reasoningShort)}</div>
+                      )}
+                      {(f?.recommendedHandling != null && f.recommendedHandling !== "") && (
+                        <div style={{ marginTop: 2, fontWeight: 600, fontSize: 11, color: "#1e40af" }}>Empfohlen: {sanitize(f.recommendedHandling)}</div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <span style={{ fontSize: 12, color: "#94a3b8" }}>Keine systemlogischen Auffälligkeiten erkannt</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {showDebug && (
+        <div style={{ marginTop: 12, padding: 10, background: "#f1f5f9", borderRadius: 8, fontSize: 11, color: "#475569" }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Debug Erkennung</div>
+          {debugEntries.map((e, i) => (
+            <div key={i} style={{ marginBottom: 6 }}>
+              <span style={{ fontWeight: 600 }}>{e?.label ?? e?.systemKey ?? "—"}</span>
+              {" · "}
+              <span>Treffer: {e?.detectionHitCount ?? 0}</span>
+              {" · "}
+              <span>Quelle: {e?.detectionSource ?? "—"}</span>
+              {e?.detectionReason != null && e.detectionReason !== "" && (
+                <span> · {e.detectionReason}</span>
+              )}
+              {Array.isArray(e?.matchedStrongTerms) && e.matchedStrongTerms.length > 0 && (
+                <div style={{ marginTop: 2, paddingLeft: 8 }}>Stark: {e.matchedStrongTerms.slice(0, 6).join(", ")}{e.matchedStrongTerms.length > 6 ? "…" : ""}</div>
+              )}
+              {((Array.isArray(e?.matchedWeakTerms) && e.matchedWeakTerms.length > 0) || (Array.isArray(e?.matchedAbbreviationTerms) && e.matchedAbbreviationTerms.length > 0)) && (
+                <div style={{ marginTop: 2, paddingLeft: 8 }}>
+                  {Array.isArray(e?.matchedWeakTerms) && e.matchedWeakTerms.length > 0 && (
+                    <span>Verstärker: {e.matchedWeakTerms.slice(0, 4).join(", ")}{e.matchedWeakTerms.length > 4 ? "…" : ""}</span>
+                  )}
+                  {Array.isArray(e?.matchedWeakTerms) && e.matchedWeakTerms.length > 0 && Array.isArray(e?.matchedAbbreviationTerms) && e.matchedAbbreviationTerms.length > 0 && " · "}
+                  {Array.isArray(e?.matchedAbbreviationTerms) && e.matchedAbbreviationTerms.length > 0 && (
+                    <span>Abk.: {e.matchedAbbreviationTerms.join(", ")}</span>
+                  )}
+                </div>
+              )}
+              {Array.isArray(e?.matchedDetectionTerms) && e.matchedDetectionTerms.length > 0 && (e?.matchedStrongTerms?.length === 0 && e?.matchedWeakTerms?.length === 0 && e?.matchedAbbreviationTerms?.length === 0) && (
+                <div style={{ marginTop: 2, paddingLeft: 8 }}>Begriffe: {e.matchedDetectionTerms.slice(0, 8).join(", ")}{e.matchedDetectionTerms.length > 8 ? "…" : ""}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 type Props = {
   /** Ergebnis der on-demand Nachtragsanalyse (Strang B). null = noch nicht ermittelt. */
   analysis: NachtragspotenzialAnalysisResult | null;
@@ -767,43 +1269,52 @@ export function NachtragspotenzialBlock({
   isExpertMode,
   customerRoute = false,
 }: Props) {
+  const [systemOpen, setSystemOpen] = useState(false);
   const cardBorder = customerRoute ? "1px solid #e2e8f0" : "1px solid #e5e5e5";
   const cardBg = customerRoute ? "#ffffff" : "#fff";
 
   return (
-    <div style={{ border: cardBorder, borderRadius: 14, padding: 16, background: cardBg }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>NACHTRAGSPOTENZIAL</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {isExpertMode && (
-            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 700 }}>
-              <input
-                type="checkbox"
-                checked={useChangePotentialLlm}
-                onChange={(e) => onUseChangePotentialLlmChange(e.target.checked)}
-              />
-              KI‑Veredelung aktivieren
-            </label>
-          )}
-          <button
-            onClick={onGenerate}
-            disabled={loading}
-            style={{
-              padding: "10px 16px",
-              borderRadius: 12,
-              border: "1px solid #333",
-              background: loading ? "#666" : "#111",
-              color: "#fff",
-              fontWeight: 800,
-              cursor: loading ? "wait" : "pointer",
-              opacity: loading ? 0.9 : 1,
-            }}
-          >
-            {loading
-              ? DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmittelnLoading
-              : DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmitteln}
-          </button>
-        </div>
+    <div style={{ border: cardBorder, borderRadius: 14, padding: 16, background: cardBg, marginTop: 24 }}>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 16,
+          rowGap: 12,
+          marginBottom: 24,
+        }}
+      >
+        <div style={{ fontSize: 14, color: "#334155", fontWeight: 600 }}>Nachtragspotenzial</div>
+        {isExpertMode && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#475569", fontWeight: 500 }}>
+            <input
+              type="checkbox"
+              checked={useChangePotentialLlm}
+              onChange={(e) => onUseChangePotentialLlmChange(e.target.checked)}
+            />
+            KI‑Veredelung aktivieren
+          </label>
+        )}
+        <button
+          onClick={onGenerate}
+          disabled={loading}
+          style={{
+            padding: "8px 14px",
+            borderRadius: 8,
+            border: "1px solid #64748b",
+            background: loading ? "#94a3b8" : "#334155",
+            color: "#fff",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: loading ? "wait" : "pointer",
+            opacity: loading ? 0.9 : 1,
+          }}
+        >
+          {loading
+            ? DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmittelnLoading
+            : DEFAULT_TEXTS_CONFIG.customerUI.buttonLabels.nachtragspotenzialErmitteln}
+        </button>
       </div>
 
       {loading && (
@@ -827,6 +1338,17 @@ export function NachtragspotenzialBlock({
 
       {!loading && analysis && (
         <>
+          <NachtragExecutivePanel analysis={analysis} sanitize={sanitizeForDisplay} />
+
+          {SHOW_DEBUG_UI && (
+            <div style={{ marginTop: 8, fontSize: 11, color: "#94a3b8" }}>
+              [Debug] systemLogic: {analysis.systemLogic != null ? "vorhanden" : "fehlt"}
+              {analysis.systemLogic != null && (
+                <> · Systeme: {analysis.systemLogic.systemsDetected?.length ?? 0} · Findings: {analysis.systemLogic.findings?.length ?? 0}</>
+              )}
+            </div>
+          )}
+
           {/* Klare Statusanzeige: KI-Veredelung aktiv vs. angefordert aber nicht ausgeführt */}
           {analysis.debug && (
             <div style={{ marginTop: 12, fontSize: 12 }}>
@@ -856,7 +1378,7 @@ export function NachtragspotenzialBlock({
             </div>
           )}
 
-          {isExpertMode && analysis.debug && (
+          {SHOW_DEBUG_UI && isExpertMode && analysis.debug && (
             <>
               <div style={{ marginTop: 14, color: "#666", fontSize: 12, fontWeight: 700 }}>
                 Regeln: {analysis.debug.ruleBasedCount} • Legacy-KI (Debug): {analysis.debug.llmCount} • Nach Bereinigung:{" "}
@@ -955,6 +1477,40 @@ export function NachtragspotenzialBlock({
               isExpertMode={isExpertMode}
               sanitize={sanitizeForDisplay}
             />
+          )}
+
+          {analysis?.systemLogic != null && (
+            <div style={{ marginTop: 24 }}>
+              <button
+                type="button"
+                onClick={() => setSystemOpen((v) => !v)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  width: "100%",
+                  padding: "8px 0",
+                  background: "none",
+                  border: "none",
+                  borderBottom: "1px solid #e2e8f0",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  color: "#334155",
+                  fontSize: 14,
+                  textAlign: "left",
+                }}
+              >
+                <span>Systemanalyse</span>
+                <span style={{ fontSize: 12, color: "#64748b" }}>{systemOpen ? "▼" : "▶"}</span>
+              </button>
+              {systemOpen && (
+                <SystemlogikSection
+                  systemLogic={analysis.systemLogic}
+                  sanitize={sanitizeForDisplay}
+                  isExpertMode={isExpertMode}
+                />
+              )}
+            </div>
           )}
 
           {(() => {

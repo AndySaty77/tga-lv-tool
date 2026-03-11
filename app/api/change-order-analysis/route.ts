@@ -43,6 +43,9 @@ export async function POST(req: Request) {
     if (result.offerStrategySummary != null) {
       payload.offerStrategySummary = result.offerStrategySummary;
     }
+    if (result.systemLogic != null) {
+      payload.systemLogic = result.systemLogic;
+    }
     return NextResponse.json(payload);
   } catch (e: unknown) {
     return NextResponse.json(

@@ -17,6 +17,7 @@ import { enrichChangePotentialWithCommercialStrategy } from "./changePotentialCo
 import { buildNegotiationClusters } from "./changePotentialNegotiationClusters";
 import { deriveCommercialActionsFromChangePotential } from "./changePotentialCommercialActions";
 import { buildOfferStrategySummary } from "./offerStrategySummary";
+import { runSystemLogicEngine } from "./system-logic";
 export type { ChangePotentialSummary } from "./changePotentialModel";
 export type { OfferStrategySummary } from "./changePotentialModel";
 export type { CommercialActionsFromChangePotential } from "./changePotentialCommercialActions";
@@ -475,6 +476,8 @@ export type ChangeOrderResult = {
   commercialActionsFromChangePotential?: import("./changePotentialCommercialActions").CommercialActionsFromChangePotential;
   /** Management Summary + Strategievarianten auf Dokumentebene (KI, nur auf Basis bestehender CP-Ergebnisse). */
   offerStrategySummary?: import("./changePotentialModel").OfferStrategySummary;
+  /** Systemlogik-Lückenanalyse (LV-Text); fail-safe: nur gesetzt wenn Engine ohne Fehler lief. */
+  systemLogic?: import("./system-logic").SystemLogicResult;
 }
 
 /** Intern: neues Kernmodell (ChangePotentialSummary) für spätere Erweiterungen/API. */
@@ -645,6 +648,16 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
     }
   }
 
+  let systemLogicResult: import("./system-logic").SystemLogicResult | undefined;
+  try {
+    const vortext = input.vortext ?? "";
+    const positionsText = input.lvPositions ?? "";
+    const combinedText = [vortext, positionsText].filter(Boolean).join("\n").trim() || vortext + " " + positionsText;
+    systemLogicResult = runSystemLogicEngine({ vortext, positionsText, combinedText });
+  } catch (_e) {
+    // fail-safe: bei Fehler keine systemLogic setzen
+  }
+
   return {
     opportunities: deduped,
     byCluster,
@@ -677,5 +690,6 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
     changePotentialSummary: summary,
     commercialActionsFromChangePotential,
     ...(offerStrategySummary && { offerStrategySummary }),
+    ...(systemLogicResult != null && { systemLogic: systemLogicResult }),
   };
 }
