@@ -2,40 +2,41 @@
 
 import React from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { MarketingPageShell } from "@/components/marketing/MarketingPageShell";
 import { MarketingSection } from "@/components/marketing/MarketingSection";
 import { Container } from "@/components/shared/Container";
 import { marketingTheme as T } from "@/components/marketing/MarketingTheme";
 import { supabase } from "@/lib/supabaseClient";
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-
-  const redirectTo = searchParams.get("redirectTo") || "/app";
+  const [info, setInfo] = React.useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setInfo(null);
     setLoading(true);
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { error: signUpError } = await supabase.auth.signUp({
         email,
         password,
       });
-      if (signInError) {
-        setError(signInError.message);
+      if (signUpError) {
+        setError(signUpError.message);
         return;
       }
-      // Vollständiger Reload stellt sicher, dass Cookies/Session auch serverseitig greifen
-      window.location.href = redirectTo;
+      setInfo("Registrierung erfolgreich. Bitte E-Mail prüfen und anschließend einloggen.");
+      setTimeout(() => {
+        router.replace("/login");
+      }, 1500);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Unbekannter Fehler beim Login.");
+      setError(err instanceof Error ? err.message : "Unbekannter Fehler bei der Registrierung.");
     } finally {
       setLoading(false);
     }
@@ -45,8 +46,8 @@ export default function LoginPage() {
     <MarketingPageShell>
       <MarketingSection
         eyebrow="SaaS"
-        title="Login / Registrierung (Platzhalter)"
-        lead="Dieser Bereich ist vorbereitet, aber noch nicht implementiert. Die produktive Analyse ist weiterhin ohne Login unter /analyse verfügbar."
+        title="Registrieren"
+        lead="Account für den geschützten /app-Bereich anlegen. Die produktive Analyse bleibt weiterhin ohne Login unter /analyse verfügbar."
       >
         <Container>
           <div style={{ border: `1px solid ${T.border}`, borderRadius: 18, padding: 18, background: "rgba(255,255,255,0.03)", maxWidth: 480 }}>
@@ -96,6 +97,11 @@ export default function LoginPage() {
                   {error}
                 </div>
               )}
+              {info && (
+                <div style={{ marginBottom: 12, fontSize: 12, color: T.text }}>
+                  {info}
+                </div>
+              )}
               <button
                 type="submit"
                 disabled={loading}
@@ -113,13 +119,13 @@ export default function LoginPage() {
                   marginBottom: 10,
                 }}
               >
-                {loading ? "Einloggen…" : "Login"}
+                {loading ? "Registriere…" : "Registrieren"}
               </button>
             </form>
             <div style={{ marginTop: 8, fontSize: 12, color: T.muted }}>
-              Noch kein Account?{" "}
-              <Link href="/register" style={{ color: T.text, fontWeight: 600 }}>
-                Jetzt registrieren
+              Bereits ein Account?{" "}
+              <Link href="/login" style={{ color: T.text, fontWeight: 600 }}>
+                Zum Login
               </Link>
             </div>
             <div style={{ marginTop: 12, fontSize: 12, color: T.muted }}>

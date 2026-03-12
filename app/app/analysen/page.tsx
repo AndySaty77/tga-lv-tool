@@ -1,23 +1,55 @@
+"use client";
+
 import React from "react";
 import Link from "next/link";
 import { appTheme as T } from "@/components/app/appTheme";
 import { StatusBadge } from "@/components/shared/statusBadge";
 
-export const metadata = {
-  title: "Analysen – TGA LV Tool",
-  description: "Übersicht aller Analysen.",
+type AnalyseRun = {
+  id: string;
+  created_at: string;
+  project_name: string | null;
+  file_name: string | null;
+  score: number | null;
+  status: string | null;
 };
 
-/** Mock: Analysenliste (später durch echte Daten ersetzen) */
-const MOCK_ANALYSEN = [
-  { id: "1", projektname: "Bürogebäude Musterstadt – TGA", datum: "2025-03-10", score: 62, status: "Abgeschlossen" as const },
-  { id: "2", projektname: "Klinik Nord – HLSE", datum: "2025-03-08", score: 78, status: "Abgeschlossen" as const },
-  { id: "3", projektname: "Schulbau Projekt Alpha", datum: "2025-03-05", score: 45, status: "In Analyse" as const },
-  { id: "4", projektname: "Industriehalle Lüftung", datum: "2025-03-02", score: 71, status: "Abgeschlossen" as const },
-  { id: "5", projektname: "Sanierung Bestand Ost", datum: "2025-02-28", score: 0, status: "Fehler" as const },
-];
-
 export default function AppAnalysenPage() {
+  const [items, setItems] = React.useState<AnalyseRun[] | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/analyse/list");
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.error || "Laden der Analysen fehlgeschlagen");
+        }
+        if (!cancelled) {
+          setItems((data?.items ?? []) as AnalyseRun[]);
+        }
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Unbekannter Fehler");
+          setItems([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const hasItems = (items?.length ?? 0) > 0;
+
   return (
     <>
       <div style={{ marginBottom: T.space.xl }}>
@@ -37,49 +69,61 @@ export default function AppAnalysenPage() {
           overflow: "hidden",
         }}
       >
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", minWidth: 640, borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>Projektname</th>
-                <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>Datum</th>
-                <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>Score</th>
-                <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>Status</th>
-                <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {MOCK_ANALYSEN.map((row) => (
-                <tr key={row.id} className="app-table-row" style={{ borderBottom: `1px solid ${T.border}` }}>
-                  <td style={{ padding: T.space.md, color: T.text }}>{row.projektname}</td>
-                  <td style={{ padding: T.space.md, color: T.muted }}>{row.datum}</td>
-                  <td style={{ padding: T.space.md, textAlign: "right" }}>
-                    <span style={{ color: T.accent, fontWeight: 700, fontSize: 14 }}>{row.score}</span>
-                  </td>
-                  <td style={{ padding: T.space.md }}>
-                    <StatusBadge status={row.status} />
-                  </td>
-                  <td style={{ padding: T.space.md, textAlign: "right" }}>
-                    <Link
-                      href={`/app/analysen/${row.id}`}
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: T.accent,
-                        textDecoration: "none",
-                      }}
-                    >
-                      Ergebnis ansehen
-                    </Link>
-                  </td>
+        {loading && (
+          <div style={{ padding: T.space.lg, fontSize: 13, color: T.muted }}>Lade Analysen…</div>
+        )}
+        {error && !loading && (
+          <div style={{ padding: T.space.lg, fontSize: 13, color: T.danger }}>Fehler: {error}</div>
+        )}
+        {!loading && !error && !hasItems && (
+          <div style={{ padding: T.space.lg, fontSize: 13, color: T.muted }}>Noch keine Analysen gespeichert.</div>
+        )}
+        {hasItems && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", minWidth: 640, borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>Projektname</th>
+                  <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>Datum</th>
+                  <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>Score</th>
+                  <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>Status</th>
+                  <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint }}></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p style={{ margin: T.space.md, fontSize: 12, color: T.faint }}>
-          Mockdaten. Später: echte Analysen aus Backend/DB anbinden.
-        </p>
+              </thead>
+              <tbody>
+                {(items ?? []).map((row) => (
+                  <tr key={row.id} className="app-table-row" style={{ borderBottom: `1px solid ${T.border}` }}>
+                    <td style={{ padding: T.space.md, color: T.text }}>{row.project_name ?? row.file_name ?? "Unbenannt"}</td>
+                    <td style={{ padding: T.space.md, color: T.muted }}>
+                      {row.created_at ? new Date(row.created_at).toLocaleString("de-DE") : "—"}
+                    </td>
+                    <td style={{ padding: T.space.md, textAlign: "right" }}>
+                      <span style={{ color: T.accent, fontWeight: 700, fontSize: 14 }}>
+                        {row.score != null ? row.score : "—"}
+                      </span>
+                    </td>
+                    <td style={{ padding: T.space.md }}>
+                      <StatusBadge status={row.status ?? "Abgeschlossen"} />
+                    </td>
+                    <td style={{ padding: T.space.md, textAlign: "right" }}>
+                      <Link
+                        href={`/app/analysen/${row.id}`}
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: T.accent,
+                          textDecoration: "none",
+                        }}
+                      >
+                        Ergebnis ansehen
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </>
   );

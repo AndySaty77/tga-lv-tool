@@ -1,0 +1,35 @@
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { createMiddlewareClient } from "@supabase/ssr";
+
+export async function middleware(req: NextRequest) {
+  const res = NextResponse.next();
+
+  const supabase = createMiddlewareClient({
+    req,
+    res,
+    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    supabaseKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  });
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const url = new URL(req.url);
+  const protectedRoots = ["/app", "/app/analysen", "/app/settings", "/app/billing"];
+  const isProtected = protectedRoots.some((base) => url.pathname === base || url.pathname.startsWith(base + "/"));
+
+  if (isProtected && !session) {
+    const redirectUrl = new URL("/login", req.url);
+    redirectUrl.searchParams.set("redirectTo", url.pathname + url.search);
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  return res;
+}
+
+export const config = {
+  matcher: ["/app/:path*"],
+};
+

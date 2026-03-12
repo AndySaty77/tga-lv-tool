@@ -556,6 +556,9 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
   const [positionenCurrentHitIndex, setPositionenCurrentHitIndex] = useState(0);
 
   const totalAmp = traffic(clamp0_100(result?.total ?? 0));
+  const projectNameForCustomer = (keyFacts as Record<string, string> | undefined)?.objektbezeichnung
+    ?? (keyFacts as Record<string, string> | undefined)?.projektbezeichnung
+    ?? null;
 
   const resetVortext = () => {
     setVortextError(null);
@@ -734,11 +737,13 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
     groupRemarks?: string[];
   };
 
+  type VortextResult = { keyFacts: Record<string, string>; riskClauses: unknown[]; keyFactsDebug: object | null };
+
   const analyzeVortextLLM = async (
     vortext: string,
     vortextSource?: VortextSource,
     options?: { normalized?: NormalizedPayload; formatDetected?: string }
-  ) => {
+  ): Promise<VortextResult | null> => {
     setVortextLoading(true);
     setVortextError(null);
     setRiskClauses([]);
@@ -768,44 +773,46 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
         setRiskClauses([]);
         setKeyFacts({});
         setKeyFactConfidence({});
-      } else {
-        const clauses = Array.isArray(vData?.riskClauses) ? vData.riskClauses : [];
-        setRiskClauses(clauses);
-
-        const facts = vData?.keyFacts && typeof vData.keyFacts === "object" ? vData.keyFacts : {};
-        setKeyFacts(facts);
-
-        const conf =
-          vData?.keyFactConfidence && typeof vData.keyFactConfidence === "object" ? vData.keyFactConfidence : {};
-        setKeyFactConfidence(conf);
-
-        setKeyFactsDebug(
-          vData?.keyFactsDebug && typeof vData.keyFactsDebug === "object"
-            ? {
-                keyFactsSourceMode: vData.keyFactsDebug.keyFactsSourceMode,
-                llmFallbackUsed: vData.keyFactsDebug.llmFallbackUsed,
-                llmFieldsRequested: vData.keyFactsDebug.llmFieldsRequested,
-                llmFieldsAccepted: vData.keyFactsDebug.llmFieldsAccepted,
-                llmFieldsRejected: vData.keyFactsDebug.llmFieldsRejected,
-                llmRawResponse: vData.keyFactsDebug.llmRawResponse,
-                llmParsedResponse: vData.keyFactsDebug.llmParsedResponse,
-                llmFallbackDebugPerField: vData.keyFactsDebug.llmFallbackDebugPerField,
-                mergeWinnerPerField: vData.keyFactsDebug.mergeWinnerPerField,
-                overwrittenByLegacy: vData.keyFactsDebug.overwrittenByLegacy,
-                previousValueBeforeLegacyMerge: vData.keyFactsDebug.previousValueBeforeLegacyMerge,
-                keyFactsWithSource: Array.isArray(vData.keyFactsDebug.keyFactsWithSource)
-                  ? vData.keyFactsDebug.keyFactsWithSource
-                  : undefined,
-              }
-            : null
-        );
+        return null;
       }
+      const clauses = Array.isArray(vData?.riskClauses) ? vData.riskClauses : [];
+      setRiskClauses(clauses);
+
+      const facts = vData?.keyFacts && typeof vData.keyFacts === "object" ? vData.keyFacts : {};
+      setKeyFacts(facts);
+
+      const conf =
+        vData?.keyFactConfidence && typeof vData.keyFactConfidence === "object" ? vData.keyFactConfidence : {};
+      setKeyFactConfidence(conf);
+
+      const debug =
+        vData?.keyFactsDebug && typeof vData.keyFactsDebug === "object"
+          ? {
+              keyFactsSourceMode: vData.keyFactsDebug.keyFactsSourceMode,
+              llmFallbackUsed: vData.keyFactsDebug.llmFallbackUsed,
+              llmFieldsRequested: vData.keyFactsDebug.llmFieldsRequested,
+              llmFieldsAccepted: vData.keyFactsDebug.llmFieldsAccepted,
+              llmFieldsRejected: vData.keyFactsDebug.llmFieldsRejected,
+              llmRawResponse: vData.keyFactsDebug.llmRawResponse,
+              llmParsedResponse: vData.keyFactsDebug.llmParsedResponse,
+              llmFallbackDebugPerField: vData.keyFactsDebug.llmFallbackDebugPerField,
+              mergeWinnerPerField: vData.keyFactsDebug.mergeWinnerPerField,
+              overwrittenByLegacy: vData.keyFactsDebug.overwrittenByLegacy,
+              previousValueBeforeLegacyMerge: vData.keyFactsDebug.previousValueBeforeLegacyMerge,
+              keyFactsWithSource: Array.isArray(vData.keyFactsDebug.keyFactsWithSource)
+                ? vData.keyFactsDebug.keyFactsWithSource
+                : undefined,
+            }
+          : null;
+      setKeyFactsDebug(debug);
+      return { keyFacts: facts, riskClauses: clauses, keyFactsDebug: debug };
     } catch (e: any) {
       setVortextError(e?.message || "Vortext Analyse fehlgeschlagen");
       setRiskClauses([]);
       setKeyFacts({});
       setKeyFactConfidence({});
       setKeyFactsDebug(null);
+      return null;
     } finally {
       setVortextLoading(false);
     }
@@ -892,10 +899,79 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           : undefined;
       const isGaebXml = preview?.debug?.formatDetected === "gaeb-xml" || (preview?.normalized != null && Array.isArray((preview.normalized as any)?.remarks));
 
+      let vortextResult: VortextResult | null = null;
       if (vortextForRisk.trim().length > 0 || normalizedPayload) {
-        await analyzeVortextLLM(vortextForRisk, vortextSource, isGaebXml && normalizedPayload ? { normalized: normalizedPayload, formatDetected: "gaeb-xml" } : undefined);
+        vortextResult = await analyzeVortextLLM(vortextForRisk, vortextSource, isGaebXml && normalizedPayload ? { normalized: normalizedPayload, formatDetected: "gaeb-xml" } : undefined);
       } else {
         setVortextError("Vortext ist leer (Split/Extraktion hat nichts geliefert).");
+      }
+
+      // Persistenz erst nach Score + Vortext (keyFacts), damit project_name und resultJson möglichst vollständig sind
+      if (props.customerRoute && data) {
+        try {
+          const kf = vortextResult?.keyFacts ?? {};
+          const nameKeysInOrder = [
+            "objektbezeichnung",
+            "projektbezeichnung",
+            "bauvorhaben",
+            "projekt",
+            "objekt",
+            "titel",
+            "lvTitel",
+            "bezeichnung",
+          ];
+          let nameFromKeyFacts: string | null = null;
+          for (const key of nameKeysInOrder) {
+            const raw = (kf as Record<string, unknown>)[key];
+            if (typeof raw === "string") {
+              const trimmed = raw.trim();
+              if (trimmed) {
+                nameFromKeyFacts = trimmed;
+                break;
+              }
+            }
+          }
+
+          const projectName =
+            nameFromKeyFacts ??
+            (typeof fileMeta?.name === "string" && fileMeta.name.trim() ? fileMeta.name.trim() : "Unbenannte Analyse");
+
+          // Minimaler Debug-Log für Analyse-Persistenz (kann nach Stabilisierung entfernt werden)
+          // eslint-disable-next-line no-console
+          console.log("[analyse/save debug]", {
+            keyFactsKeys: Object.keys(kf),
+            chosenProjectName: projectName,
+            fileMetaName: fileMeta?.name,
+          });
+          const execSummary = (changeOrderAnalysis as ChangeOrderResult | null)?.offerStrategySummary?.executiveSummary;
+          const payload = {
+            projectName,
+            fileName: fileMeta?.name ?? null,
+            score: data.total,
+            status: "completed",
+            managementSummary: typeof execSummary === "string" && execSummary.trim() ? execSummary : null,
+            resultJson: {
+              scoreResult: data,
+              changeOrderAnalysis,
+              clarificationQuestions,
+              offerAssumptions,
+              keyFacts: vortextResult?.keyFacts ?? {},
+              riskClauses: vortextResult?.riskClauses ?? [],
+              keyFactsDebug: vortextResult?.keyFactsDebug ?? null,
+              gaebPreview,
+              split,
+            },
+          };
+          void fetch("/api/analyse/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }).catch(() => {
+            // Persistenz-Fehler bewusst nicht in die Analyse-UI hochreichen
+          });
+        } catch {
+          // Fehler bei der Vorbereitung der Persistenz ignorieren
+        }
       }
     } catch (e: any) {
       setError(e?.message ?? "Unbekannter Fehler");

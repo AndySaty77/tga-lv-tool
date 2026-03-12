@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { appTheme as T } from "@/components/app/appTheme";
 
 export const metadata = {
@@ -53,6 +54,30 @@ export default function AppSettingsPage() {
         <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
           Allgemeine App-Optionen (Benachrichtigungen, Standardansicht, Export-Optionen). Später ergänzen.
         </p>
+      </SettingsCard>
+
+      <SettingsCard title="Account">
+        <p style={{ margin: "0 0 8px", fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+          Du kannst dich hier aus dem geschützten Bereich abmelden.
+        </p>
+        <Link
+          href="/app/logout"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#fecaca",
+            textDecoration: "none",
+            padding: "6px 10px",
+            borderRadius: T.radiusSm,
+            border: `1px solid ${T.border}`,
+            background: "rgba(248,113,113,0.08)",
+          }}
+        >
+          Logout
+        </Link>
       </SettingsCard>
     </>
   );
