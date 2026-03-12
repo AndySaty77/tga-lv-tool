@@ -10,8 +10,8 @@ export default function Home() {
     <main
       style={{
         minHeight: "100vh",
-        background: "radial-gradient(1200px 700px at 20% 10%, rgba(96,165,250,0.35), transparent 55%), radial-gradient(900px 600px at 80% 0%, rgba(94,234,212,0.28), transparent 55%), #0b1220",
-        color: "rgba(255,255,255,0.92)",
+        background: T.bg,
+        color: T.text,
       }}
     >
       {/* Marketing-Navigation (öffentlich) */}
@@ -31,12 +31,8 @@ export default function Home() {
                   </span>
                 </div>
 
-                    <h1 style={{ margin: "16px 0 0", fontSize: 46, lineHeight: 1.05, fontWeight: 950, letterSpacing: "-0.04em" }}>
-                      LV prüfen wie ein{" "}
-                      <span style={{ background: `linear-gradient(90deg, ${T.brand}, ${T.brand2})`, WebkitBackgroundClip: "text", color: "transparent" }}>
-                        Analyse-Cockpit
-                      </span>
-                      .
+                    <h1 style={{ margin: "16px 0 0", fontSize: 46, lineHeight: 1.05, fontWeight: 950, letterSpacing: "-0.04em", color: T.text }}>
+                      LV prüfen wie ein <span style={{ color: T.brand }}>Profi</span>.
                     </h1>
                     <p style={{ margin: "14px 0 0", fontSize: 16, lineHeight: 1.75, color: T.muted, maxWidth: 780 }}>
                       Für TGA-Projekte zählt, was im LV steht – und was nicht. Dieses Tool strukturiert Risiken, erzeugt klare Rückfragen, liefert Angebotsklarstellungen und identifiziert
@@ -54,11 +50,11 @@ export default function Home() {
                           textDecoration: "none",
                           fontSize: 14,
                           fontWeight: 900,
-                          color: "#06121a",
+                          color: "#020617",
                           padding: "12px 16px",
                           borderRadius: 14,
-                          background: `linear-gradient(90deg, ${T.brand}, ${T.brand2})`,
-                          boxShadow: "0 18px 44px rgba(96,165,250,0.18)",
+                          background: T.brand,
+                          border: "1px solid transparent",
                         }}
                       >
                         Analyse starten
@@ -236,7 +232,7 @@ export default function Home() {
                     <div style={{ marginTop: 6, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>Analyse-UI und Admin bleiben technisch getrennt; diese Seite ist nur die öffentliche Produktdarstellung.</div>
                   </div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <a href="/analyse" style={{ textDecoration: "none", fontSize: 13, fontWeight: 900, color: "#06121a", padding: "10px 14px", borderRadius: 12, background: `linear-gradient(90deg, ${T.brand}, ${T.brand2})` }}>
+                    <a href="/analyse" style={{ textDecoration: "none", fontSize: 13, fontWeight: 900, color: "#020617", padding: "10px 14px", borderRadius: 12, background: T.brand, border: "1px solid transparent" }}>
                       Zur Analyse
                     </a>
                     <a href="/features" style={{ textDecoration: "none", fontSize: 13, fontWeight: 800, color: T.text, padding: "10px 14px", borderRadius: 12, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.03)" }}>

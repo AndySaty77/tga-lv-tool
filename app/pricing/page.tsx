@@ -32,15 +32,15 @@ function PriceCard({
       style={{
         borderRadius: 20,
         border: `1px solid ${T.border}`,
-        background: highlighted ? "linear-gradient(180deg, rgba(94,234,212,0.10), rgba(255,255,255,0.03))" : "rgba(255,255,255,0.03)",
+        background: highlighted ? "rgba(56,189,248,0.08)" : "rgba(255,255,255,0.03)",
         padding: 18,
-        boxShadow: "0 18px 50px rgba(0,0,0,0.28)",
+        boxShadow: "0 16px 40px rgba(15,23,42,0.65)",
       }}
     >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 950, color: T.text }}>{name}</div>
         {highlighted && (
-          <span style={{ fontSize: 12, fontWeight: 900, color: "#06121a", padding: "6px 10px", borderRadius: 999, background: `linear-gradient(90deg, ${T.brand}, ${T.brand2})` }}>
+          <span style={{ fontSize: 12, fontWeight: 900, color: "#020617", padding: "6px 10px", borderRadius: 999, background: T.brand }}>
             empfohlen
           </span>
         )}
@@ -62,10 +62,10 @@ function PriceCard({
             textDecoration: "none",
             fontSize: 13,
             fontWeight: 900,
-            color: highlighted ? "#06121a" : T.text,
+            color: highlighted ? "#020617" : T.text,
             padding: "10px 14px",
             borderRadius: 12,
-            background: highlighted ? `linear-gradient(90deg, ${T.brand}, ${T.brand2})` : "rgba(255,255,255,0.03)",
+            background: highlighted ? T.brand : "rgba(255,255,255,0.03)",
             border: highlighted ? "1px solid transparent" : `1px solid ${T.border}`,
           }}
         >

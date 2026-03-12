@@ -75,32 +75,6 @@ export function AppSidebar() {
           );
         })}
       </nav>
-
-      <div style={{ marginTop: "auto", paddingTop: T.space.lg, borderTop: `1px solid ${T.border}` }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: T.faint, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-          Analyse starten
-        </div>
-        <Link
-          href="/analyse"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: "100%",
-            padding: `${T.space.sm}px ${T.space.md}px`,
-            borderRadius: T.radiusSm,
-            fontSize: 13,
-            fontWeight: 700,
-            color: "#0a0e18",
-            background: T.accent,
-            border: "none",
-            textDecoration: "none",
-          }}
-          className="app-sidebar-analyse-btn"
-        >
-          Neue Analyse
-        </Link>
-      </div>
     </aside>
   );
 }

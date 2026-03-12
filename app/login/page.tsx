@@ -33,10 +33,11 @@ export default function LoginPage() {
                   textDecoration: "none",
                   fontSize: 13,
                   fontWeight: 900,
-                  color: "#06121a",
+                  color: "#020617",
                   padding: "10px 14px",
                   borderRadius: 12,
-                  background: `linear-gradient(90deg, ${T.brand}, ${T.brand2})`,
+                  background: T.brand,
+                  border: "1px solid transparent",
                 }}
               >
                 Zur Analyse →

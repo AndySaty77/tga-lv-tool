@@ -1,13 +1,16 @@
+import { appTheme as App } from "@/components/app/appTheme";
+
 export const marketingTheme = {
-  bg: "#0b1220",
-  surface: "#0f1a33",
-  card: "#0f1930",
-  border: "rgba(255,255,255,0.10)",
-  text: "rgba(255,255,255,0.92)",
-  muted: "rgba(255,255,255,0.70)",
-  faint: "rgba(255,255,255,0.55)",
-  brand: "#5EEAD4", // teal
-  brand2: "#60A5FA", // blue
-  danger: "#FCA5A5",
+  bg: App.bg,
+  surface: App.surface,
+  card: App.card,
+  border: App.border,
+  text: App.text,
+  muted: App.muted,
+  faint: App.faint,
+  // Akzentfarben an App anlehnen, aber sparsam nutzen
+  brand: App.accent,
+  brand2: "#7dd3fc",
+  danger: App.danger,
 };
 

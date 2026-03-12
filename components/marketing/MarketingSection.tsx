@@ -55,9 +55,9 @@ export function MarketingCard({
       style={{
         borderRadius: 18,
         border: `1px solid ${T.border}`,
-        background: "rgba(255,255,255,0.04)",
+        background: T.card,
         padding: 18,
-        boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
+        boxShadow: "0 14px 30px rgba(15,23,42,0.65)",
       }}
     >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>

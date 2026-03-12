@@ -75,11 +75,11 @@ export function MarketingNav({ active }: { active?: string }) {
               textDecoration: "none",
               fontSize: 13,
               fontWeight: 800,
-              color: "#06121a",
+              color: "#020617",
               padding: "10px 12px",
               borderRadius: 12,
-              background: `linear-gradient(90deg, ${T.brand}, ${T.brand2})`,
-              boxShadow: "0 10px 28px rgba(96,165,250,0.20)",
+              background: T.brand,
+              border: "1px solid transparent",
             }}
           >
             Zur Analyse
