@@ -4,6 +4,7 @@ import Link from "next/link";
 import React from "react";
 import { Container } from "@/components/shared/Container";
 import { marketingTheme as T } from "./MarketingTheme";
+import { useSessionClient } from "@/lib/auth/use-session-client";
 
 const linkStyle: React.CSSProperties = {
   color: T.muted,
@@ -16,7 +17,9 @@ const linkStyle: React.CSSProperties = {
 };
 
 export function MarketingNav({ active }: { active?: string }) {
+  const isLoggedIn = useSessionClient();
   const isActive = (href: string) => (active ? active === href : false);
+  const showZurApp = isLoggedIn === true;
 
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const [isMobile, setIsMobile] = React.useState(false);
@@ -58,6 +61,9 @@ export function MarketingNav({ active }: { active?: string }) {
   return (
     <div
       style={{
+        boxSizing: "border-box",
+        width: "100%",
+        maxWidth: "100%",
         position: "sticky",
         top: 0,
         zIndex: 10,
@@ -90,17 +96,31 @@ export function MarketingNav({ active }: { active?: string }) {
           </nav>
 
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, justifyContent: "flex-end", flexShrink: 1 }}>
-            <Link
-              href="/login"
-              style={{
-                ...linkStyle,
-                color: T.muted,
-                border: `1px solid ${T.border}`,
-                background: "transparent",
-              }}
-            >
-              Login
-            </Link>
+            {showZurApp ? (
+              <Link
+                href="/app"
+                style={{
+                  ...linkStyle,
+                  color: T.muted,
+                  border: `1px solid ${T.border}`,
+                  background: "transparent",
+                }}
+              >
+                Zur App
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                style={{
+                  ...linkStyle,
+                  color: T.muted,
+                  border: `1px solid ${T.border}`,
+                  background: "transparent",
+                }}
+              >
+                Login
+              </Link>
+            )}
             <Link
               href="/analyse"
               style={{
@@ -129,6 +149,7 @@ export function MarketingNav({ active }: { active?: string }) {
       >
         <Container
           style={{
+            boxSizing: "border-box",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -136,13 +157,13 @@ export function MarketingNav({ active }: { active?: string }) {
             minWidth: 0,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexShrink: 1 }}>
             <Link href="/" style={{ color: T.text, textDecoration: "none", fontWeight: 900, letterSpacing: "-0.02em", fontSize: 14 }} onClick={closeMenu}>
               TGA&nbsp;LV&nbsp;Tool
             </Link>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexShrink: 0 }}>
             <Link
               href="/analyse"
               style={{
@@ -215,20 +236,37 @@ export function MarketingNav({ active }: { active?: string }) {
 
                 <div style={{ height: 1, background: T.border, margin: "6px 0" }} />
 
-                <Link
-                  href="/login"
-                  style={{
-                    ...linkStyle,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "flex-start",
-                    border: `1px solid ${T.border}`,
-                    background: "transparent",
-                  }}
-                  onClick={closeMenu}
-                >
-                  Login
-                </Link>
+                {showZurApp ? (
+                  <Link
+                    href="/app"
+                    style={{
+                      ...linkStyle,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "flex-start",
+                      border: `1px solid ${T.border}`,
+                      background: "transparent",
+                    }}
+                    onClick={closeMenu}
+                  >
+                    Zur App
+                  </Link>
+                ) : (
+                  <Link
+                    href="/login"
+                    style={{
+                      ...linkStyle,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "flex-start",
+                      border: `1px solid ${T.border}`,
+                      background: "transparent",
+                    }}
+                    onClick={closeMenu}
+                  >
+                    Login
+                  </Link>
+                )}
                 <Link
                   href="/analyse"
                   style={{

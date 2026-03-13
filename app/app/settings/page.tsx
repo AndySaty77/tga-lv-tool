@@ -61,15 +61,42 @@ export default async function AppSettingsPage() {
 
       <SettingsCard title="Profil">
         {user ? (
-          <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.7 }}>
-            <div style={{ marginBottom: 4 }}>
-              <span style={{ fontWeight: 600, color: T.text }}>E-Mail: </span>
-              <span>{user.email}</span>
-            </div>
-            <div style={{ fontSize: 12, color: T.faint }}>
-              Konto-ID: <code style={{ fontSize: 11 }}>{user.id}</code>
-            </div>
-          </div>
+          (() => {
+            const meta: any = (user as any).user_metadata || {};
+            const firstName = typeof meta.first_name === "string" ? meta.first_name : undefined;
+            const lastName = typeof meta.last_name === "string" ? meta.last_name : undefined;
+            const company = typeof meta.company === "string" ? meta.company : undefined;
+
+            return (
+              <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.7 }}>
+                {firstName || lastName ? (
+                  <div style={{ marginBottom: 4 }}>
+                    <span style={{ fontWeight: 600, color: T.text }}>Name: </span>
+                    <span>
+                      {[firstName, lastName].filter(Boolean).join(" ")}
+                    </span>
+                  </div>
+                ) : null}
+                {company && (
+                  <div style={{ marginBottom: 4 }}>
+                    <span style={{ fontWeight: 600, color: T.text }}>Firma: </span>
+                    <span>{company}</span>
+                  </div>
+                )}
+                <div style={{ marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600, color: T.text }}>E-Mail: </span>
+                  <span>{user.email}</span>
+                </div>
+                <div style={{ marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600, color: T.text }}>Plan: </span>
+                  <span>{isPro ? "Pro" : "Free"}</span>
+                </div>
+                <div style={{ fontSize: 12, color: T.faint }}>
+                  Konto-ID: <code style={{ fontSize: 11 }}>{user.id}</code>
+                </div>
+              </div>
+            );
+          })()
         ) : (
           <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
             Keine Kontodaten verfügbar (nicht angemeldet).

@@ -47,7 +47,7 @@ export function AppSidebar() {
         </div>
       </div>
 
-      <nav aria-label="App-Navigation" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <nav aria-label="App-Navigation" style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
         {navItems.map(({ href, label, icon: Icon }) => {
           const isActive = pathname === href || (href !== "/app" && pathname.startsWith(href));
           return (
@@ -75,6 +75,23 @@ export function AppSidebar() {
           );
         })}
       </nav>
+      <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: T.space.sm, marginTop: T.space.sm }}>
+        <Link
+          href="/"
+          style={{
+            display: "block",
+            padding: `${T.space.sm}px ${T.space.md}px`,
+            borderRadius: T.radiusSm,
+            fontSize: 12,
+            fontWeight: 600,
+            color: T.faint,
+            textDecoration: "none",
+          }}
+          className="app-sidebar-link"
+        >
+          Zur Website
+        </Link>
+      </div>
     </aside>
   );
 }

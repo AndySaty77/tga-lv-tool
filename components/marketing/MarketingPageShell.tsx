@@ -13,6 +13,9 @@ export function MarketingPageShell({
   return (
     <main
       style={{
+        boxSizing: "border-box",
+        width: "100%",
+        maxWidth: "100%",
         minHeight: "100vh",
         background: T.bg,
         color: T.text,

@@ -11,49 +11,67 @@ export const metadata = {
   description: "Einfache Free- und Pro-Pläne für die LV-Analyse.",
 };
 
+type PlanDefinition = {
+  id: "free" | "pro" | "team";
+  name: string;
+  price: string;
+  priceSubline?: string;
+  description: string;
+  features: string[];
+  ctaLabel: string;
+  ctaHref: string;
+  featured?: boolean;
+  badge?: string;
+  isContactPlan?: boolean;
+};
+
 function PriceCard({
   name,
   price,
-  subtitle,
-  items,
+  priceSubline,
+  description,
+  features,
   ctaHref,
   ctaLabel,
-  highlighted,
-}: {
-  name: string;
-  price: string;
-  subtitle: string;
-  items: string[];
-  ctaHref: string;
-  ctaLabel: string;
-  highlighted?: boolean;
-}) {
+  featured,
+  badge,
+  isContactPlan,
+}: Omit<PlanDefinition, "id">) {
   return (
     <div
       style={{
+        display: "flex",
+        flexDirection: "column",
         borderRadius: 20,
         border: `1px solid ${T.border}`,
-        background: highlighted ? "rgba(56,189,248,0.08)" : "rgba(255,255,255,0.03)",
+        background: featured ? "rgba(56,189,248,0.08)" : "rgba(255,255,255,0.03)",
         padding: 18,
         boxShadow: "0 16px 40px rgba(15,23,42,0.65)",
       }}
     >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 950, color: T.text }}>{name}</div>
-        {highlighted && (
+        {badge && (
           <span style={{ fontSize: 12, fontWeight: 900, color: "#020617", padding: "6px 10px", borderRadius: 999, background: T.brand }}>
-            empfohlen
+            {badge}
           </span>
         )}
       </div>
-      <div style={{ marginTop: 10, fontSize: 34, fontWeight: 950, letterSpacing: "-0.03em" }}>{price}</div>
-      <div style={{ marginTop: 6, color: T.muted, fontSize: 13, lineHeight: 1.6 }}>{subtitle}</div>
+      <div style={{ marginTop: 10, fontSize: isContactPlan ? 16 : 34, fontWeight: 950, letterSpacing: isContactPlan ? "-0.01em" : "-0.03em" }}>
+        {price}
+      </div>
+      {priceSubline && (
+        <div style={{ marginTop: 4, color: T.muted, fontSize: 12, lineHeight: 1.5 }}>
+          {priceSubline}
+        </div>
+      )}
+      <div style={{ marginTop: 6, color: T.muted, fontSize: 13, lineHeight: 1.6 }}>{description}</div>
       <ul style={{ margin: "14px 0 0", paddingLeft: 18, color: T.muted, fontSize: 13, lineHeight: 1.85 }}>
-        {items.map((i) => (
-          <li key={i}>{i}</li>
+        {features.map((f) => (
+          <li key={f}>{f}</li>
         ))}
       </ul>
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: "auto", paddingTop: 16 }}>
         <Link
           href={ctaHref}
           style={{
@@ -63,11 +81,11 @@ function PriceCard({
             textDecoration: "none",
             fontSize: 13,
             fontWeight: 900,
-            color: highlighted ? "#020617" : T.text,
+            color: featured ? "#020617" : T.text,
             padding: "10px 14px",
             borderRadius: 12,
-            background: highlighted ? T.brand : "rgba(255,255,255,0.03)",
-            border: highlighted ? "1px solid transparent" : `1px solid ${T.border}`,
+            background: featured ? T.brand : "rgba(255,255,255,0.03)",
+            border: featured ? "1px solid transparent" : `1px solid ${T.border}`,
           }}
         >
           {ctaLabel}
@@ -80,12 +98,62 @@ function PriceCard({
 export default async function PricingPage() {
   const plan = await getUserPlan().catch(() => "free" as const);
 
+  const plans: PlanDefinition[] = [
+    {
+      id: "free",
+      name: "Free",
+      price: "0 €",
+      description: "Für den Einstieg und erste Tests im Arbeitsalltag.",
+      features: ["3 Analysen pro Monat", "Basis-Ergebnisansicht", "Basis-Risikoanalyse", "Management-Zusammenfassung", "Analyse-Archiv"],
+      ctaHref: "/register",
+      ctaLabel: "Kostenlos starten",
+      featured: false,
+    },
+    {
+      id: "pro",
+      name: "Pro",
+      price: "79 € / Monat",
+      description:
+        "Für Unternehmen, die Leistungsverzeichnisse regelmäßig fundiert prüfen, Risiken erkennen und Angebote sauber absichern wollen.",
+      features: [
+        "Unbegrenzte Analysen",
+        "Vollständige Analyse mit erweiterten Auswertungen",
+        "Vertiefte Risiko- und Nachtragsanalyse",
+        "Rückfragen / Klarstellungen / Angebotsstrategie",
+        "Analyse-Archiv",
+        "PDF-Export",
+      ],
+      ctaHref: "/register",
+      ctaLabel: "Pro wählen",
+      featured: true,
+      badge: "Empfohlen",
+    },
+    {
+      id: "team",
+      name: "Team",
+      price: "Individuelle Anfrage",
+      description: "Für Unternehmen, Planungsbüros und größere Teams mit mehreren Nutzern.",
+      features: [
+        "Alle Pro-Funktionen",
+        "Mehrere Nutzer",
+        "Individuelle Kontingente",
+        "Perspektivisch Team- und Organisationsfunktionen",
+        "Priorisierter Support / individuelle Abstimmung",
+        "PDF-Export",
+      ],
+      ctaHref: "/contact",
+      ctaLabel: "Anfrage senden",
+      featured: false,
+      isContactPlan: true,
+    },
+  ];
+
   return (
     <MarketingPageShell active="/pricing">
       <MarketingSection
         eyebrow="Preise"
-        title="Einfache Pläne für Ihre LV-Analysen"
-        lead="Starten Sie mit dem Free-Plan oder schalten Sie mit Pro unbegrenzte Analysen und erweiterte Auswertungen frei."
+        title="Das passende Modell für Ihre LV-Prüfung"
+        lead="Vom Einstieg bis zur regelmäßigen LV-Prüfung im Team – wählen Sie den passenden Plan für Ausschreibung, Kalkulation und Risikobewertung."
       >
         <Container>
           {/* Aktueller Plan */}
@@ -106,7 +174,7 @@ export default async function PricingPage() {
             </span>
           </div>
 
-          {/* Free / Pro Karten */}
+          {/* Pricing-Karten */}
           <div
             style={{
               display: "grid",
@@ -114,38 +182,24 @@ export default async function PricingPage() {
               gap: 12,
             }}
           >
-            <PriceCard
-              name={plan === "free" ? "Free (aktuell)" : "Free"}
-              price="0 €"
-              subtitle="Für Nutzer, die erste LV-Analysen im Alltag ausprobieren möchten."
-              items={[
-                "3 Analysen pro Monat",
-                "Dashboard mit Kennzahlen",
-                "Analyse-Archiv / gespeicherte Ergebnisse",
-                "Management-Zusammenfassung",
-                "Basis-Risikoanalyse und Ergebnisansicht",
-              ]}
-              ctaHref={plan === "free" ? "/analyse" : "/login"}
-              ctaLabel={plan === "free" ? "Mit Free weiter analysieren" : "Kostenlos starten"}
-            />
-            <PriceCard
-              name={plan === "pro" ? "Pro (aktuell)" : "Pro"}
-              price="ab X € / Monat"
-              subtitle="Für Teams, die LV-Analysen regelmäßig und mit voller Funktionsbreite einsetzen möchten."
-              items={[
-                "Unbegrenzte Analysen pro Monat",
-                "Vollständige Analyse mit vertiefter Auswertung",
-                "Erweiterte Risiko- und Nachtragsanalyse (Pro-Funktionen)",
-                "Rückfragen / Klarstellungen und Angebotsstrategien",
-                "PDF-Export (bald verfügbar)",
-              ]}
-              ctaHref={plan === "pro" ? "/analyse" : "/login"}
-              ctaLabel={plan === "pro" ? "Pro nutzen" : "Upgrade bald verfügbar"}
-              highlighted
-            />
+            {plans.map((p) => (
+              <PriceCard
+                key={p.id}
+                name={p.name}
+                price={p.price}
+                priceSubline={p.priceSubline}
+                description={p.description}
+                features={p.features}
+                ctaHref={p.ctaHref}
+                ctaLabel={p.ctaLabel}
+                featured={p.featured}
+                badge={p.badge}
+                isContactPlan={p.isContactPlan}
+              />
+            ))}
           </div>
 
-          {/* Feature-Vergleich */}
+          {/* Vergleichsmatrix */}
           <div style={{ marginTop: 32 }}>
             <h2
               style={{
@@ -164,36 +218,128 @@ export default async function PricingPage() {
                 borderRadius: 16,
                 border: `1px solid ${T.border}`,
                 background: "rgba(15,23,42,0.7)",
-                overflow: "hidden",
+                padding: 12,
               }}
             >
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead>
-                  <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                    <th style={{ textAlign: "left", padding: 12, color: T.faint, fontSize: 12 }}>Feature</th>
-                    <th style={{ textAlign: "center", padding: 12, color: T.faint, fontSize: 12 }}>Free</th>
-                    <th style={{ textAlign: "center", padding: 12, color: T.faint, fontSize: 12 }}>Pro</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { label: "Analysen pro Monat", free: "3", pro: "unbegrenzt" },
-                    { label: "Dashboard", free: "inklusive", pro: "inklusive" },
-                    { label: "Analyse-Archiv", free: "inklusive", pro: "inklusive" },
-                    { label: "Management-Zusammenfassung", free: "inklusive", pro: "inklusive" },
-                    { label: "Risikoanalyse", free: "Basis", pro: "Erweitert" },
-                    { label: "Rückfragen / Klarstellungen", free: "inklusive", pro: "inklusive" },
-                    { label: "Nachtragspotenzial (Pro-Funktionen)", free: "eingeschränkt", pro: "vollständig" },
-                    { label: "PDF-Export", free: "nicht verfügbar", pro: "bald verfügbar" },
-                  ].map((row) => (
-                    <tr key={row.label} style={{ borderTop: `1px solid ${T.border}` }}>
-                      <td style={{ padding: 10, color: T.text }}>{row.label}</td>
-                      <td style={{ padding: 10, textAlign: "center", color: T.muted }}>{row.free}</td>
-                      <td style={{ padding: 10, textAlign: "center", color: T.muted }}>{row.pro}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1.6fr repeat(3, 1fr)",
+                  gap: 4,
+                  fontSize: 12,
+                }}
+              >
+                {/* Header */}
+                <div style={{ padding: 8, color: T.faint }}>Funktion</div>
+                <div style={{ padding: 8, textAlign: "center", color: T.faint }}>Free</div>
+                <div style={{ padding: 8, textAlign: "center", color: T.faint }}>Pro</div>
+                <div style={{ padding: 8, textAlign: "center", color: T.faint }}>Team</div>
+
+                {[
+                  {
+                    label: "Analysen pro Monat",
+                    free: "3",
+                    pro: "unbegrenzt",
+                    team: "individuell",
+                  },
+                  {
+                    label: "Basis-Ergebnisansicht",
+                    free: "ja",
+                    pro: "ja",
+                    team: "ja",
+                  },
+                  {
+                    label: "Erweiterte Auswertungen",
+                    free: "–",
+                    pro: "ja",
+                    team: "ja",
+                  },
+                  {
+                    label: "Risikoanalyse",
+                    free: "Basis",
+                    pro: "Erweitert",
+                    team: "Erweitert",
+                  },
+                  {
+                    label: "Nachtragsanalyse",
+                    free: "–",
+                    pro: "ja",
+                    team: "ja",
+                  },
+                  {
+                    label: "Rückfragen / Klarstellungen",
+                    free: "–",
+                    pro: "ja",
+                    team: "ja",
+                  },
+                  {
+                    label: "Angebotsstrategie",
+                    free: "–",
+                    pro: "ja",
+                    team: "ja",
+                  },
+                  {
+                    label: "PDF-Export",
+                    free: "–",
+                    pro: "ja",
+                    team: "ja",
+                  },
+                  {
+                    label: "Mehrere Nutzer",
+                    free: "–",
+                    pro: "–",
+                    team: "ja",
+                  },
+                  {
+                    label: "Individuelle Kontingente",
+                    free: "–",
+                    pro: "–",
+                    team: "ja",
+                  },
+                ].map((row) => (
+                  <React.Fragment key={row.label}>
+                    <div
+                      style={{
+                        padding: 8,
+                        borderTop: `1px solid ${T.border}`,
+                        color: T.text,
+                      }}
+                    >
+                      {row.label}
+                    </div>
+                    <div
+                      style={{
+                        padding: 8,
+                        borderTop: `1px solid ${T.border}`,
+                        textAlign: "center",
+                        color: T.muted,
+                      }}
+                    >
+                      {row.free}
+                    </div>
+                    <div
+                      style={{
+                        padding: 8,
+                        borderTop: `1px solid ${T.border}`,
+                        textAlign: "center",
+                        color: T.muted,
+                      }}
+                    >
+                      {row.pro}
+                    </div>
+                    <div
+                      style={{
+                        padding: 8,
+                        borderTop: `1px solid ${T.border}`,
+                        textAlign: "center",
+                        color: T.muted,
+                      }}
+                    >
+                      {row.team}
+                    </div>
+                  </React.Fragment>
+                ))}
+              </div>
             </div>
           </div>
         </Container>

@@ -45,8 +45,8 @@ export function LoginClient() {
     <MarketingPageShell>
       <MarketingSection
         eyebrow="SaaS"
-        title="Login / Registrierung"
-        lead="Dieser Bereich ist vorbereitet, aber noch nicht implementiert. Die produktive Analyse ist weiterhin ohne Login unter /analyse verfügbar."
+        title="Login"
+        lead="Melden Sie sich mit Ihrem TGA LV Tool Konto an oder setzen Sie bei Bedarf Ihr Passwort zurück."
       >
         <Container>
           <div style={{ border: `1px solid ${T.border}`, borderRadius: 18, padding: 18, background: "rgba(255,255,255,0.03)", maxWidth: 480 }}>
@@ -116,6 +116,12 @@ export function LoginClient() {
                 {loading ? "Einloggen…" : "Login"}
               </button>
             </form>
+            <div style={{ marginTop: 8, fontSize: 12, color: T.muted }}>
+              Passwort vergessen?{" "}
+              <Link href="/reset-password" style={{ color: T.text, fontWeight: 600 }}>
+                Passwort zurücksetzen
+              </Link>
+            </div>
             <div style={{ marginTop: 8, fontSize: 12, color: T.muted }}>
               Noch kein Account?{" "}
               <Link href="/register" style={{ color: T.text, fontWeight: 600 }}>

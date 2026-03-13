@@ -12,10 +12,11 @@ export function Container({
   return (
     <div
       style={{
+        boxSizing: "border-box",
         width: "100%",
         maxWidth,
         margin: "0 auto",
-        padding: "0 20px",
+        paddingInline: 20,
         ...style,
       }}
     >

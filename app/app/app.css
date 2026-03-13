@@ -5,6 +5,12 @@
   border-color: rgba(255, 255, 255, 0.12) !important;
 }
 
+/* App-Header: Links zur öffentlichen Website */
+.app-header-public-link:hover {
+  color: rgba(255, 255, 255, 0.92) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
 /* Tabellenzeilen Hover */
 .app-table-row:hover {
   background: rgba(255, 255, 255, 0.04);

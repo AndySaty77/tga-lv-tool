@@ -9,13 +9,14 @@ export default function Home() {
   return (
     <main
       style={{
+        boxSizing: "border-box",
+        width: "100%",
+        maxWidth: "100%",
         minHeight: "100vh",
         background: T.bg,
         color: T.text,
       }}
     >
-      {/* Marketing-Navigation (öffentlich) */}
-      {/* NOTE: Keine Änderungen an /analyse oder /admin/* */}
       <MarketingNav active="/" />
 
       <>

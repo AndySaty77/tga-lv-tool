@@ -116,11 +116,19 @@ function scoreToLabel(score: number | null): { title: string; description: strin
   };
 }
 
+function getFilenameFromDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const match = header.match(/filename="?([^";\n]+)"?/i);
+  return match ? match[1].trim() : null;
+}
+
 export function DetailContent({ id }: { id: string }) {
   const [item, setItem] = React.useState<AnalyseItem | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [expandedRiskId, setExpandedRiskId] = React.useState<string | null>(null);
+  const [exportLoading, setExportLoading] = React.useState(false);
+  const [exportError, setExportError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -144,6 +152,40 @@ export function DetailContent({ id }: { id: string }) {
       cancelled = true;
     };
   }, [id]);
+
+  const handlePdfExport = React.useCallback(async () => {
+    if (!item) return;
+    setExportError(null);
+    setExportLoading(true);
+    try {
+      const res = await fetch("/api/export/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysisId: item.id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const stage = typeof data?.stage === "string" ? data.stage : "";
+        const message = typeof data?.message === "string" ? data.message : (data?.error ?? "Export fehlgeschlagen");
+        const display = stage ? `${stage} – ${message}` : message;
+        throw new Error(display);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition");
+      const filename = getFilenameFromDisposition(disposition) ?? `analysebericht-${id}.pdf`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportError(null);
+    } catch (e: unknown) {
+      setExportError(e instanceof Error ? e.message : "PDF-Export fehlgeschlagen.");
+    } finally {
+      setExportLoading(false);
+    }
+  }, [item, id]);
 
   if (loading) {
     return (
@@ -237,16 +279,41 @@ export function DetailContent({ id }: { id: string }) {
       </div>
 
       <div style={{ marginBottom: T.space.xl }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: T.text }}>{title}</h1>
-        <p style={{ margin: "8px 0 0", fontSize: 14, color: T.muted }}>
-          {item.created_at ? new Date(item.created_at).toLocaleString("de-DE") : "—"}
-          {mappedStatus && (
-            <>
-              {" · "}
-              <span style={{ textTransform: "capitalize" }}>{mappedStatus}</span>
-            </>
-          )}
-        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: T.space.md }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: T.text }}>{title}</h1>
+            <p style={{ margin: "8px 0 0", fontSize: 14, color: T.muted }}>
+              {item.created_at ? new Date(item.created_at).toLocaleString("de-DE") : "—"}
+              {mappedStatus && (
+                <>
+                  {" · "}
+                  <span style={{ textTransform: "capitalize" }}>{mappedStatus}</span>
+                </>
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handlePdfExport}
+            disabled={exportLoading}
+            style={{
+              padding: "8px 14px",
+              fontSize: 13,
+              fontWeight: 600,
+              color: T.text,
+              background: T.card,
+              border: `1px solid ${T.border}`,
+              borderRadius: T.radiusSm,
+              cursor: exportLoading ? "not-allowed" : "pointer",
+              opacity: exportLoading ? 0.7 : 1,
+            }}
+          >
+            {exportLoading ? "Export läuft…" : "PDF exportieren"}
+          </button>
+        </div>
+        {exportError && (
+          <p style={{ margin: "10px 0 0", fontSize: 13, color: T.danger }}>{exportError}</p>
+        )}
       </div>
 
       {displaySummary && (
