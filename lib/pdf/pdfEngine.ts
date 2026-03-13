@@ -39,7 +39,6 @@ function getLocalExecutablePath(): { path: string; source: "PUPPETEER_EXECUTABLE
 async function getProductionConfig(): Promise<{
   executablePath: string;
   args: string[];
-  headless: boolean | "shell";
 }> {
   const chromium = await import("@sparticuz/chromium");
   LOG("PDF mode: production | library: @sparticuz/chromium");
@@ -55,7 +54,6 @@ async function getProductionConfig(): Promise<{
   return {
     executablePath,
     args: chromium.default.args,
-    headless: chromium.default.headless ?? true,
   };
 }
 
@@ -64,13 +62,11 @@ export async function htmlToPdfBuffer(options: PdfEngineOptions): Promise<Buffer
 
   let executablePath: string;
   let launchArgs: string[];
-  let headless: boolean | "shell" = true;
 
   if (isProduction) {
     const prod = await getProductionConfig();
     executablePath = prod.executablePath;
     launchArgs = prod.args;
-    headless = prod.headless;
   } else {
     LOG("mode: local (non-production)");
     const local = getLocalExecutablePath();
@@ -90,10 +86,10 @@ export async function htmlToPdfBuffer(options: PdfEngineOptions): Promise<Buffer
   const launchOptions: Parameters<typeof puppeteer.launch>[0] = {
     args: launchArgs,
     executablePath,
-    headless,
+    headless: true,
     defaultViewport: null,
   };
-  LOG("launch: headless=" + String(headless) + " executablePath=" + executablePath + " argsCount=" + launchArgs.length);
+  LOG("launch: headless=true executablePath=" + executablePath + " argsCount=" + launchArgs.length);
 
   LOG("before browser launch");
   let browser: Awaited<ReturnType<typeof puppeteer.launch>>;
