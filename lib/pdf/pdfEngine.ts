@@ -1,14 +1,10 @@
 /**
  * Serverseitige HTML-zu-PDF-Erzeugung mit Puppeteer.
- * Minimaler, stabiler Ablauf: eine Page, setContent(domcontentloaded), pdf(), sauber schließen.
- *
- * macOS: Es wird immer der systemseitig installierte Google Chrome verwendet, sofern vorhanden.
- * Andere Plattformen / Vercel: @sparticuz/chromium.
+ * Zwei Modi: Lokal (NODE_ENV !== "production") nutzt Chrome/Env, Production nutzt @sparticuz/chromium.
  */
 
 import { existsSync } from "fs";
 import { platform } from "os";
-import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
 
 const DARWIN_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -20,53 +16,61 @@ export type PdfEngineOptions = {
   footer?: boolean;
 };
 
+const isProduction = process.env.NODE_ENV === "production";
+
 /**
- * Bestimmt executablePath: Auf macOS fest System-Chrome, sofern vorhanden; sonst Fallback (Env / Chromium).
+ * Lokaler Modus: executablePath aus Env oder lokalem Chrome (macOS). Kein @sparticuz/chromium.
  */
-function getExecutablePath(): string {
-  const isDarwin = platform() === "darwin";
-
-  if (isDarwin && existsSync(DARWIN_CHROME)) {
-    return DARWIN_CHROME;
-  }
-
-  const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
+function getLocalExecutablePath(): { path: string; source: "PUPPETEER_EXECUTABLE_PATH" | "localChrome" } | null {
+  const envPath = process.env.PUPPETEER_EXECUTABLE_PATH?.trim();
   if (envPath) {
-    return envPath;
+    return { path: envPath, source: "PUPPETEER_EXECUTABLE_PATH" };
   }
-
-  return "";
+  if (platform() === "darwin" && existsSync(DARWIN_CHROME)) {
+    return { path: DARWIN_CHROME, source: "localChrome" };
+  }
+  return null;
 }
 
 /**
- * Erzeugt aus dem übergebenen HTML ein PDF-Buffer.
- * Stabiler Ablauf: Browser starten → eine Page → Viewport → setContent(domcontentloaded) → pdf() → close.
- * Kein networkidle, kein goto, keine Header/Footer (vermeidet Frame-Detach-Probleme).
+ * Production-Modus: executablePath und Launch-Args aus @sparticuz/chromium.
  */
+async function getProductionExecutablePath(): Promise<{ path: string; args: string[] }> {
+  const chromium = await import("@sparticuz/chromium");
+  const path = await chromium.default.executablePath();
+  const args = chromium.default.args;
+  return { path, args };
+}
+
 export async function htmlToPdfBuffer(options: PdfEngineOptions): Promise<Buffer> {
   const { html } = options;
 
-  let executablePath = getExecutablePath();
-  if (!executablePath) {
-    try {
-      executablePath = await chromium.executablePath();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(`Chromium executablePath: ${msg}. Lokal Mac: Google Chrome installieren oder PUPPETEER_EXECUTABLE_PATH setzen.`);
+  let executablePath: string;
+  let launchArgs: string[];
+
+  if (isProduction) {
+    LOG("mode: production (Vercel/serverless)");
+    const prod = await getProductionExecutablePath();
+    executablePath = prod.path;
+    launchArgs = prod.args;
+    LOG("executablePath: " + executablePath + " (sparticuz/chromium)");
+  } else {
+    LOG("mode: local (non-production)");
+    const local = getLocalExecutablePath();
+    if (!local) {
+      throw new Error(
+        "Lokale PDF-Erzeugung benötigt Google Chrome oder PUPPETEER_EXECUTABLE_PATH. " +
+          "macOS: Chrome installieren oder PUPPETEER_EXECUTABLE_PATH setzen."
+      );
     }
+    executablePath = local.path;
+    launchArgs = platform() === "darwin" && executablePath === DARWIN_CHROME
+      ? ["--no-sandbox", "--disable-setuid-sandbox"]
+      : ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"];
+    LOG("executablePath: " + executablePath + " (" + local.source + ")");
   }
 
-  LOG("executablePath: " + executablePath);
-
-  const isDarwinChrome = platform() === "darwin" && executablePath === DARWIN_CHROME;
-  const launchArgs = isDarwinChrome ? ["--no-sandbox", "--disable-setuid-sandbox"] : chromium.args;
-
-  const launchConfig = {
-    headless: true,
-    executablePath,
-    argsCount: launchArgs.length,
-  };
-  LOG("launch config: headless=" + launchConfig.headless + " executablePath=" + executablePath + " argsCount=" + launchConfig.argsCount);
+  LOG("launch: headless=true executablePath=" + executablePath + " argsCount=" + launchArgs.length);
 
   LOG("before browser launch");
   const browser = await puppeteer.launch({
