@@ -98,6 +98,23 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Responsiver Marketing-Header: Desktop vs. Mobile */
+.marketing-nav-desktop {
+  display: block;
+}
+.marketing-nav-mobile {
+  display: none;
+}
+
+@media (max-width: 800px) {
+  .marketing-nav-desktop {
+    display: none;
+  }
+  .marketing-nav-mobile {
+    display: block;
+  }
+}
+
 /* Hilfsklassen für Akzentlinien (z. B. border-l mit Primary) */
 .accent-border-primary {
   border-left: var(--accent-border-width) solid var(--color-primary);

@@ -18,7 +18,13 @@ export default function FeaturesPage() {
         title="Ergebnisse, die du direkt verwenden kannst"
         lead="Keine Demo-Romantik: Im Kern geht es um saubere Struktur, nachvollziehbare Begründungen und Outputs, die in Angebot und Klärung übergehen."
       >
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 12,
+          }}
+        >
           <MarketingCard
             title="Score & Kennzahlen"
             accent="risk"
@@ -61,7 +67,13 @@ export default function FeaturesPage() {
         lead="Hier gehören später echte Screenshots hin. Bis dahin: die Art von Output, die du in Angebot/Projektdokumentation weiterreichen kannst."
       >
         <Container>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: 12,
+            }}
+          >
             {[
               {
                 title: "Kritischer Trigger",

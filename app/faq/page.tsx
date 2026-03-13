@@ -28,7 +28,13 @@ export default function FaqPage() {
         lead="Kurz und konkret – ohne Versprechen, die ein LV-Kontext nicht hergibt."
       >
         <Container>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: 12,
+            }}
+          >
             <QA
               q="Ersetzt das Tool die fachliche Prüfung?"
               a="Nein. Es strukturiert den LV-Inhalt, hebt typische Risiken hervor und erzeugt Vorschläge (Rückfragen/Klarstellungen). Die Freigabe bleibt beim Team."

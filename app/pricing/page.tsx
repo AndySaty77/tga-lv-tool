@@ -107,7 +107,13 @@ export default async function PricingPage() {
           </div>
 
           {/* Free / Pro Karten */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: 12,
+            }}
+          >
             <PriceCard
               name={plan === "free" ? "Free (aktuell)" : "Free"}
               price="0 €"

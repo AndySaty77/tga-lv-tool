@@ -40,7 +40,13 @@ export default function HowItWorksPage() {
         lead="Der Fokus liegt auf dem Ergebnis: Kennzahlen, Summary, zentrale Risiken. Danach Details in Tabs – damit Angebote schneller und konsistenter werden."
       >
         <Container>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: 12,
+            }}
+          >
             <Step
               nr="1"
               title="LV/GAEB bereitstellen"

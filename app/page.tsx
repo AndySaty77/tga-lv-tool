@@ -20,9 +20,16 @@ export default function Home() {
 
       <>
         {/* Hero */}
-        <section style={{ padding: "64px 0 28px" }}>
+        <section style={{ padding: "48px 0 28px" }}>
           <Container>
-            <div style={{ display: "grid", gridTemplateColumns: "1.25fr 0.75fr", gap: 18, alignItems: "start" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: 18,
+                alignItems: "start",
+              }}
+            >
               <div>
                 <div style={{ display: "inline-flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 999, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.04)" }}>
                   <span style={{ width: 8, height: 8, borderRadius: 999, background: T.brand }} />
