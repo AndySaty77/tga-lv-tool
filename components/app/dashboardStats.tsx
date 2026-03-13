@@ -1,13 +1,6 @@
 import React from "react";
 import { appTheme as T } from "./appTheme";
 
-/** Mockdaten – später durch echte Aggregation ersetzen */
-const MOCK_STATS = {
-  analysenGesamt: 42,
-  durchschnittScore: 63,
-  letzteAnalyse: "vor 2 Stunden",
-};
-
 function StatCard({
   label,
   value,
@@ -38,7 +31,15 @@ function StatCard({
   );
 }
 
-export function DashboardStats() {
+export function DashboardStats({
+  analysenGesamt,
+  durchschnittScore,
+  letzteAnalyse,
+}: {
+  analysenGesamt: number;
+  durchschnittScore: number | null;
+  letzteAnalyse: string;
+}) {
   return (
     <div
       style={{
@@ -48,9 +49,13 @@ export function DashboardStats() {
         marginBottom: T.space.xl,
       }}
     >
-      <StatCard label="Analysen gesamt" value={MOCK_STATS.analysenGesamt} />
-      <StatCard label="Durchschnittlicher Score" value={MOCK_STATS.durchschnittScore} sub="von 100" />
-      <StatCard label="Letzte Analyse" value={MOCK_STATS.letzteAnalyse} />
+      <StatCard label="Analysen gesamt" value={analysenGesamt} />
+      <StatCard
+        label="Durchschnittlicher Score"
+        value={durchschnittScore != null ? Math.round(durchschnittScore) : "—"}
+        sub="von 100"
+      />
+      <StatCard label="Letzte Analyse" value={letzteAnalyse} />
     </div>
   );
 }

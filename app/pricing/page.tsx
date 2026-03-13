@@ -4,10 +4,11 @@ import { MarketingPageShell } from "@/components/marketing/MarketingPageShell";
 import { MarketingSection } from "@/components/marketing/MarketingSection";
 import { Container } from "@/components/shared/Container";
 import { marketingTheme as T } from "@/components/marketing/MarketingTheme";
+import { getUserPlan } from "@/lib/billing/userPlan";
 
 export const metadata = {
   title: "Preise – TGA LV Tool",
-  description: "Preismodell (Platzhalter) für LV-/GAEB-Analyse. Fokus: Team-Nutzung und nachvollziehbare Ergebnisse.",
+  description: "Einfache Free- und Pro-Pläne für die LV-Analyse.",
 };
 
 function PriceCard({
@@ -76,61 +77,123 @@ function PriceCard({
   );
 }
 
-export default function PricingPage() {
+export default async function PricingPage() {
+  const plan = await getUserPlan().catch(() => "free" as const);
+
   return (
     <MarketingPageShell active="/pricing">
       <MarketingSection
         eyebrow="Preise"
-        title="Transparentes Modell für B2B-Teams"
-        lead="Platzhalter-Seite: Preise und Pakete sollten an Zielkunden, Datenhaltung und Compliance-Anforderungen angepasst werden. Inhaltlich geht es um Team-Nutzung und nachvollziehbare Ergebnisse."
+        title="Einfache Pläne für Ihre LV-Analysen"
+        lead="Starten Sie mit dem Free-Plan oder schalten Sie mit Pro unbegrenzte Analysen und erweiterte Auswertungen frei."
       >
         <Container>
+          {/* Aktueller Plan */}
+          <div
+            style={{
+              marginBottom: 20,
+              padding: 12,
+              borderRadius: 12,
+              border: `1px solid ${T.border}`,
+              background: "rgba(15,23,42,0.7)",
+              fontSize: 13,
+              color: T.muted,
+            }}
+          >
+            <span style={{ fontWeight: 600, color: T.text }}>Aktueller Plan:</span>{" "}
+            <span style={{ fontWeight: 600, color: T.text }}>
+              {plan === "pro" ? "Pro" : "Free"}
+            </span>
+          </div>
+
+          {/* Free / Pro Karten */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
             <PriceCard
-              name="Pilot"
-              price="auf Anfrage"
-              subtitle="Für Teams, die das Tool in echten Angebotsprozessen evaluieren wollen."
+              name={plan === "free" ? "Free (aktuell)" : "Free"}
+              price="0 €"
+              subtitle="Für Nutzer, die erste LV-Analysen im Alltag ausprobieren möchten."
               items={[
-                "Gemeinsame Einrichtung (Scope + Checkliste)",
-                "Analyse via /analyse",
-                "Feedback-Loop für Output-Qualität",
+                "3 Analysen pro Monat",
+                "Dashboard mit Kennzahlen",
+                "Analyse-Archiv / gespeicherte Ergebnisse",
+                "Management-Zusammenfassung",
+                "Basis-Risikoanalyse und Ergebnisansicht",
               ]}
-              ctaHref="/analyse"
-              ctaLabel="Analyse testen"
+              ctaHref={plan === "free" ? "/analyse" : "/login"}
+              ctaLabel={plan === "free" ? "Mit Free weiter analysieren" : "Kostenlos starten"}
             />
             <PriceCard
-              name="Team"
-              price="ab X €/Monat"
-              subtitle="Für Angebots-Teams mit wiederkehrenden LV-Prüfungen und klaren Workflows."
+              name={plan === "pro" ? "Pro (aktuell)" : "Pro"}
+              price="ab X € / Monat"
+              subtitle="Für Teams, die LV-Analysen regelmäßig und mit voller Funktionsbreite einsetzen möchten."
               items={[
-                "Mehrbenutzer (später: Login/Organisation)",
-                "Management Summary, Rückfragen, Klarstellungen, Nachtragspotenzial",
-                "Admin-Parameter (Scoring/Texts) wie heute",
+                "Unbegrenzte Analysen pro Monat",
+                "Vollständige Analyse mit vertiefter Auswertung",
+                "Erweiterte Risiko- und Nachtragsanalyse (Pro-Funktionen)",
+                "Rückfragen / Klarstellungen und Angebotsstrategien",
+                "PDF-Export (bald verfügbar)",
               ]}
-              ctaHref="/login"
-              ctaLabel="Interesse anmelden"
+              ctaHref={plan === "pro" ? "/analyse" : "/login"}
+              ctaLabel={plan === "pro" ? "Pro nutzen" : "Upgrade bald verfügbar"}
               highlighted
-            />
-            <PriceCard
-              name="Enterprise"
-              price="individuell"
-              subtitle="Für größere Organisationen (Governance, Audit, Integrationen)."
-              items={[
-                "SSO / Rollen / Audit (später)",
-                "Integrationen & Exporte",
-                "SLA & Support",
-              ]}
-              ctaHref="/docs"
-              ctaLabel="Technik ansehen"
             />
           </div>
 
-          <div style={{ marginTop: 16, color: T.faint, fontSize: 12, lineHeight: 1.6, maxWidth: 920 }}>
-            Hinweis: Diese Preisseite ist bewusst konservativ formuliert. Für ein echtes SaaS-Angebot sollten Datenschutz, Datenfluss, Hosting-Optionen und Rollenmodell vorab fachlich geklärt werden.
+          {/* Feature-Vergleich */}
+          <div style={{ marginTop: 32 }}>
+            <h2
+              style={{
+                margin: "0 0 12px",
+                fontSize: 14,
+                fontWeight: 700,
+                color: T.text,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              Funktionsübersicht
+            </h2>
+            <div
+              style={{
+                borderRadius: 16,
+                border: `1px solid ${T.border}`,
+                background: "rgba(15,23,42,0.7)",
+                overflow: "hidden",
+              }}
+            >
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                    <th style={{ textAlign: "left", padding: 12, color: T.faint, fontSize: 12 }}>Feature</th>
+                    <th style={{ textAlign: "center", padding: 12, color: T.faint, fontSize: 12 }}>Free</th>
+                    <th style={{ textAlign: "center", padding: 12, color: T.faint, fontSize: 12 }}>Pro</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { label: "Analysen pro Monat", free: "3", pro: "unbegrenzt" },
+                    { label: "Dashboard", free: "inklusive", pro: "inklusive" },
+                    { label: "Analyse-Archiv", free: "inklusive", pro: "inklusive" },
+                    { label: "Management-Zusammenfassung", free: "inklusive", pro: "inklusive" },
+                    { label: "Risikoanalyse", free: "Basis", pro: "Erweitert" },
+                    { label: "Rückfragen / Klarstellungen", free: "inklusive", pro: "inklusive" },
+                    { label: "Nachtragspotenzial (Pro-Funktionen)", free: "eingeschränkt", pro: "vollständig" },
+                    { label: "PDF-Export", free: "nicht verfügbar", pro: "bald verfügbar" },
+                  ].map((row) => (
+                    <tr key={row.label} style={{ borderTop: `1px solid ${T.border}` }}>
+                      <td style={{ padding: 10, color: T.text }}>{row.label}</td>
+                      <td style={{ padding: 10, textAlign: "center", color: T.muted }}>{row.free}</td>
+                      <td style={{ padding: 10, textAlign: "center", color: T.muted }}>{row.pro}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </Container>
       </MarketingSection>
     </MarketingPageShell>
   );
 }
+
 

@@ -4,6 +4,7 @@ import { AppSidebar } from "@/components/app/sidebar";
 import { AppHeader } from "@/components/app/appHeader";
 import { appTheme as T } from "@/components/app/appTheme";
 import "./app.css";
+import { ensureUserProfile } from "@/lib/billing/bootstrapProfile";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -16,7 +17,8 @@ export const metadata = {
   description: "Geschützter Kundenbereich: Dashboard, Analysen, Einstellungen.",
 };
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  await ensureUserProfile();
   return (
     <div
       className={inter.variable}

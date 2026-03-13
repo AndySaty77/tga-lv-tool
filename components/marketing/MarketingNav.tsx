@@ -41,8 +41,8 @@ export function MarketingNav({ active }: { active?: string }) {
         borderBottom: `1px solid ${T.border}`,
       }}
     >
-      <Container style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 64 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 260 }}>
+      <Container style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
           <Link href="/" style={{ color: T.text, textDecoration: "none", fontWeight: 900, letterSpacing: "-0.02em" }}>
             TGA&nbsp;LV&nbsp;Tool
           </Link>
@@ -57,7 +57,7 @@ export function MarketingNav({ active }: { active?: string }) {
           {item("/docs", "Docs")}
         </nav>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 260, justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, justifyContent: "flex-end", flexShrink: 1 }}>
           <Link
             href="/login"
             style={{

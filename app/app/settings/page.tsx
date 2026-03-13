@@ -1,10 +1,14 @@
 import React from "react";
 import Link from "next/link";
 import { appTheme as T } from "@/components/app/appTheme";
+import { getUser } from "@/lib/auth/get-user";
+import type { PlanId } from "@/lib/billing/plans";
+import { getUserPlan } from "@/lib/billing/userPlan";
+import { getMonthlyUsageForPlan, type MonthlyUsageInfo } from "@/lib/billing/usage";
 
 export const metadata = {
   title: "Settings – TGA LV Tool",
-  description: "Profil, Sprache und Einstellungen.",
+  description: "Profil, Plan und grundlegende Einstellungen.",
 };
 
 function SettingsCard({ title, children }: { title: string; children: React.ReactNode }) {
@@ -26,7 +30,24 @@ function SettingsCard({ title, children }: { title: string; children: React.Reac
   );
 }
 
-export default function AppSettingsPage() {
+export default async function AppSettingsPage() {
+  const user = await getUser().catch(() => null);
+
+  let plan: PlanId = "free";
+  let usage: MonthlyUsageInfo | null = null;
+
+  if (user) {
+    try {
+      plan = await getUserPlan();
+      usage = await getMonthlyUsageForPlan(user.id, plan);
+    } catch {
+      plan = "free";
+      usage = null;
+    }
+  }
+
+  const isPro = plan === "pro";
+
   return (
     <>
       <div style={{ marginBottom: T.space.xl }}>
@@ -34,26 +55,94 @@ export default function AppSettingsPage() {
           Settings
         </h1>
         <p style={{ margin: "8px 0 0", fontSize: 14, color: T.muted, lineHeight: 1.5 }}>
-          Profil, Sprache und App-Einstellungen. Platzhalter – wird später mit echten Optionen ergänzt.
+          Kontodaten, Plan und Nutzung für dein TGA LV Tool Konto.
         </p>
       </div>
 
       <SettingsCard title="Profil">
+        {user ? (
+          <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.7 }}>
+            <div style={{ marginBottom: 4 }}>
+              <span style={{ fontWeight: 600, color: T.text }}>E-Mail: </span>
+              <span>{user.email}</span>
+            </div>
+            <div style={{ fontSize: 12, color: T.faint }}>
+              Konto-ID: <code style={{ fontSize: 11 }}>{user.id}</code>
+            </div>
+          </div>
+        ) : (
+          <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+            Keine Kontodaten verfügbar (nicht angemeldet).
+          </p>
+        )}
+      </SettingsCard>
+
+      <SettingsCard title="Plan">
+        <p style={{ margin: "0 0 8px", fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+          Sie nutzen aktuell den{" "}
+          <span style={{ fontWeight: 600, color: T.text }}>{isPro ? "Pro-Plan" : "Free-Plan"}</span>.
+        </p>
         <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
-          Name, E-Mail, Avatar. Später: Anbindung an Auth/User-Service.
+          {isPro
+            ? "Mit Pro stehen Ihnen unbegrenzt viele Analysen und erweiterte Auswertungen zur Verfügung."
+            : "Mit dem Free-Plan können Sie bis zu 3 Analysen pro Monat durchführen und alle Basisfunktionen testen."}
         </p>
       </SettingsCard>
 
-      <SettingsCard title="Sprache">
-        <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
-          UI-Sprache (z. B. Deutsch / Englisch). Später: aus Konfiguration oder User-Preference.
-        </p>
+      <SettingsCard title="Nutzung im aktuellen Monat">
+        {usage ? (
+          <>
+            {usage.limit == null ? (
+              <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+                Sie nutzen Pro mit unbegrenzten Analysen. Aktuell wurden in diesem Monat{" "}
+                <span style={{ fontWeight: 600, color: T.text }}>{usage.usedThisMonth}</span> Analysen durchgeführt.
+              </p>
+            ) : (
+              <>
+                <p style={{ margin: "0 0 4px", fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+                  Sie haben in diesem Monat{" "}
+                  <span style={{ fontWeight: 600, color: T.text }}>{usage.usedThisMonth}</span> von{" "}
+                  <span style={{ fontWeight: 600, color: T.text }}>{usage.limit}</span> möglichen Analysen genutzt.
+                </p>
+                <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+                  {usage.remaining && usage.remaining > 0
+                    ? `Es verbleiben noch ${usage.remaining} Analyse${
+                        usage.remaining === 1 ? "" : "n"
+                      } in diesem Monat.`
+                    : "Das Monatslimit ist erreicht. Weitere Analysen sind im Free-Plan aktuell nicht möglich."}
+                </p>
+              </>
+            )}
+          </>
+        ) : (
+          <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+            Nutzungsdaten konnten nicht geladen werden.
+          </p>
+        )}
       </SettingsCard>
 
-      <SettingsCard title="Einstellungen">
-        <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
-          Allgemeine App-Optionen (Benachrichtigungen, Standardansicht, Export-Optionen). Später ergänzen.
+      <SettingsCard title="Preise & Upgrade">
+        <p style={{ margin: "0 0 8px", fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+          Auf der Preisseite sehen Sie die Unterschiede zwischen Free und Pro.
         </p>
+        <Link
+          href="/pricing"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            fontWeight: 600,
+            color: T.accent,
+            textDecoration: "none",
+            padding: "6px 10px",
+            borderRadius: T.radiusSm,
+            border: `1px solid ${T.border}`,
+            background: "rgba(56,189,248,0.06)",
+          }}
+        >
+          Preise ansehen →
+        </Link>
       </SettingsCard>
 
       <SettingsCard title="Account">

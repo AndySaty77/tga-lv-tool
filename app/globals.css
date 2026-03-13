@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+/* Globales Box-Sizing und Layout-Basis */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+}
+
 /* ========== Design-System (Theme) ========== */
 :root {
   /* Legacy – bleiben für Kompatibilität */

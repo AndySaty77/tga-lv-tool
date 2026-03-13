@@ -45,7 +45,7 @@ export function LoginClient() {
     <MarketingPageShell>
       <MarketingSection
         eyebrow="SaaS"
-        title="Login / Registrierung (Platzhalter)"
+        title="Login / Registrierung"
         lead="Dieser Bereich ist vorbereitet, aber noch nicht implementiert. Die produktive Analyse ist weiterhin ohne Login unter /analyse verfügbar."
       >
         <Container>

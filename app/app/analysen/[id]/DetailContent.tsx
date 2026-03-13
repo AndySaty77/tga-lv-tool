@@ -259,9 +259,10 @@ export function DetailContent({ id }: { id: string }) {
                 borderRadius: T.radiusSm,
                 borderLeft: `3px solid ${T.accent}`,
                 fontSize: 14,
-                lineHeight: 1.65,
+                lineHeight: 1.7,
                 color: T.muted,
                 whiteSpace: "pre-wrap",
+                maxWidth: 720,
               }}
             >
               {displaySummary}
