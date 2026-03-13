@@ -130,13 +130,14 @@ export async function POST(request: NextRequest) {
     const safeDate = sanitizeFilename(datePart);
     const filename = safeProject ? `analysebericht-${safeProject}-${safeDate}.pdf` : `analysebericht-${safeDate}.pdf`;
 
+    const pdfBytes = new Uint8Array(pdfBuffer);
     console.error("[PDF export] send-response ok");
-    return new NextResponse(pdfBuffer, {
+    return new NextResponse(pdfBytes, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": String(pdfBuffer.length),
+        "Content-Length": String(pdfBytes.byteLength),
       },
     });
   } catch (err) {
