@@ -33,13 +33,32 @@ function getLocalExecutablePath(): { path: string; source: "PUPPETEER_EXECUTABLE
 }
 
 /**
- * Production-Modus: executablePath und Launch-Args aus @sparticuz/chromium.
+ * Production-Modus: @sparticuz/chromium Standard-API, keine harten Pfade.
+ * Erfordert, dass die Chromium-bin-Dateien per outputFileTracingIncludes mit ausgeliefert werden (next.config).
  */
-async function getProductionExecutablePath(): Promise<{ path: string; args: string[] }> {
+async function getProductionConfig(): Promise<{
+  executablePath: string;
+  args: string[];
+  defaultViewport: { width: number; height: number } | null;
+  headless: boolean | "shell";
+}> {
   const chromium = await import("@sparticuz/chromium");
-  const path = await chromium.default.executablePath();
-  const args = chromium.default.args;
-  return { path, args };
+  LOG("PDF mode: production | library: @sparticuz/chromium");
+  let executablePath: string;
+  try {
+    executablePath = await chromium.default.executablePath();
+    LOG("chromium.executablePath() ok: " + executablePath);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    LOG("chromium.executablePath() failed: " + msg);
+    throw new Error("Chromium executablePath: " + msg);
+  }
+  return {
+    executablePath,
+    args: chromium.default.args,
+    defaultViewport: chromium.default.defaultViewport ?? null,
+    headless: chromium.default.headless ?? true,
+  };
 }
 
 export async function htmlToPdfBuffer(options: PdfEngineOptions): Promise<Buffer> {
@@ -47,13 +66,15 @@ export async function htmlToPdfBuffer(options: PdfEngineOptions): Promise<Buffer
 
   let executablePath: string;
   let launchArgs: string[];
+  let defaultViewport: { width: number; height: number } | null = null;
+  let headless: boolean | "shell" = true;
 
   if (isProduction) {
-    LOG("mode: production (Vercel/serverless)");
-    const prod = await getProductionExecutablePath();
-    executablePath = prod.path;
+    const prod = await getProductionConfig();
+    executablePath = prod.executablePath;
     launchArgs = prod.args;
-    LOG("executablePath: " + executablePath + " (sparticuz/chromium)");
+    defaultViewport = prod.defaultViewport;
+    headless = prod.headless;
   } else {
     LOG("mode: local (non-production)");
     const local = getLocalExecutablePath();
@@ -70,15 +91,24 @@ export async function htmlToPdfBuffer(options: PdfEngineOptions): Promise<Buffer
     LOG("executablePath: " + executablePath + " (" + local.source + ")");
   }
 
-  LOG("launch: headless=true executablePath=" + executablePath + " argsCount=" + launchArgs.length);
+  const launchOptions: Parameters<typeof puppeteer.launch>[0] = {
+    args: launchArgs,
+    executablePath,
+    headless,
+    defaultViewport,
+  };
+  LOG("launch: headless=" + String(headless) + " executablePath=" + executablePath + " argsCount=" + launchArgs.length);
 
   LOG("before browser launch");
-  const browser = await puppeteer.launch({
-    args: launchArgs,
-    defaultViewport: null,
-    executablePath,
-    headless: true,
-  });
+  let browser: Awaited<ReturnType<typeof puppeteer.launch>>;
+  try {
+    browser = await puppeteer.launch(launchOptions);
+    LOG("puppeteer.launch() ok");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    LOG("puppeteer.launch() failed: " + msg);
+    throw e;
+  }
   LOG("after browser launch");
 
   let page: Awaited<ReturnType<typeof browser.newPage>> | null = null;

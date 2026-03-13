@@ -6,7 +6,7 @@ import { renderPdfHtml } from "@/lib/pdf/renderPdfHtml";
 import { htmlToPdfBuffer } from "@/lib/pdf/pdfEngine";
 import { sanitizeFilename } from "@/lib/pdf/sanitizeFilename";
 
-// Vercel: längeres Timeout und mehr Memory für Chromium + PDF-Render
+export const runtime = "nodejs";
 export const maxDuration = 30;
 
 function getSupabase() {
