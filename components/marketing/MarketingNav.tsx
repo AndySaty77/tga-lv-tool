@@ -82,18 +82,18 @@ export function MarketingNav({ active }: { active?: string }) {
           display: isMobile ? "none" : "block",
         }}
       >
-        <Container style={{ display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 80, paddingTop: 12, paddingBottom: 12, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0, flexShrink: 0 }}>
+        <Container style={{ display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 88, paddingTop: 14, paddingBottom: 14, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 18, minWidth: 280, flexShrink: 0 }}>
             <Link href="/" style={{ display: "block", lineHeight: 0, flexShrink: 0 }} title="LV Scope – Startseite">
               <img
                 src={LOGO_SRC}
                 alt="LV Scope"
                 width={400}
                 height={110}
-                style={{ display: "block", height: 80, width: "auto", minHeight: 80, objectFit: "contain", objectPosition: "left center" }}
+                style={{ display: "block", height: 72, width: "auto", minHeight: 72, objectFit: "contain", objectPosition: "left center" }}
               />
             </Link>
-            <span style={{ color: T.faint, fontSize: 11, fontWeight: 600, letterSpacing: "0.03em", whiteSpace: "nowrap", flexShrink: 1, borderLeft: `1px solid ${T.border}`, paddingLeft: 16, overflow: "hidden", textOverflow: "ellipsis", maxWidth: 220 }}>KI-gestützte LV-/GAEB-Analyse</span>
+            <span style={{ color: T.faint, fontSize: 11, fontWeight: 600, letterSpacing: "0.03em", whiteSpace: "nowrap", flexShrink: 1, borderLeft: `1px solid ${T.border}`, paddingLeft: 18, overflow: "hidden", textOverflow: "ellipsis", maxWidth: 240 }}>KI-gestützte LV-/GAEB-Analyse</span>
           </div>
 
           <nav aria-label="Produktseiten" style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -162,20 +162,20 @@ export function MarketingNav({ active }: { active?: string }) {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            minHeight: 64,
+            minHeight: 68,
             paddingTop: 10,
             paddingBottom: 10,
             minWidth: 0,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", minWidth: 0, flexShrink: 0 }}>
-            <Link href="/" style={{ display: "block", lineHeight: 0 }} onClick={closeMenu} title="LV Scope – Startseite">
+          <div style={{ display: "flex", alignItems: "center", minWidth: 180, flexShrink: 0 }}>
+            <Link href="/" style={{ display: "block", lineHeight: 0, flexShrink: 0 }} onClick={closeMenu} title="LV Scope – Startseite">
               <img
                 src={LOGO_SRC}
                 alt="LV Scope"
                 width={340}
                 height={94}
-                style={{ display: "block", height: 52, width: "auto", minHeight: 52, objectFit: "contain", objectPosition: "left center" }}
+                style={{ display: "block", height: 48, width: "auto", minHeight: 48, objectFit: "contain", objectPosition: "left center" }}
               />
             </Link>
           </div>

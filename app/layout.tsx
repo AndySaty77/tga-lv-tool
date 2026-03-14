@@ -9,6 +9,7 @@ const inter = Inter({
 export const metadata = {
   title: "TGA LV Tool",
   description: "MVP",
+  icons: { icon: "/favicon.png" },
 };
 
 export default function RootLayout({
