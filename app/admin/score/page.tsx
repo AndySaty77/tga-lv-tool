@@ -16,6 +16,7 @@ import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
 import { PAGE_DESIGN } from "@/lib/ui/pageDesign";
 import { SectionCard, StatusBadge } from "@/components/ui";
 import { colors as themeColors } from "@/lib/ui/theme";
+import { appTheme as T } from "@/components/app/appTheme";
 
 /** Einheitliches Design für alle Tabs (Rückfragen, Risiken, Angebotsklarstellungen, Admin). */
 const D = PAGE_DESIGN;
@@ -1493,34 +1494,39 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
 
   return (
     <div
+      className={customerRoute ? "tga-analyse-dark" : undefined}
       style={{
         padding: customerRoute ? (hasResult ? 16 : 32) : (hasResult ? 12 : 28),
         fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
-        ...(customerRoute ? { background: D.pageBg, minHeight: "100vh" } : {}),
+        ...(customerRoute ? { background: T.bg, minHeight: "100vh", color: T.text } : {}),
       }}
     >
-      {/* Micro-Animations nur für Kundenroute (keine neuen Abhängigkeiten) */}
+      {/* Micro-Animations nur für Kundenroute (keine neuen Abhängigkeiten); .tga-analyse-dark = dunkle App-Sprache */}
       {customerRoute && (
         <style dangerouslySetInnerHTML={{ __html: `
+          .tga-analyse-dark .tga-toggle-option:hover { background-color: rgba(255,255,255,0.08) !important; }
+          .tga-analyse-dark .tga-toggle-option:not([data-active]):hover { color: rgba(255,255,255,0.92) !important; }
+          .tga-analyse-dark .tga-toggle-option[data-active] { box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
           .tga-btn-primary { transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease; }
-          .tga-btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(30,95,116,0.25); }
+          .tga-btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(56,189,248,0.3); }
           .tga-btn-primary:active:not(:disabled) { transform: translateY(0); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-          .tga-btn-primary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+          .tga-btn-primary:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
           .tga-btn-secondary { transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease; }
-          .tga-btn-secondary:hover { border-color: #cbd5e1 !important; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+          .tga-btn-secondary:hover { border-color: rgba(255,255,255,0.12) !important; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
           .tga-btn-secondary:active { transform: translateY(0); }
-          .tga-btn-secondary:focus-visible { outline: 2px solid #1e5f74; outline-offset: 2px; }
+          .tga-btn-secondary:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
           .tga-toggle-option { transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease; }
           .tga-toggle-option:hover { background-color: #f1f5f9 !important; }
           .tga-toggle-option:not([data-active]):hover { color: #0f172a !important; }
           .tga-toggle-option[data-active] { box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
           .tga-toggle-option:active { transform: scale(0.98); }
-          .tga-toggle-option:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+          .tga-toggle-option:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
           .tga-tab { transition: color 0.2s ease, border-color 0.2s ease; }
           .tga-tab:hover { color: #0f172a !important; }
-          .tga-tab:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+          .tga-tab:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
           .tga-benefit-card { transition: box-shadow 0.2s ease; }
-          .tga-benefit-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+          .tga-benefit-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+          .tga-analyse-dark textarea::placeholder { color: rgba(255,255,255,0.45); }
         ` }} />
       )}
 
@@ -1540,14 +1546,15 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
         >
           <div
             style={{
-              background: "#fff",
+              background: customerRoute ? T.card : "#fff",
               borderRadius: 16,
               padding: "28px 32px",
               maxWidth: 420,
               boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+              border: customerRoute ? `1px solid ${T.border}` : undefined,
             }}
           >
-            <div style={{ fontSize: 18, fontWeight: 800, color: "#111", marginBottom: 20 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: customerRoute ? T.text : "#111", marginBottom: 20 }}>
               {loadingPhase === "file" ? "Datei wird vorbereitet" : "Analyse läuft"}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1562,9 +1569,9 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                     alignItems: "center",
                     gap: 10,
                     fontSize: 14,
-                    color: i < effectiveStep ? (customerRoute ? D.primary : "#0a7a2f") : i === effectiveStep ? "#111" : "#999",
+                    color: i < effectiveStep ? (customerRoute ? T.accent : "#0a7a2f") : i === effectiveStep ? (customerRoute ? T.text : "#111") : (customerRoute ? T.faint : "#999"),
                     fontWeight: i === effectiveStep ? 700 : 500,
-                    ...(i === effectiveStep && customerRoute ? { paddingLeft: 4, borderLeft: `3px solid ${D.primary}`, marginLeft: -4 } : {}),
+                    ...(i === effectiveStep && customerRoute ? { paddingLeft: 4, borderLeft: `3px solid ${T.accent}`, marginLeft: -4 } : {}),
                   }}
                 >
                   <span style={{ width: 20, textAlign: "center", flexShrink: 0 }}>
@@ -1574,7 +1581,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                 </div>
               ); })}
               {loadingPhase === "analyze" && analysisStep === 5 && (
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e2e8f0", fontSize: 13, color: "#64748b", fontWeight: 500 }}>
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${customerRoute ? T.border : "#e2e8f0"}`, fontSize: 13, color: customerRoute ? T.muted : "#64748b", fontWeight: 500 }}>
                   {lastStepSubStatuses[lastStepSubIndex]}
                 </div>
               )}
@@ -1599,19 +1606,20 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
         >
           <div
             style={{
-              background: "#fff",
+              background: customerRoute ? T.card : "#fff",
               borderRadius: 16,
               padding: "28px 32px",
               maxWidth: 380,
               boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+              border: customerRoute ? `1px solid ${T.border}` : undefined,
             }}
           >
-            <div style={{ fontSize: 18, fontWeight: 800, color: "#111", marginBottom: 12 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: customerRoute ? T.text : "#111", marginBottom: 12 }}>
               {changeOrderLoading && "Nachtragspotenziale werden ermittelt…"}
               {!changeOrderLoading && clarificationQuestionsLoading && "Rückfragen werden generiert…"}
               {!changeOrderLoading && !clarificationQuestionsLoading && offerAssumptionsLoading && "Annahmen werden generiert…"}
             </div>
-            <div style={{ color: "#666", fontSize: 14 }}>
+            <div style={{ color: customerRoute ? T.muted : "#666", fontSize: 14 }}>
               Bitte einen Moment warten.
             </div>
           </div>
@@ -1622,31 +1630,31 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       <header
         style={{
           marginBottom: 0,
-          padding: hasResult ? (customerRoute ? "10px 20px" : "8px 16px") : (customerRoute ? `${D.headerPaddingV}px ${D.headerPaddingH}px` : "0 28px"),
+          padding: hasResult ? (customerRoute ? "10px 20px" : "8px 16px") : (customerRoute ? `${T.space.lg}px ${T.space.xl}px` : "0 28px"),
           minHeight: hasResult ? (customerRoute ? 48 : 44) : (customerRoute ? 72 : 64),
           height: hasResult ? "auto" : (customerRoute ? "auto" : 64),
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           gap: hasResult ? 16 : 28,
-          background: customerRoute ? D.cardBg : "#fff",
-          borderBottom: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e5e7eb",
+          background: customerRoute ? T.card : "#fff",
+          borderBottom: customerRoute ? `1px solid ${T.border}` : "1px solid #e5e7eb",
           flexWrap: "wrap",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: hasResult ? 12 : (customerRoute ? 8 : 2), minWidth: 0, flex: "1 1 280px" }}>
           {customerRoute ? (
             <>
-              <h1 style={{ margin: 0, fontSize: hasResult ? 18 : 26, fontWeight: hasResult ? 700 : 800, color: D.textPrimary, letterSpacing: "-0.025em", lineHeight: 1.2 }}>
+              <h1 style={{ margin: 0, fontSize: hasResult ? 18 : 26, fontWeight: hasResult ? 700 : 800, color: T.text, letterSpacing: "-0.025em", lineHeight: 1.2 }}>
                 Leistungsverzeichnis analysieren
               </h1>
               {!hasResult && (
-                <p style={{ margin: 0, fontSize: 13, color: D.textSecondary, fontWeight: 400, maxWidth: 480, lineHeight: 1.5 }}>
+                <p style={{ margin: 0, fontSize: 13, color: T.muted, fontWeight: 400, maxWidth: 480, lineHeight: 1.5 }}>
                   Erkennen Sie Risiken, Unklarheiten und mögliche Nachtragspotenziale vor der Angebotsabgabe.
                 </p>
               )}
               {fileMeta?.name && (
-                <span style={{ fontSize: 12, color: D.textMuted, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(hasResult ? { marginLeft: 8, paddingLeft: 12, borderLeft: `1px solid ${D.cardBorder}` } : { marginTop: 4 }) }}>
+                <span style={{ fontSize: 12, color: T.faint, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(hasResult ? { marginLeft: 8, paddingLeft: 12, borderLeft: `1px solid ${T.border}` } : { marginTop: 4 }) }}>
                   {fileMeta.name}
                   {fileMeta.size ? ` · ${fmtKB(fileMeta.size)}` : ""}
                 </span>
@@ -1671,14 +1679,14 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           {analysisStatus && (
             <span
               style={{
-                fontSize: 11,
+                fontSize: customerRoute ? 12 : 11,
                 fontWeight: 600,
                 letterSpacing: "0.02em",
-                color: loading ? "#b45309" : result ? (customerRoute ? D.primary : "#047857") : (customerRoute ? D.textSecondary : "#9ca3af"),
+                color: loading ? T.warning : result ? (customerRoute ? T.accent : "#047857") : (customerRoute ? T.muted : "#9ca3af"),
                 padding: hasResult ? "4px 10px" : (customerRoute ? "6px 12px" : "4px 10px"),
-                borderRadius: customerRoute ? D.badgeRadius : 6,
-                background: loading ? "#fffbeb" : result ? (customerRoute ? "#e8f4f8" : "#ecfdf5") : (customerRoute ? "#f8fafc" : "#f9fafb"),
-                border: customerRoute ? `1px solid ${loading ? "#fde68a" : result ? "#b8dce6" : D.cardBorder}` : "none",
+                borderRadius: customerRoute ? T.radiusSm : 6,
+                background: loading ? "rgba(251,191,36,0.15)" : result ? (customerRoute ? T.accentMuted : "#ecfdf5") : (customerRoute ? "rgba(255,255,255,0.05)" : "#f9fafb"),
+                border: customerRoute ? `1px solid ${loading ? T.warning : result ? T.accent : T.border}` : "none",
               }}
             >
               {loading ? "Analyse läuft…" : result ? "Abgeschlossen" : "Bereit"}
@@ -1686,9 +1694,9 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {!hasResult && customerRoute && (
-              <span style={{ fontSize: 11, color: D.textMuted, fontWeight: 500 }}>{customerRoute ? "Ansicht" : "Modus"}</span>
+              <span style={{ fontSize: 11, color: T.faint, fontWeight: 500 }}>{customerRoute ? "Ansicht" : "Modus"}</span>
             )}
-            <div style={{ display: "flex", background: customerRoute ? D.cardBorder : "#f3f4f6", borderRadius: customerRoute ? D.radiusToggle : 8, padding: 3 }}>
+            <div style={{ display: "flex", background: customerRoute ? T.border : "#f3f4f6", borderRadius: customerRoute ? T.radiusSm : 8, padding: 3 }}>
               <button
                 type="button"
                 className={customerRoute ? "tga-toggle-option" : undefined}
@@ -1701,12 +1709,12 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                   padding: hasResult ? "6px 12px" : (customerRoute ? "8px 16px" : "6px 14px"),
                   border: "none",
                   borderRadius: 6,
-                  background: analysisMode === "standard" ? (customerRoute ? D.cardBg : "#fff") : "transparent",
-                  color: analysisMode === "standard" ? (customerRoute ? D.textPrimary : "#111") : (customerRoute ? D.textSecondary : "#6b7280"),
+                  background: analysisMode === "standard" ? (customerRoute ? T.card : "#fff") : "transparent",
+                  color: analysisMode === "standard" ? (customerRoute ? T.text : "#111") : (customerRoute ? T.muted : "#6b7280"),
                   fontWeight: 600,
                   fontSize: hasResult ? 12 : 13,
                   cursor: "pointer",
-                  boxShadow: analysisMode === "standard" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                  boxShadow: analysisMode === "standard" ? (customerRoute ? "0 1px 3px rgba(0,0,0,0.2)" : "0 1px 3px rgba(0,0,0,0.08)") : "none",
                 }}
               >
                 Standard
@@ -1720,12 +1728,12 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                   padding: hasResult ? "6px 12px" : (customerRoute ? "8px 16px" : "6px 14px"),
                   border: "none",
                   borderRadius: 6,
-                  background: analysisMode === "expert" ? (customerRoute ? D.cardBg : "#fff") : "transparent",
-                  color: analysisMode === "expert" ? (customerRoute ? D.textPrimary : "#111") : (customerRoute ? D.textSecondary : "#6b7280"),
+                  background: analysisMode === "expert" ? (customerRoute ? T.card : "#fff") : "transparent",
+                  color: analysisMode === "expert" ? (customerRoute ? T.text : "#111") : (customerRoute ? T.muted : "#6b7280"),
                   fontWeight: 600,
                   fontSize: hasResult ? 12 : 13,
                   cursor: "pointer",
-                  boxShadow: analysisMode === "expert" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                  boxShadow: analysisMode === "expert" ? (customerRoute ? "0 1px 3px rgba(0,0,0,0.2)" : "0 1px 3px rgba(0,0,0,0.08)") : "none",
                 }}
               >
                 Experte
@@ -1743,23 +1751,23 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       {/* Analysebereich: nach Ergebnis kompakte Leiste, sonst voller Upload */}
       <div
         style={{
-          marginTop: hasResult ? (customerRoute ? 12 : 10) : (customerRoute ? D.spacingSection : 24),
+          marginTop: hasResult ? (customerRoute ? 12 : 10) : (customerRoute ? T.space.xl : 24),
           padding: hasResult ? (customerRoute ? "10px 16px" : "8px 12px") : (customerRoute ? 28 : 16),
-          border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e5e7eb",
-          borderRadius: customerRoute ? D.cardRadiusLg : 16,
-          background: customerRoute ? D.cardBg : "#fafafa",
-          boxShadow: customerRoute ? D.cardShadow : "none",
+          border: customerRoute ? `1px solid ${T.border}` : "1px solid #e5e7eb",
+          borderRadius: customerRoute ? T.radius : 16,
+          background: customerRoute ? T.card : "#fafafa",
+          boxShadow: customerRoute ? "0 1px 3px rgba(0,0,0,0.15)" : "none",
         }}
       >
         {hasResult ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 13, color: customerRoute ? D.textSecondary : "#6b7280", fontWeight: 500 }}>
-              {fileMeta?.name ? (<>Aktuelle Datei: <strong style={{ color: customerRoute ? D.textPrimary : "#111" }}>{fileMeta.name}</strong>{fileMeta.size ? ` · ${fmtKB(fileMeta.size)}` : ""}</>) : "Analyse abgeschlossen"}
+            <span style={{ fontSize: 13, color: customerRoute ? T.muted : "#6b7280", fontWeight: 500 }}>
+              {fileMeta?.name ? (<>Aktuelle Datei: <strong style={{ color: customerRoute ? T.text : "#111" }}>{fileMeta.name}</strong>{fileMeta.size ? ` · ${fmtKB(fileMeta.size)}` : ""}</>) : "Analyse abgeschlossen"}
             </span>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input ref={fileInputRef} type="file" accept=".txt,.xml,.gaeb,.x83,.x84,.x86,.json" onChange={(e) => onPickFile(e.target.files?.[0] ?? null)} style={{ display: "none" }} />
-              <button type="button" onClick={() => fileInputRef.current?.click()} style={{ padding: "6px 12px", borderRadius: D.radiusButton, border: `1px solid ${D.cardBorder}`, background: D.cardBg, color: D.textSecondary, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Andere Datei</button>
-              <button type="button" onClick={() => { setLvText(""); setResult(null); setError(null); setFileMeta(null); setLastFile(null); resetVortext(); resetGaebPreview(); resetSplit(); }} style={{ padding: "6px 12px", borderRadius: D.radiusButton, border: `1px solid ${D.cardBorder}`, background: "transparent", color: D.textSecondary, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>Neue Analyse starten</button>
+              <button type="button" onClick={() => fileInputRef.current?.click()} style={{ padding: "6px 12px", borderRadius: customerRoute ? T.radiusSm : D.radiusButton, border: `1px solid ${customerRoute ? T.border : D.cardBorder}`, background: customerRoute ? T.card : D.cardBg, color: customerRoute ? T.muted : D.textSecondary, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Andere Datei</button>
+              <button type="button" onClick={() => { setLvText(""); setResult(null); setError(null); setFileMeta(null); setLastFile(null); resetVortext(); resetGaebPreview(); resetSplit(); }} style={{ padding: "6px 12px", borderRadius: customerRoute ? T.radiusSm : D.radiusButton, border: `1px solid ${customerRoute ? T.border : D.cardBorder}`, background: "transparent", color: customerRoute ? T.muted : D.textSecondary, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>Neue Analyse starten</button>
             </div>
           </div>
         ) : (
@@ -1772,10 +1780,10 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
           style={{
-            border: `2px dashed ${dragOver ? (customerRoute ? D.primary : "#0a7a2f") : (customerRoute ? D.cardBorder : "#d1d5db")}`,
-            borderRadius: customerRoute ? D.cardRadius : 14,
+            border: `2px dashed ${dragOver ? (customerRoute ? T.accent : "#0a7a2f") : (customerRoute ? T.border : "#d1d5db")}`,
+            borderRadius: customerRoute ? T.radiusSm : 14,
             padding: customerRoute ? 32 : 14,
-            background: dragOver ? (customerRoute ? "#e8f4f8" : "#f0fdf4") : customerRoute ? "#f8fafc" : "#fff",
+            background: dragOver ? (customerRoute ? T.accentMuted : "#f0fdf4") : customerRoute ? "rgba(255,255,255,0.03)" : "#fff",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -1786,21 +1794,21 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           <div style={{ minWidth: 0, flex: "1 1 280px" }}>
             {customerRoute ? (
               <>
-                <div style={{ fontSize: 20, fontWeight: 700, color: D.textPrimary, marginBottom: 8, letterSpacing: "-0.01em" }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: T.text, marginBottom: 8, letterSpacing: "-0.01em" }}>
                   Leistungsverzeichnis hochladen
                 </div>
-                <p style={{ margin: 0, fontSize: 14, color: D.textSecondary, lineHeight: 1.55 }}>
+                <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.55 }}>
                   Datei hierher ziehen oder über den Button auswählen. Anschließend Analyse starten.
                 </p>
                 {!fileMeta && (
-                  <ul style={{ margin: "16px 0 0", paddingLeft: 20, fontSize: 13, color: D.textSecondary, lineHeight: 1.65 }}>
+                  <ul style={{ margin: "16px 0 0", paddingLeft: 20, fontSize: 13, color: T.muted, lineHeight: 1.65 }}>
                     <li>Erkennt Risiken im Leistungsverzeichnis</li>
                     <li>Zeigt mögliche Nachtragspotenziale</li>
                     <li>Formuliert Rückfragen und Angebotsklarstellungen</li>
                   </ul>
                 )}
                 {fileMeta && (
-                  <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: D.radiusButton, background: "#e8f4f8", border: `1px solid ${D.cardBorder}`, color: D.primary, fontWeight: 600, fontSize: 13 }}>
+                  <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: T.radiusSm, background: T.accentMuted, border: `1px solid ${T.border}`, color: T.accent, fontWeight: 600, fontSize: 13 }}>
                     Geladen: {fileMeta.name}
                     {fileMeta.size ? ` · ${fmtKB(fileMeta.size)}` : ""}
                   </div>
@@ -1835,26 +1843,26 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               className={customerRoute ? "tga-btn-primary" : undefined}
               onClick={() => fileInputRef.current?.click()}
               style={{
-                padding: customerRoute ? "12px 20px" : "10px 14px",
-                borderRadius: customerRoute ? D.radiusButton : 12,
+                padding: customerRoute ? `${T.space.sm}px ${T.space.md}px` : "10px 14px",
+                borderRadius: customerRoute ? T.radiusSm : 12,
                 border: "none",
-                background: customerRoute ? D.primary : "#111",
-                color: "#fff",
+                background: customerRoute ? T.accent : "#111",
+                color: customerRoute ? "#0c1222" : "#fff",
                 cursor: "pointer",
                 fontWeight: 700,
-                fontSize: customerRoute ? 14 : 13,
-                boxShadow: customerRoute ? D.cardShadow : "none",
+                fontSize: 13,
+                boxShadow: customerRoute ? "0 1px 3px rgba(56,189,248,0.25)" : "none",
               }}
             >
               {customerRoute ? "Datei auswählen" : "Datei wählen"}
             </button>
             {customerRoute && (
-              <span style={{ fontSize: 11, color: D.textMuted }}>Max. 10 MB · TXT, XML, GAEB</span>
+              <span style={{ fontSize: 11, color: T.faint }}>Max. 10 MB · TXT, XML, GAEB</span>
             )}
             {isExpertMode && (
               <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
                 <input type="checkbox" checked={autoAnalyze} onChange={(e) => setAutoAnalyze(e.target.checked)} />
-                <span style={{ fontWeight: 700, color: "#111" }}>{customerRoute ? "Analyse nach Upload" : "Auto-Analyse"}</span>
+                <span style={{ fontWeight: 700, color: customerRoute ? T.text : "#111" }}>{customerRoute ? "Analyse nach Upload" : "Auto-Analyse"}</span>
               </label>
             )}
           </div>
@@ -1865,13 +1873,15 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           rows={10}
           style={{
             width: "100%",
-            marginTop: customerRoute ? 16 : 12,
-            borderRadius: customerRoute ? D.cardRadius : 12,
-            border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #ddd",
-            padding: customerRoute ? 14 : 12,
+            marginTop: customerRoute ? T.space.md : 12,
+            borderRadius: customerRoute ? T.radiusSm : 12,
+            border: customerRoute ? `1px solid ${T.border}` : "1px solid #ddd",
+            padding: customerRoute ? T.space.md : 12,
             resize: "vertical",
             fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
             fontSize: 13,
+            lineHeight: 1.5,
+            ...(customerRoute ? { background: T.surface, color: T.text } : {}),
           }}
           placeholder={customerRoute ? "Optional: Text hier einfügen oder nur Datei nutzen …" : "LV Text hier einfügen..."}
           value={lvText}
@@ -1894,15 +1904,15 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             }}
             disabled={loading || lvText.trim().length === 0}
             style={{
-              padding: customerRoute ? "12px 20px" : "10px 14px",
-              borderRadius: customerRoute ? D.radiusButton : 12,
+              padding: customerRoute ? `${T.space.sm}px ${T.space.md}px` : "10px 14px",
+              borderRadius: customerRoute ? T.radiusSm : 12,
               border: "none",
-              background: loading ? "#d1d5db" : customerRoute ? D.primary : "#111",
-              color: loading ? "#6b7280" : "#fff",
+              background: loading ? (customerRoute ? T.surface : "rgba(0,0,0,0.06)") : customerRoute ? T.accent : "#111",
+              color: loading ? (customerRoute ? T.faint : "#6b7280") : (customerRoute ? "#0c1222" : "#fff"),
               cursor: loading ? "default" : "pointer",
               fontWeight: 700,
-              fontSize: customerRoute ? 14 : 13,
-              boxShadow: customerRoute && !loading ? D.cardShadow : "none",
+              fontSize: 13,
+              boxShadow: customerRoute && !loading ? "0 1px 3px rgba(56,189,248,0.25)" : "none",
             }}
           >
             {loading ? "Analysiere…" : "Analysieren"}
@@ -1919,12 +1929,13 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               }}
               disabled={splitLoading || !lastFile}
               style={{
-                padding: "10px 14px",
-                borderRadius: 12,
-                border: "1px solid #ddd",
-                background: "#fff",
+                padding: customerRoute ? "10px 16px" : "10px 14px",
+                borderRadius: customerRoute ? T.radiusSm : 12,
+                border: customerRoute ? `1px solid ${T.border}` : "1px solid #ddd",
+                background: customerRoute ? T.card : "#fff",
+                color: splitLoading || !lastFile ? (customerRoute ? T.faint : "#999") : (customerRoute ? T.muted : "#374151"),
                 cursor: splitLoading || !lastFile ? "default" : "pointer",
-                fontWeight: 700,
+                fontWeight: 600,
                 fontSize: 13,
               }}
               title={!lastFile ? "Nur möglich, wenn eine Datei geladen wurde." : ""}
@@ -1947,13 +1958,13 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               resetSplit();
             }}
             style={{
-              padding: "10px 14px",
-              borderRadius: customerRoute ? D.radiusButton : 12,
-              border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #d1d5db",
-              background: customerRoute ? D.cardBg : "#fff",
-              color: customerRoute ? D.textSecondary : "#6b7280",
+              padding: customerRoute ? `${T.space.sm}px ${T.space.md}px` : "10px 14px",
+              borderRadius: customerRoute ? T.radiusSm : 12,
+              border: customerRoute ? `1px solid ${T.border}` : "1px solid #d1d5db",
+              background: customerRoute ? T.card : "#fff",
+              color: customerRoute ? T.muted : "#6b7280",
               cursor: "pointer",
-              fontWeight: 500,
+              fontWeight: 600,
               fontSize: 13,
             }}
           >
@@ -1964,7 +1975,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
             <label
               title={customerRoute ? "Bei Aktivierung werden bei der Analyse zusätzliche Risiken per KI ermittelt." : "Bei Aktivierung werden bei der Analyse zusätzliche Risiken per KI ermittelt (Relevanzfilter)."}
               style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
-                color: "#6b7280", fontWeight: 500, fontSize: 13 }}
+                color: customerRoute ? T.muted : "#6b7280", fontWeight: 500, fontSize: 13 }}
             >
               <input
                 type="checkbox"
@@ -1974,42 +1985,42 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               {customerRoute ? "Erweiterte Filter (KI-Risiken)" : "Relevanzfilter (KI)"}
             </label>
           )}
-          <span style={{ fontSize: 12, color: customerRoute ? D.textMuted : "#9ca3af" }}>Max. 10 MB</span>
+          <span style={{ fontSize: 12, color: customerRoute ? T.faint : "#9ca3af" }}>Max. 10 MB</span>
         </div>
 
-        {error && <div style={{ marginTop: 12, color: "#b00020", fontWeight: 800 }}>{error}</div>}
+        {error && <div style={{ marginTop: 12, color: customerRoute ? T.danger : "#b00020", fontWeight: 600, fontSize: 13 }}>{error}</div>}
         </>
         )}
       </div>
 
       {/* Value-Preview: Was Sie nach der Analyse erhalten (nur Kundenroute, Startzustand) */}
       {customerRoute && !result && !loading && (
-        <div style={{ marginTop: D.spacingSection }}>
-          <h2 style={{ margin: "0 0 24px", fontSize: 18, fontWeight: 800, color: D.textPrimary, letterSpacing: "-0.02em" }}>Nach der Analyse erhalten Sie</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: D.spacingCard }}>
-            <div className="tga-benefit-card" style={{ padding: D.spacingCard, minHeight: 120, borderRadius: D.cardRadius, border: `1px solid ${D.cardBorder}`, background: D.cardBg, boxShadow: D.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: D.textPrimary, marginBottom: 8 }}>Risikoübersicht</div>
-              <p style={{ margin: 0, fontSize: 13, color: D.textSecondary, lineHeight: 1.55 }}>Erkennen Sie kritische Punkte in Vorbemerkungen, Mengen und Leistungsgrenzen.</p>
+        <div style={{ marginTop: T.space.xl }}>
+          <h2 style={{ margin: "0 0 24px", fontSize: 18, fontWeight: 800, color: T.text, letterSpacing: "-0.02em" }}>Nach der Analyse erhalten Sie</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: T.space.md }}>
+            <div className="tga-benefit-card" style={{ padding: T.space.md, minHeight: 120, borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.card, boxShadow: "0 1px 3px rgba(0,0,0,0.15)" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 8 }}>Risikoübersicht</div>
+              <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.55 }}>Erkennen Sie kritische Punkte in Vorbemerkungen, Mengen und Leistungsgrenzen.</p>
             </div>
-            <div className="tga-benefit-card" style={{ padding: D.spacingCard, minHeight: 120, borderRadius: D.cardRadius, border: `1px solid ${D.cardBorder}`, background: D.cardBg, boxShadow: D.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: D.textPrimary, marginBottom: 8 }}>Nachtragspotenzial</div>
-              <p style={{ margin: 0, fontSize: 13, color: D.textSecondary, lineHeight: 1.55 }}>Identifizieren Sie mögliche Ursachen für spätere Mehrkosten.</p>
+            <div className="tga-benefit-card" style={{ padding: T.space.md, minHeight: 120, borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.card, boxShadow: "0 1px 3px rgba(0,0,0,0.15)" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 8 }}>Nachtragspotenzial</div>
+              <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.55 }}>Identifizieren Sie mögliche Ursachen für spätere Mehrkosten.</p>
             </div>
-            <div className="tga-benefit-card" style={{ padding: D.spacingCard, minHeight: 120, borderRadius: D.cardRadius, border: `1px solid ${D.cardBorder}`, background: D.cardBg, boxShadow: D.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: D.textPrimary, marginBottom: 8 }}>Rückfragen</div>
-              <p style={{ margin: 0, fontSize: 13, color: D.textSecondary, lineHeight: 1.55 }}>Erhalten Sie konkrete Fragen zur Klärung vor Angebotsabgabe.</p>
+            <div className="tga-benefit-card" style={{ padding: T.space.md, minHeight: 120, borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.card, boxShadow: "0 1px 3px rgba(0,0,0,0.15)" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 8 }}>Rückfragen</div>
+              <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.55 }}>Erhalten Sie konkrete Fragen zur Klärung vor Angebotsabgabe.</p>
             </div>
-            <div className="tga-benefit-card" style={{ padding: D.spacingCard, minHeight: 120, borderRadius: D.cardRadius, border: `1px solid ${D.cardBorder}`, background: D.cardBg, boxShadow: D.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: D.textPrimary, marginBottom: 8 }}>Angebotsklarstellungen</div>
-              <p style={{ margin: 0, fontSize: 13, color: D.textSecondary, lineHeight: 1.55 }}>Nutzen Sie Formulierungsvorschläge für Ihr Angebot.</p>
+            <div className="tga-benefit-card" style={{ padding: T.space.md, minHeight: 120, borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.card, boxShadow: "0 1px 3px rgba(0,0,0,0.15)" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 8 }}>Angebotsklarstellungen</div>
+              <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.55 }}>Nutzen Sie Formulierungsvorschläge für Ihr Angebot.</p>
             </div>
-            <div className="tga-benefit-card" style={{ padding: D.spacingCard, minHeight: 120, borderRadius: D.cardRadius, border: `1px solid ${D.cardBorder}`, background: D.cardBg, boxShadow: D.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: D.textPrimary, marginBottom: 8 }}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.vorbemerkungen}</div>
-              <p style={{ margin: 0, fontSize: 13, color: D.textSecondary, lineHeight: 1.55 }}>Lesbare Darstellung der Vorbemerkungen aus Ihrem LV inkl. Suche und Volltextansicht.</p>
+            <div className="tga-benefit-card" style={{ padding: T.space.md, minHeight: 120, borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.card, boxShadow: "0 1px 3px rgba(0,0,0,0.15)" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 8 }}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.vorbemerkungen}</div>
+              <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.55 }}>Lesbare Darstellung der Vorbemerkungen aus Ihrem LV inkl. Suche und Volltextansicht.</p>
             </div>
-            <div className="tga-benefit-card" style={{ padding: D.spacingCard, minHeight: 120, borderRadius: D.cardRadius, border: `1px solid ${D.cardBorder}`, background: D.cardBg, boxShadow: D.cardShadow }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: D.textPrimary, marginBottom: 8 }}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.positionen}</div>
-              <p style={{ margin: 0, fontSize: 13, color: D.textSecondary, lineHeight: 1.55 }}>Übersicht der Positionsinhalte des Leistungsverzeichnisses mit Suchfunktion.</p>
+            <div className="tga-benefit-card" style={{ padding: T.space.md, minHeight: 120, borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.card, boxShadow: "0 1px 3px rgba(0,0,0,0.15)" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 8 }}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.positionen}</div>
+              <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.55 }}>Übersicht der Positionsinhalte des Leistungsverzeichnisses mit Suchfunktion.</p>
             </div>
           </div>
         </div>

@@ -61,6 +61,7 @@ export function AppHeader() {
       </div>
       <nav
         aria-label="Zur öffentlichen Website"
+        className="app-header-public-nav"
         style={{
           display: "flex",
           alignItems: "center",

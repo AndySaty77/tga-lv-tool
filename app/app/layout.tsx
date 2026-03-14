@@ -1,7 +1,6 @@
 import React from "react";
 import { Inter } from "next/font/google";
-import { AppSidebar } from "@/components/app/sidebar";
-import { AppHeader } from "@/components/app/appHeader";
+import { AppShell } from "@/components/app/AppShell";
 import { appTheme as T } from "@/components/app/appTheme";
 import "./app.css";
 import { ensureUserProfile } from "@/lib/billing/bootstrapProfile";
@@ -21,22 +20,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   await ensureUserProfile();
   return (
     <div
-      className={inter.variable}
+      className={`app-layout ${inter.variable}`}
       style={{
-        minHeight: "100vh",
         background: T.bg,
         color: T.text,
-        display: "flex",
         fontFamily: "var(--font-app-inter), system-ui, sans-serif",
       }}
     >
-      <AppSidebar />
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <main style={{ flex: 1, padding: T.space.xl }}>
-          <AppHeader />
-          {children}
-        </main>
-      </div>
+      <AppShell>{children}</AppShell>
     </div>
   );
 }

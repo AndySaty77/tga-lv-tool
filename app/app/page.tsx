@@ -234,7 +234,8 @@ export default async function AppDashboardPage() {
             overflow: "hidden",
           }}
         >
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", minWidth: 480, borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${T.border}` }}>
                 <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>Projektname</th>
@@ -283,6 +284,7 @@ export default async function AppDashboardPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       </section>
     </>

@@ -19,8 +19,10 @@ export function AppSidebar() {
   return (
     <aside
       style={{
-        width: 248,
+        boxSizing: "border-box",
+        width: "100%",
         minWidth: 248,
+        height: "100%",
         background: T.sidebarBg,
         borderRight: `1px solid ${T.border}`,
         padding: T.space.lg,
