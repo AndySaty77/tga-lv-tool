@@ -30,12 +30,14 @@ export async function middleware(req: NextRequest) {
   } = await supabase.auth.getUser();
 
   const url = new URL(req.url);
-  const protectedRoots = ["/app", "/app/analysen", "/app/settings", "/app/billing"];
+  // Geschützte Bereiche: kompletter /app (Dashboard, Analysen, Settings, Billing) und /analyse
+  const protectedRoots = ["/app", "/analyse"];
   const isProtected = protectedRoots.some((base) => url.pathname === base || url.pathname.startsWith(base + "/"));
 
   if (isProtected && !user) {
     const redirectUrl = new URL("/login", req.url);
-    redirectUrl.searchParams.set("redirectTo", url.pathname + url.search);
+    const targetPath = url.pathname === "/analyse" || url.pathname.startsWith("/analyse/") ? "/app/analyse" : url.pathname + url.search;
+    redirectUrl.searchParams.set("redirectTo", targetPath);
     return NextResponse.redirect(redirectUrl);
   }
 
@@ -43,6 +45,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/app/:path*"],
+  matcher: ["/app/:path*", "/analyse", "/analyse/:path*"],
 };
 

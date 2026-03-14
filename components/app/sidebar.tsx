@@ -3,11 +3,12 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, FolderSearch, Settings, CreditCard } from "lucide-react";
+import { BarChart3, FileSearch, FolderSearch, Settings, CreditCard } from "lucide-react";
 import { appTheme as T } from "./appTheme";
 
 const navItems = [
   { href: "/app", label: "Dashboard", icon: BarChart3 },
+  { href: "/app/analyse", label: "Analyse", icon: FileSearch },
   { href: "/app/analysen", label: "Analysen", icon: FolderSearch },
   { href: "/app/settings", label: "Settings", icon: Settings },
   { href: "/app/billing", label: "Billing", icon: CreditCard },
@@ -51,7 +52,9 @@ export function AppSidebar() {
 
       <nav aria-label="App-Navigation" style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
         {navItems.map(({ href, label, icon: Icon }) => {
-          const isActive = pathname === href || (href !== "/app" && pathname.startsWith(href));
+          const isActive =
+            pathname === href ||
+            (href !== "/app" && href !== "/app/analyse" && pathname.startsWith(href + "/"));
           return (
             <Link
               key={href}

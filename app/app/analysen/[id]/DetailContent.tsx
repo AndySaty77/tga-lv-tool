@@ -540,9 +540,26 @@ export function DetailContent({ id }: { id: string }) {
         )}
       </div>
 
-      <div style={{ marginTop: T.space.xl }}>
+      <div style={{ marginTop: T.space.xl, display: "flex", flexWrap: "wrap", alignItems: "center", gap: T.space.md }}>
         <Link href="/app/analysen" style={{ fontSize: 13, fontWeight: 600, color: T.accent, textDecoration: "none" }}>
           ← Zurück zur Liste
+        </Link>
+        <span style={{ color: T.faint }}>·</span>
+        <Link
+          href="/app/analyse"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "6px 12px",
+            borderRadius: T.radiusSm,
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#0c1222",
+            background: T.accent,
+            textDecoration: "none",
+          }}
+        >
+          Neue Analyse starten
         </Link>
       </div>
     </>

@@ -203,7 +203,7 @@ export default async function AppDashboardPage() {
 
       <div style={{ marginBottom: T.space.xl }}>
         <Link
-          href="/analyse"
+          href="/app/analyse"
           style={{
             display: "inline-flex",
             alignItems: "center",

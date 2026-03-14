@@ -29,7 +29,7 @@ export function MarketingFooter() {
           <div>
             <div style={{ fontSize: 12, fontWeight: 800, color: T.text, textTransform: "uppercase", letterSpacing: "0.06em" }}>Start</div>
             <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-              <Link href="/analyse" style={{ color: T.muted, textDecoration: "none", fontSize: 13 }}>Analyse starten</Link>
+              <Link href="/app/analyse" style={{ color: T.muted, textDecoration: "none", fontSize: 13 }}>Analyse starten</Link>
               <Link href="/app" style={{ color: T.faint, textDecoration: "none", fontSize: 13 }}>App (bald)</Link>
               <Link href="/login" style={{ color: T.faint, textDecoration: "none", fontSize: 13 }}>Login (Platzhalter)</Link>
             </div>
@@ -39,7 +39,7 @@ export function MarketingFooter() {
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <span style={{ color: T.faint, fontSize: 12 }}>© {new Date().getFullYear()} TGA LV Tool</span>
           <span style={{ color: T.faint, fontSize: 12 }}>
-            Hinweis: Marketingseiten sind öffentlich; Analyse (`/analyse`) und Admin bleiben unverändert.
+            Hinweis: Marketingseiten sind öffentlich; Analyse (`/app/analyse`) und Admin bleiben unverändert.
           </span>
         </div>
       </Container>

@@ -415,8 +415,8 @@ export default function RegisterPage() {
             </div>
             <div style={{ marginTop: 10, fontSize: 11, color: T.muted }}>
               Sie können die LV-/GAEB-Analyse weiterhin ohne Login über{" "}
-              <Link href="/analyse" style={{ color: T.text, fontWeight: 600 }}>
-                /analyse
+              <Link href="/app/analyse" style={{ color: T.text, fontWeight: 600 }}>
+                zur Analyse
               </Link>{" "}
               testen.
             </div>

@@ -1505,8 +1505,9 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
       {customerRoute && (
         <style dangerouslySetInnerHTML={{ __html: `
           .tga-analyse-dark .tga-toggle-option:hover { background-color: rgba(255,255,255,0.08) !important; }
-          .tga-analyse-dark .tga-toggle-option:not([data-active]):hover { color: rgba(255,255,255,0.92) !important; }
-          .tga-analyse-dark .tga-toggle-option[data-active] { box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+          .tga-analyse-dark .tga-toggle-option[data-active]:hover { background-color: rgba(255,255,255,0.18) !important; }
+          .tga-analyse-dark .tga-toggle-option:not([data-active]):hover { color: rgba(255,255,255,0.85) !important; }
+          .tga-analyse-dark .tga-toggle-option[data-active] { box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
           .tga-btn-primary { transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease; }
           .tga-btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(56,189,248,0.3); }
           .tga-btn-primary:active:not(:disabled) { transform: translateY(0); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
@@ -1522,6 +1523,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           .tga-toggle-option:active { transform: scale(0.98); }
           .tga-toggle-option:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
           .tga-tab { transition: color 0.2s ease, border-color 0.2s ease; }
+          .tga-analyse-dark .tga-tab:hover { color: rgba(255,255,255,0.92) !important; }
           .tga-tab:hover { color: #0f172a !important; }
           .tga-tab:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
           .tga-benefit-card { transition: box-shadow 0.2s ease; }
@@ -1682,11 +1684,11 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                 fontSize: customerRoute ? 12 : 11,
                 fontWeight: 600,
                 letterSpacing: "0.02em",
-                color: loading ? T.warning : result ? (customerRoute ? T.accent : "#047857") : (customerRoute ? T.muted : "#9ca3af"),
+                color: loading ? T.warning : result ? (customerRoute ? "#0c1222" : "#047857") : (customerRoute ? "rgba(255,255,255,0.6)" : "#9ca3af"),
                 padding: hasResult ? "4px 10px" : (customerRoute ? "6px 12px" : "4px 10px"),
                 borderRadius: customerRoute ? T.radiusSm : 6,
-                background: loading ? "rgba(251,191,36,0.15)" : result ? (customerRoute ? T.accentMuted : "#ecfdf5") : (customerRoute ? "rgba(255,255,255,0.05)" : "#f9fafb"),
-                border: customerRoute ? `1px solid ${loading ? T.warning : result ? T.accent : T.border}` : "none",
+                background: loading ? "rgba(251,191,36,0.15)" : result ? (customerRoute ? T.accent : "#ecfdf5") : (customerRoute ? "rgba(255,255,255,0.08)" : "#f9fafb"),
+                border: customerRoute ? `1px solid ${loading ? T.warning : result ? T.accent : "rgba(255,255,255,0.1)"}` : "none",
               }}
             >
               {loading ? "Analyse läuft…" : result ? "Abgeschlossen" : "Bereit"}
@@ -1694,9 +1696,9 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {!hasResult && customerRoute && (
-              <span style={{ fontSize: 11, color: T.faint, fontWeight: 500 }}>{customerRoute ? "Ansicht" : "Modus"}</span>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontWeight: 500 }}>{customerRoute ? "Ansicht" : "Modus"}</span>
             )}
-            <div style={{ display: "flex", background: customerRoute ? T.border : "#f3f4f6", borderRadius: customerRoute ? T.radiusSm : 8, padding: 3 }}>
+            <div style={{ display: "flex", background: customerRoute ? "rgba(0,0,0,0.35)" : "#f3f4f6", borderRadius: customerRoute ? T.radiusSm : 8, padding: 3 }}>
               <button
                 type="button"
                 className={customerRoute ? "tga-toggle-option" : undefined}
@@ -1709,12 +1711,12 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                   padding: hasResult ? "6px 12px" : (customerRoute ? "8px 16px" : "6px 14px"),
                   border: "none",
                   borderRadius: 6,
-                  background: analysisMode === "standard" ? (customerRoute ? T.card : "#fff") : "transparent",
-                  color: analysisMode === "standard" ? (customerRoute ? T.text : "#111") : (customerRoute ? T.muted : "#6b7280"),
+                  background: analysisMode === "standard" ? (customerRoute ? "rgba(255,255,255,0.14)" : "#fff") : "transparent",
+                  color: analysisMode === "standard" ? (customerRoute ? "#ffffff" : "#111") : (customerRoute ? "rgba(255,255,255,0.55)" : "#6b7280"),
                   fontWeight: 600,
                   fontSize: hasResult ? 12 : 13,
                   cursor: "pointer",
-                  boxShadow: analysisMode === "standard" ? (customerRoute ? "0 1px 3px rgba(0,0,0,0.2)" : "0 1px 3px rgba(0,0,0,0.08)") : "none",
+                  boxShadow: analysisMode === "standard" ? (customerRoute ? "0 1px 2px rgba(0,0,0,0.25)" : "0 1px 3px rgba(0,0,0,0.08)") : "none",
                 }}
               >
                 Standard
@@ -1728,12 +1730,12 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                   padding: hasResult ? "6px 12px" : (customerRoute ? "8px 16px" : "6px 14px"),
                   border: "none",
                   borderRadius: 6,
-                  background: analysisMode === "expert" ? (customerRoute ? T.card : "#fff") : "transparent",
-                  color: analysisMode === "expert" ? (customerRoute ? T.text : "#111") : (customerRoute ? T.muted : "#6b7280"),
+                  background: analysisMode === "expert" ? (customerRoute ? "rgba(255,255,255,0.14)" : "#fff") : "transparent",
+                  color: analysisMode === "expert" ? (customerRoute ? "#ffffff" : "#111") : (customerRoute ? "rgba(255,255,255,0.55)" : "#6b7280"),
                   fontWeight: 600,
                   fontSize: hasResult ? 12 : 13,
                   cursor: "pointer",
-                  boxShadow: analysisMode === "expert" ? (customerRoute ? "0 1px 3px rgba(0,0,0,0.2)" : "0 1px 3px rgba(0,0,0,0.08)") : "none",
+                  boxShadow: analysisMode === "expert" ? (customerRoute ? "0 1px 2px rgba(0,0,0,0.25)" : "0 1px 3px rgba(0,0,0,0.08)") : "none",
                 }}
               >
                 Experte
@@ -2026,12 +2028,12 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
         </div>
       )}
 
-      {/* Dateistruktur / Struktur LV (nur in erweiterter Ansicht) */}
+      {/* Dateistruktur / Struktur LV (nur in erweiterter Ansicht) – heller Content-Bereich, eigene Light-Logik (keine Vererbung von T.text) */}
       {isExpertMode && (
-      <div style={{ marginTop: 14, border: "1px solid #e5e5e5", borderRadius: 14, padding: 16, background: "#fff" }}>
+      <div className="tga-expert-light-panel" style={{ marginTop: 14, border: "1px solid #e2e8f0", borderRadius: 14, padding: 16, background: "#fff", color: D.textPrimary }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-          <div style={{ fontSize: 14, color: "#666", fontWeight: 900 }}>{customerRoute ? "Dateistruktur" : "Struktur des Leistungsverzeichnisses"}</div>
-          <div style={{ color: "#666", fontWeight: 700 }}>
+          <div style={{ fontSize: 14, color: D.textSecondary, fontWeight: 900 }}>{customerRoute ? "Dateistruktur" : "Struktur des Leistungsverzeichnisses"}</div>
+          <div style={{ color: D.textSecondary, fontWeight: 700 }}>
             {gaebPreviewLoading ? "Lade…" : gaebPreview ? `${gaebPreview.filename} (${fmtKB(gaebPreview.size)})` : "—"}
           </div>
         </div>
@@ -2055,15 +2057,16 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               ].map((t) => (
                 <button
                   key={t}
+                  type="button"
                   onClick={() => setGaebTab(t)}
                   style={{
                     padding: "8px 10px",
                     borderRadius: 10,
-                    border: "1px solid #ddd",
+                    border: "1px solid #e2e8f0",
                     background: gaebTab === t ? (customerRoute ? D.primary : "#111") : "#fff",
-                    color: gaebTab === t ? "#fff" : "#111",
+                    color: gaebTab === t ? "#fff" : D.textPrimary,
                     cursor: "pointer",
-                    fontWeight: 800,
+                    fontWeight: 700,
                   }}
                 >
                   {t === "structure"
@@ -2085,14 +2088,16 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               ))}
 
               <button
+                type="button"
                 onClick={() => setLvText(gaebTextForTab || "")}
                 style={{
                   padding: "8px 10px",
                   borderRadius: 10,
-                  border: "1px solid #111",
+                  border: `1px solid ${D.textPrimary}`,
                   background: "#fff",
+                  color: D.textPrimary,
                   cursor: "pointer",
-                  fontWeight: 900,
+                  fontWeight: 700,
                 }}
               >
                 In Textfeld übernehmen
@@ -2113,8 +2118,9 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                     margin: 0,
                     padding: 12,
                     borderRadius: 12,
-                    border: "1px solid #eee",
-                    background: "#fafafa",
+                    border: "1px solid #e2e8f0",
+                    background: "#f8fafc",
+                    color: D.textPrimary,
                     fontSize: 12,
                     whiteSpace: "pre-wrap",
                     maxHeight: 320,
@@ -2140,7 +2146,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               )}
             </div>
 
-            <div style={{ marginTop: 8, color: "#666", fontSize: 12, fontWeight: 700 }}>
+            <div style={{ marginTop: 8, color: D.textSecondary, fontSize: 12, fontWeight: 600 }}>
               {split ? (
                 <>
                   Automatische Textanalyse: Einleitung {effectiveVortextLen} Zeichen • Positionen {effectivePositionsLen} Zeichen
@@ -2178,7 +2184,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               gap: 4,
               marginBottom: 10,
               padding: "4px 0",
-              borderBottom: customerRoute ? `2px solid ${D.cardBorder}` : "2px solid #e5e5e5",
+              borderBottom: customerRoute ? `2px solid ${T.border}` : "2px solid #e5e5e5",
               flexWrap: "wrap",
             }}
           >
@@ -2203,12 +2209,12 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
                 style={{
                   padding: "10px 16px",
                   border: "none",
-                  borderBottom: resultTab === id ? `2px solid ${customerRoute ? D.primary : "#111"}` : "2px solid transparent",
+                  borderBottom: resultTab === id ? `2px solid ${customerRoute ? T.accent : "#111"}` : "2px solid transparent",
                   marginBottom: -8,
                   background: "none",
                   fontWeight: 700,
                   fontSize: 13,
-                  color: resultTab === id ? (customerRoute ? D.textPrimary : "#111") : (customerRoute ? D.textSecondary : "#666"),
+                  color: resultTab === id ? (customerRoute ? T.text : "#111") : (customerRoute ? T.muted : "#666"),
                   cursor: "pointer",
                 }}
               >

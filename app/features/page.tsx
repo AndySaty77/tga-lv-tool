@@ -97,7 +97,7 @@ export default function FeaturesPage() {
 
           <div style={{ marginTop: 18 }}>
             <Link
-              href="/analyse"
+              href="/app/analyse"
               style={{
                 display: "inline-flex",
                 alignItems: "center",

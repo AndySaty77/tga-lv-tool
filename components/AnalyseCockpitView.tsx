@@ -163,25 +163,29 @@ export function AnalyseCockpitView({
         </div>
       </header>
 
-      {/* 2 Kennzahlen-Row */}
+      {/* 2 Kennzahlen-Row – nur diese 4 KPI-Karten zentriert */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: spacing[3], marginBottom: spacing[4] }}>
         <MetricCard
+          center
           title={DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.complexity}
           value={total}
           subtitle="von 100 Punkten"
           variant={total >= 70 ? "danger" : total >= 40 ? "warning" : "success"}
         />
         <MetricCard
+          center
           title={DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.totalRisk}
           value={<ScoreBadge value={total} max={100} />}
           variant="neutral"
         />
         <MetricCard
+          center
           title={DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.claimPotential}
           value={claimLevel ? claimLevel.text : "—"}
           variant={claimLevel?.variant ?? "neutral"}
         />
         <MetricCard
+          center
           title="Kritische Trigger"
           value={criticalCount}
           subtitle={criticalCount === 1 ? "hoher Befund" : "hohe Befunde"}
@@ -218,126 +222,94 @@ export function AnalyseCockpitView({
         </div>
       </div>
 
-      {/* Einheitliche Übersichtskarten: Header-Band + Body + Button (wie Referenz) */}
+      {/* Aktionsbereiche: ruhige Dark-Cards wie KPI/Kategorien, Farbe nur als Akzent (linker Rand + Button) */}
       {(() => {
-        const cardStyle = {
+        const actionCardStyle = (accent: string) => ({
           background: colors.card,
           border: `1px solid ${colors.border}`,
+          borderLeft: `4px solid ${accent}`,
           borderRadius: radius.lg,
           boxShadow: shadows.md,
-          overflow: "hidden" as const,
-        };
-        const headerBandStyle = (accent: string) => ({
-          background: accent,
-          padding: "10px 16px",
+          padding: spacing[4],
         });
-        const titleStyle = {
-          fontSize: "1rem",
+        const actionTitleStyle = {
+          fontSize: 15,
           fontWeight: 700,
-          color: "#fff",
-          margin: 0,
+          color: colors.text,
+          margin: "0 0 " + spacing[2],
         };
-        const bodyStyle = {
-          padding: "12px 16px",
-        };
-        const bodyTextStyle = {
+        const actionBodyStyle = {
           margin: 0,
           fontSize: 14,
           color: colors.textMuted,
           lineHeight: 1.5,
         };
-        const buttonStyle = (accent: string) => ({
+        const actionButtonStyle = (accent: string) => ({
           marginTop: spacing[3],
           padding: "10px 16px",
-          borderRadius: 8,
+          borderRadius: radius.md,
           border: "none" as const,
           background: accent,
           color: "#fff",
           fontWeight: 600,
           fontSize: 13,
           cursor: "pointer" as const,
-          display: "block" as const,
-          width: "100%",
-          maxWidth: 280,
-          marginLeft: "auto" as const,
-          marginRight: "auto" as const,
         });
 
         return (
           <>
             {/* 5 Nachtragspotenzial */}
             <div style={{ marginBottom: spacing[4] }}>
-              <div style={cardStyle}>
-                <div style={headerBandStyle(colors.secondary)}>
-                  <h2 style={titleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}</h2>
-                </div>
-                <div style={bodyStyle}>
-                  <p style={bodyTextStyle}>
-                    Die detaillierte Nachtragsanalyse mit Hebel und Sofortmaßnahmen finden Sie im Tab „{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}".
-                  </p>
-                  {onTabChange && (
-                    <button type="button" onClick={() => onTabChange("nachtragspotenzial")} style={buttonStyle(colors.secondary)}>
-                      Zum Tab {DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}
-                    </button>
-                  )}
-                </div>
+              <div style={actionCardStyle(colors.secondary)}>
+                <h2 style={actionTitleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}</h2>
+                <p style={actionBodyStyle}>
+                  Die detaillierte Nachtragsanalyse mit Hebel und Sofortmaßnahmen finden Sie im Tab „{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}".
+                </p>
+                {onTabChange && (
+                  <button type="button" onClick={() => onTabChange("nachtragspotenzial")} style={actionButtonStyle(colors.secondary)}>
+                    Zum Tab {DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}
+                  </button>
+                )}
               </div>
             </div>
 
             {/* 6 Rückfragen */}
             <div style={{ marginBottom: spacing[4] }}>
-              <div style={cardStyle}>
-                <div style={headerBandStyle(colors.primary)}>
-                  <h2 style={titleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.rueckfragen}</h2>
-                </div>
-                <div style={bodyStyle}>
-                  {clarificationQuestions?.questions && clarificationQuestions.questions.length > 0 ? (
-                    <>
-                      <p style={{ ...bodyTextStyle, marginBottom: spacing[3] }}>{DEFAULT_TEXTS_CONFIG.explanation.rueckfragen}</p>
-                      <div style={{ display: "flex", flexDirection: "column", gap: spacing[2] }}>
-                        {(clarificationQuestions.byGroup && Object.keys(clarificationQuestions.byGroup).length > 0
-                          ? Object.entries(clarificationQuestions.byGroup).flatMap(([group, items]) =>
-                              (items ?? []).slice(0, 3).map((item: { question?: string; title?: string }, i: number) => (
-                                <div key={`${group}-${i}`} style={{ fontSize: 12, color: colors.textMuted, marginBottom: 2 }}>{DEFAULT_TEXTS_CONFIG.rueckfragen.groupLabels[group] ?? group}</div>
-                              ))
-                            )
-                          : null)}
-                        <p style={{ ...bodyTextStyle, fontSize: 13 }}>{clarificationQuestions.questions.length} Rückfragen vorhanden.</p>
-                      </div>
-                    </>
-                  ) : (
-                    <p style={bodyTextStyle}>{DEFAULT_TEXTS_CONFIG.rueckfragen.emptyState}</p>
-                  )}
-                  {onTabChange && (
-                    <button type="button" onClick={() => onTabChange("rueckfragen")} style={buttonStyle(colors.primary)}>
-                      {DEFAULT_TEXTS_CONFIG.rueckfragen.generateButton}
-                    </button>
-                  )}
-                </div>
+              <div style={actionCardStyle(colors.primary)}>
+                <h2 style={actionTitleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.rueckfragen}</h2>
+                {clarificationQuestions?.questions && clarificationQuestions.questions.length > 0 ? (
+                  <>
+                    <p style={{ ...actionBodyStyle, marginBottom: spacing[2] }}>{DEFAULT_TEXTS_CONFIG.explanation.rueckfragen}</p>
+                    <p style={{ ...actionBodyStyle, fontSize: 13, marginBottom: 0 }}>{clarificationQuestions.questions.length} Rückfragen vorhanden.</p>
+                  </>
+                ) : (
+                  <p style={actionBodyStyle}>{DEFAULT_TEXTS_CONFIG.rueckfragen.emptyState}</p>
+                )}
+                {onTabChange && (
+                  <button type="button" onClick={() => onTabChange("rueckfragen")} style={actionButtonStyle(colors.primary)}>
+                    {DEFAULT_TEXTS_CONFIG.rueckfragen.generateButton}
+                  </button>
+                )}
               </div>
             </div>
 
             {/* 7 Angebotsklarstellungen */}
             <div style={{ marginBottom: spacing[4] }}>
-              <div style={cardStyle}>
-                <div style={headerBandStyle(colors.accent)}>
-                  <h2 style={titleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.angebotsklarstellungen}</h2>
-                </div>
-                <div style={bodyStyle}>
-                  {offerAssumptions?.assumptions && offerAssumptions.assumptions.length > 0 ? (
-                    <>
-                      <p style={{ ...bodyTextStyle, marginBottom: spacing[3] }}>{DEFAULT_TEXTS_CONFIG.explanation.angebotsklarstellungen}</p>
-                      <p style={{ ...bodyTextStyle, fontSize: 13 }}>{offerAssumptions.assumptions.length} Annahmen vorhanden.</p>
-                    </>
-                  ) : (
-                    <p style={bodyTextStyle}>{DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.emptyState}</p>
-                  )}
-                  {onTabChange && (
-                    <button type="button" onClick={() => onTabChange("angebotsklarstellungen")} style={buttonStyle(colors.accent)}>
-                      {DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.generateButton}
-                    </button>
-                  )}
-                </div>
+              <div style={actionCardStyle(colors.accent)}>
+                <h2 style={actionTitleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.angebotsklarstellungen}</h2>
+                {offerAssumptions?.assumptions && offerAssumptions.assumptions.length > 0 ? (
+                  <>
+                    <p style={{ ...actionBodyStyle, marginBottom: spacing[2] }}>{DEFAULT_TEXTS_CONFIG.explanation.angebotsklarstellungen}</p>
+                    <p style={{ ...actionBodyStyle, fontSize: 13, marginBottom: 0 }}>{offerAssumptions.assumptions.length} Annahmen vorhanden.</p>
+                  </>
+                ) : (
+                  <p style={actionBodyStyle}>{DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.emptyState}</p>
+                )}
+                {onTabChange && (
+                  <button type="button" onClick={() => onTabChange("angebotsklarstellungen")} style={actionButtonStyle(colors.accent)}>
+                    {DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.generateButton}
+                  </button>
+                )}
               </div>
             </div>
           </>

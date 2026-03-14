@@ -7,6 +7,7 @@ import { appTheme as T } from "./appTheme";
 
 const pathToTitle: Record<string, string> = {
   "/app": "Dashboard",
+  "/app/analyse": "Analyse",
   "/app/analysen": "Analysen",
   "/app/settings": "Settings",
   "/app/billing": "Billing",
@@ -22,6 +23,7 @@ const publicLinks = [
 
 function getPageTitle(pathname: string): string {
   if (pathname in pathToTitle) return pathToTitle[pathname];
+  if (pathname === "/app/analyse") return "Analyse";
   if (pathname.startsWith("/app/analysen/")) return "Ergebnis";
   return "App";
 }

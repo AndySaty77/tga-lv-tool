@@ -122,7 +122,7 @@ export function MarketingNav({ active }: { active?: string }) {
               </Link>
             )}
             <Link
-              href="/analyse"
+              href="/app/analyse"
               style={{
                 textDecoration: "none",
                 fontSize: 13,
@@ -165,7 +165,7 @@ export function MarketingNav({ active }: { active?: string }) {
 
           <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexShrink: 0 }}>
             <Link
-              href="/analyse"
+              href="/app/analyse"
               style={{
                 textDecoration: "none",
                 fontSize: 12,
@@ -268,7 +268,7 @@ export function MarketingNav({ active }: { active?: string }) {
                   </Link>
                 )}
                 <Link
-                  href="/analyse"
+                  href="/app/analyse"
                   style={{
                     ...linkStyle,
                     display: "inline-flex",

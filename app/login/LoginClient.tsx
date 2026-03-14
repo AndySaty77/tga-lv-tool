@@ -49,8 +49,19 @@ export function LoginClient() {
         lead="Melden Sie sich mit Ihrem TGA LV Tool Konto an oder setzen Sie bei Bedarf Ihr Passwort zurück."
       >
         <Container>
-          <div style={{ border: `1px solid ${T.border}`, borderRadius: 18, padding: 18, background: "rgba(255,255,255,0.03)", maxWidth: 480 }}>
-            <form onSubmit={handleSubmit}>
+          <div
+            style={{
+              boxSizing: "border-box",
+              width: "100%",
+              maxWidth: 400,
+              minWidth: 0,
+              padding: 20,
+              border: `1px solid ${T.border}`,
+              borderRadius: 12,
+              background: "rgba(255,255,255,0.03)",
+            }}
+          >
+            <form onSubmit={handleSubmit} style={{ display: "block", minWidth: 0 }}>
               <div style={{ marginBottom: 16 }}>
                 <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
                   E-Mail
@@ -61,8 +72,9 @@ export function LoginClient() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   style={{
+                    boxSizing: "border-box",
                     width: "100%",
-                    padding: "8px 10px",
+                    padding: "10px 12px",
                     borderRadius: 8,
                     border: `1px solid ${T.border}`,
                     background: "rgba(15,23,42,0.9)",
@@ -81,8 +93,9 @@ export function LoginClient() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   style={{
+                    boxSizing: "border-box",
                     width: "100%",
-                    padding: "8px 10px",
+                    padding: "10px 12px",
                     borderRadius: 8,
                     border: `1px solid ${T.border}`,
                     background: "rgba(15,23,42,0.9)",
@@ -100,9 +113,10 @@ export function LoginClient() {
                 type="submit"
                 disabled={loading}
                 style={{
+                  boxSizing: "border-box",
                   width: "100%",
                   padding: "10px 14px",
-                  borderRadius: 10,
+                  borderRadius: 8,
                   border: "none",
                   background: T.brand,
                   color: "#020617",
@@ -116,7 +130,7 @@ export function LoginClient() {
                 {loading ? "Einloggen…" : "Login"}
               </button>
             </form>
-            <div style={{ marginTop: 8, fontSize: 12, color: T.muted }}>
+            <div style={{ marginTop: 12, fontSize: 12, color: T.muted }}>
               Passwort vergessen?{" "}
               <Link href="/reset-password" style={{ color: T.text, fontWeight: 600 }}>
                 Passwort zurücksetzen
@@ -127,13 +141,6 @@ export function LoginClient() {
               <Link href="/register" style={{ color: T.text, fontWeight: 600 }}>
                 Jetzt registrieren
               </Link>
-            </div>
-            <div style={{ marginTop: 12, fontSize: 12, color: T.muted }}>
-              Oder ohne Login weiter unter{" "}
-              <Link href="/analyse" style={{ color: T.text, fontWeight: 600 }}>
-                /analyse
-              </Link>
-              .
             </div>
           </div>
         </Container>

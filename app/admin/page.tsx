@@ -60,7 +60,7 @@ export default function AdminPage() {
       </nav>
 
       <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid #eee" }}>
-        <a href="/analyse" style={{ color: "#111", textDecoration: "underline", fontSize: 14 }}>
+        <a href="/app/analyse" style={{ color: "#111", textDecoration: "underline", fontSize: 14 }}>
           Zur Kundenseite (Analyse)
         </a>
       </div>

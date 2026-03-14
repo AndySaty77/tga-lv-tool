@@ -64,7 +64,7 @@ export default function FaqPage() {
               q="Wo starte ich?"
               a={
                 <>
-                  Am schnellsten über <Link href="/analyse" style={{ color: T.text, textDecoration: "underline" }}>/analyse</Link>. Für Produktdetails:{" "}
+                  Am schnellsten über <Link href="/app/analyse" style={{ color: T.text, textDecoration: "underline" }}>zur Analyse</Link>. Für Produktdetails:{" "}
                   <Link href="/features" style={{ color: T.text, textDecoration: "underline" }}>/features</Link>.
                 </>
               }

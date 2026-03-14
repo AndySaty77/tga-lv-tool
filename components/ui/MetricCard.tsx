@@ -28,6 +28,8 @@ type MetricCardProps = {
   stats?: Array<{ label: string; value: string | number }>;
   /** Optional: Icon (z. B. Emoji oder SVG) – wird farbig dargestellt */
   icon?: React.ReactNode;
+  /** Inhalt vertikal und horizontal zentrieren (z. B. für KPI-Übersicht) */
+  center?: boolean;
   className?: string;
   style?: React.CSSProperties;
 };
@@ -43,10 +45,14 @@ export function MetricCard({
   variant = "primary",
   stats,
   icon,
+  center = false,
   className = "",
   style = {},
 }: MetricCardProps) {
   const valueColor = valueColorMap[variant];
+  const containerAlign = center
+    ? { display: "flex" as const, flexDirection: "column" as const, alignItems: "center" as const, textAlign: "center" as const }
+    : {};
 
   return (
     <div
@@ -58,6 +64,7 @@ export function MetricCard({
         boxShadow: shadows.md,
         padding: spacing[4],
         transition: "box-shadow 0.2s ease, transform 0.15s ease",
+        ...containerAlign,
         ...style,
       }}
       onMouseEnter={(e) => {
@@ -72,7 +79,7 @@ export function MetricCard({
       <div style={{ ...typography.bodySm, color: colors.textMuted, marginBottom: spacing[2] }}>
         {title}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: spacing[2], flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: center ? "center" : undefined, gap: spacing[2], flexWrap: "wrap" }}>
         {icon && (
           <span style={{ fontSize: "1.5rem", lineHeight: 1 }} aria-hidden>
             {icon}

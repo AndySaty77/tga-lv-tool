@@ -212,7 +212,7 @@ export default function AdminSettingsPage() {
       </section>
 
       <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid #eee" }}>
-        <a href="/analyse" style={{ color: "#111", textDecoration: "underline", fontSize: 14 }}>
+        <a href="/app/analyse" style={{ color: "#111", textDecoration: "underline", fontSize: 14 }}>
           Zur Analyse-Seite (Kundenseite)
         </a>
       </div>

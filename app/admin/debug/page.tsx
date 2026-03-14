@@ -246,7 +246,7 @@ export default function AdminDebugPage() {
           Zur Analyse (Admin)
         </a>
         {" · "}
-        <a href="/analyse" style={{ color: "#111", textDecoration: "underline", fontSize: 14 }}>
+        <a href="/app/analyse" style={{ color: "#111", textDecoration: "underline", fontSize: 14 }}>
           Kundenbereich (/analyse)
         </a>
       </div>

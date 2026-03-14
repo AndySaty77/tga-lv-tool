@@ -49,7 +49,7 @@ export default function Home() {
 
                     <div style={{ marginTop: 18, display: "flex", gap: 10, flexWrap: "wrap" }}>
                       <a
-                        href="/analyse"
+                        href="/app/analyse"
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
@@ -240,7 +240,7 @@ export default function Home() {
                     <div style={{ marginTop: 6, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>Analyse-UI und Admin bleiben technisch getrennt; diese Seite ist nur die öffentliche Produktdarstellung.</div>
                   </div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <a href="/analyse" style={{ textDecoration: "none", fontSize: 13, fontWeight: 900, color: "#020617", padding: "10px 14px", borderRadius: 12, background: T.brand, border: "1px solid transparent" }}>
+                    <a href="/app/analyse" style={{ textDecoration: "none", fontSize: 13, fontWeight: 900, color: "#020617", padding: "10px 14px", borderRadius: 12, background: T.brand, border: "1px solid transparent" }}>
                       Zur Analyse
                     </a>
                     <a href="/features" style={{ textDecoration: "none", fontSize: 13, fontWeight: 800, color: T.text, padding: "10px 14px", borderRadius: 12, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.03)" }}>
