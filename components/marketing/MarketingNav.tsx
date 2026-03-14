@@ -6,7 +6,7 @@ import { Container } from "@/components/shared/Container";
 import { marketingTheme as T } from "./MarketingTheme";
 import { useSessionClient } from "@/lib/auth/use-session-client";
 
-/** Logo: public/brand/lv-scope-logo.png → /brand/lv-scope-logo.png. Enthält die PNG viel transparenten Rand, wirkt das Logo trotz Höhe 52px klein; dann Datei zuschneiden oder Rendergröße hier weiter erhöhen. */
+/** Echtes LV-Scope-Logo: public/brand/lv-scope-logo.png. Bei viel transparentem Rand in der PNG wirkt es trotz CSS-Höhe kleiner – dann PNG zuschneiden oder separates Header-Logo-Asset nutzen. */
 const LOGO_SRC = "/brand/lv-scope-logo.png";
 
 const linkStyle: React.CSSProperties = {
@@ -82,18 +82,18 @@ export function MarketingNav({ active }: { active?: string }) {
           display: isMobile ? "none" : "block",
         }}
       >
-        <Container style={{ display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 72, paddingTop: 10, paddingBottom: 10, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, flexShrink: 0 }}>
-            <Link href="/" style={{ display: "flex", alignItems: "center", lineHeight: 0 }} title="LV Scope – Startseite">
+        <Container style={{ display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 80, paddingTop: 12, paddingBottom: 12, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0, flexShrink: 0 }}>
+            <Link href="/" style={{ display: "block", lineHeight: 0, flexShrink: 0 }} title="LV Scope – Startseite">
               <img
                 src={LOGO_SRC}
                 alt="LV Scope"
-                width={320}
-                height={88}
-                style={{ display: "block", height: 52, width: "auto", maxWidth: "none", objectFit: "contain", flexShrink: 0, verticalAlign: "middle" }}
+                width={400}
+                height={110}
+                style={{ display: "block", height: 80, width: "auto", minHeight: 80, objectFit: "contain", objectPosition: "left center" }}
               />
             </Link>
-            <span style={{ color: T.faint, fontSize: 12, fontWeight: 600, letterSpacing: "0.02em", whiteSpace: "nowrap", flexShrink: 0, borderLeft: `1px solid ${T.border}`, paddingLeft: 14 }}>KI-gestützte LV-/GAEB-Analyse</span>
+            <span style={{ color: T.faint, fontSize: 11, fontWeight: 600, letterSpacing: "0.03em", whiteSpace: "nowrap", flexShrink: 1, borderLeft: `1px solid ${T.border}`, paddingLeft: 16, overflow: "hidden", textOverflow: "ellipsis", maxWidth: 220 }}>KI-gestützte LV-/GAEB-Analyse</span>
           </div>
 
           <nav aria-label="Produktseiten" style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -162,18 +162,20 @@ export function MarketingNav({ active }: { active?: string }) {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            height: 56,
+            minHeight: 64,
+            paddingTop: 10,
+            paddingBottom: 10,
             minWidth: 0,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", minWidth: 0, flexShrink: 1 }}>
-            <Link href="/" style={{ display: "flex", alignItems: "center", lineHeight: 0 }} onClick={closeMenu} title="LV Scope">
+          <div style={{ display: "flex", alignItems: "center", minWidth: 0, flexShrink: 0 }}>
+            <Link href="/" style={{ display: "block", lineHeight: 0 }} onClick={closeMenu} title="LV Scope – Startseite">
               <img
                 src={LOGO_SRC}
                 alt="LV Scope"
-                width={280}
-                height={76}
-                style={{ display: "block", height: 44, width: "auto", maxWidth: "none", objectFit: "contain", flexShrink: 0, verticalAlign: "middle" }}
+                width={340}
+                height={94}
+                style={{ display: "block", height: 52, width: "auto", minHeight: 52, objectFit: "contain", objectPosition: "left center" }}
               />
             </Link>
           </div>
