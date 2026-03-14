@@ -104,13 +104,6 @@ export default function Home() {
                       </a>
                     </div>
 
-                    <div style={{ marginTop: 18, display: "flex", gap: 12, flexWrap: "wrap", color: T.faint, fontSize: 12, lineHeight: 1.5 }}>
-                      <span style={{ padding: "6px 10px", borderRadius: 999, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.03)" }}>Risikoanalyse</span>
-                      <span style={{ padding: "6px 10px", borderRadius: 999, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.03)" }}>Rückfragen</span>
-                      <span style={{ padding: "6px 10px", borderRadius: 999, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.03)" }}>Angebotsklarstellungen</span>
-                      <span style={{ padding: "6px 10px", borderRadius: 999, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.03)" }}>Nachtragspotenzial</span>
-                      <span style={{ padding: "6px 10px", borderRadius: 999, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.03)" }}>Management Summary</span>
-                    </div>
               </div>
 
               <div style={{ position: "relative" }}>
