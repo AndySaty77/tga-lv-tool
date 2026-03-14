@@ -100,7 +100,6 @@ export function MarketingNav({ active }: { active?: string }) {
             {item("/how-it-works", "Ablauf")}
             {item("/pricing", "Preise")}
             {item("/faq", "FAQ")}
-            {item("/docs", "Docs")}
           </nav>
 
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, justifyContent: "flex-end", flexShrink: 1 }}>
@@ -248,7 +247,6 @@ export function MarketingNav({ active }: { active?: string }) {
                 {item("/how-it-works", "Ablauf")}
                 {item("/pricing", "Preise")}
                 {item("/faq", "FAQ")}
-                {item("/docs", "Docs")}
 
                 <div style={{ height: 1, background: T.border, margin: "6px 0" }} />
 

@@ -63,7 +63,7 @@ export default function RegisterPage() {
       next.passwordConfirm = "Passwort und Bestätigung stimmen nicht überein.";
     }
     if (!acceptTerms) {
-      next.acceptTerms = "Bitte stimmen Sie den Bedingungen zu.";
+      next.acceptTerms = "Bitte bestätigen Sie die Kenntnisnahme der Datenschutzhinweise und der AGB.";
     }
 
     setFieldErrors(next);
@@ -111,7 +111,7 @@ export default function RegisterPage() {
       <MarketingSection
         eyebrow="Konto"
         title="Konto erstellen"
-        lead="Erstellen Sie Ihr Konto für die KI-gestützte LV-/GAEB-Analyse."
+        lead="Erstellen Sie Ihr Konto für die KI-gestützte LV-/GAEB-Analyse. Mit der Free-Mitgliedschaft können Sie unverbindlich starten – jederzeit upgraden möglich."
       >
         <Container>
           <div
@@ -131,15 +131,8 @@ export default function RegisterPage() {
               }}
             >
             <form onSubmit={handleSubmit}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                  gap: 12,
-                  marginBottom: 16,
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", gap: 20, marginBottom: 16 }}>
+                <div style={{ flex: "1 1 0", minWidth: 0 }}>
                   <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
                     Vorname
                   </label>
@@ -153,6 +146,7 @@ export default function RegisterPage() {
                     }}
                     style={{
                       width: "100%",
+                      boxSizing: "border-box",
                       padding: "8px 10px",
                       borderRadius: 8,
                       border: `1px solid ${fieldErrors.firstName ? T.danger : T.border}`,
@@ -165,7 +159,7 @@ export default function RegisterPage() {
                     <div style={{ marginTop: 4, fontSize: 11, color: T.danger }}>{fieldErrors.firstName}</div>
                   )}
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: "1 1 0", minWidth: 0 }}>
                   <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
                     Nachname
                   </label>
@@ -179,6 +173,7 @@ export default function RegisterPage() {
                     }}
                     style={{
                       width: "100%",
+                      boxSizing: "border-box",
                       padding: "8px 10px",
                       borderRadius: 8,
                       border: `1px solid ${fieldErrors.lastName ? T.danger : T.border}`,
@@ -302,7 +297,15 @@ export default function RegisterPage() {
                 )}
               </div>
 
-              <div style={{ marginBottom: 18 }}>
+              <div
+                style={{
+                  marginBottom: 18,
+                  padding: fieldErrors.acceptTerms ? "10px 12px" : undefined,
+                  borderRadius: 8,
+                  border: fieldErrors.acceptTerms ? `1px solid ${T.danger}` : undefined,
+                  background: fieldErrors.acceptTerms ? "rgba(248,113,113,0.06)" : undefined,
+                }}
+              >
                 <label
                   style={{
                     display: "flex",
@@ -320,22 +323,32 @@ export default function RegisterPage() {
                       setAcceptTerms(e.target.checked);
                       if (fieldErrors.acceptTerms) setFieldErrors((prev) => ({ ...prev, acceptTerms: undefined }));
                     }}
-                    style={{ marginTop: 2 }}
+                    style={{ marginTop: 2, flexShrink: 0 }}
                   />
                   <span>
                     Ich habe die{" "}
-                    <Link href="/datenschutz" style={{ color: T.text, fontWeight: 600 }}>
+                    <Link
+                      href="/datenschutz"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: T.text, fontWeight: 600 }}
+                    >
                       Datenschutzhinweise
                     </Link>{" "}
                     und die{" "}
-                    <Link href="/agb" style={{ color: T.text, fontWeight: 600 }}>
+                    <Link
+                      href="/agb"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: T.text, fontWeight: 600 }}
+                    >
                       AGB
                     </Link>{" "}
                     zur Kenntnis genommen und stimme ihnen zu.
                   </span>
                 </label>
                 {fieldErrors.acceptTerms && (
-                  <div style={{ marginTop: 4, fontSize: 11, color: T.danger }}>{fieldErrors.acceptTerms}</div>
+                  <div style={{ marginTop: 6, fontSize: 11, color: T.danger }}>{fieldErrors.acceptTerms}</div>
                 )}
               </div>
 
@@ -400,6 +413,9 @@ export default function RegisterPage() {
               >
                 {loading ? "Konto wird erstellt…" : info ? "Eingabe verarbeitet" : "Konto erstellen"}
               </button>
+              <p style={{ margin: "8px 0 0", fontSize: 12, color: T.faint }}>
+                Kostenlos mit Free-Tarif starten – jederzeit upgraden möglich.
+              </p>
             </form>
             <div style={{ marginTop: 12, fontSize: 12, color: T.muted }}>
               Bereits ein Konto?{" "}
@@ -412,13 +428,6 @@ export default function RegisterPage() {
               <Link href="/reset-password" style={{ color: T.text, fontWeight: 600 }}>
                 Passwort zurücksetzen
               </Link>
-            </div>
-            <div style={{ marginTop: 10, fontSize: 11, color: T.muted }}>
-              Sie können die LV-/GAEB-Analyse weiterhin ohne Login über{" "}
-              <Link href="/app/analyse" style={{ color: T.text, fontWeight: 600 }}>
-                zur Analyse
-              </Link>{" "}
-              testen.
             </div>
             </div>
           </div>

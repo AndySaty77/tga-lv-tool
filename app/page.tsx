@@ -4,6 +4,7 @@ import { MarketingFooter } from "@/components/marketing/MarketingFooter";
 import { MarketingCard, MarketingSection } from "@/components/marketing/MarketingSection";
 import { marketingTheme as T } from "@/components/marketing/MarketingTheme";
 import { Container } from "@/components/shared/Container";
+import { AnalysisPreviewShowcase } from "@/components/marketing/AnalysisPreviewShowcase";
 
 export default function Home() {
   return (
@@ -40,11 +41,10 @@ export default function Home() {
                 </div>
 
                     <h1 style={{ margin: "16px 0 0", fontSize: 34, lineHeight: 1.1, fontWeight: 800, letterSpacing: "-0.03em", color: T.text }}>
-                      LV prüfen wie ein <span style={{ color: T.brand }}>Profi</span>.
+                      LVs prüfen, Risiken erkennen, <span style={{ color: T.brand }}>Angebote besser absichern</span>.
                     </h1>
                     <p style={{ margin: "14px 0 0", fontSize: 16, lineHeight: 1.75, color: T.muted, maxWidth: 780 }}>
-                      Für TGA-Projekte zählt, was im LV steht – und was nicht. Dieses Tool strukturiert Risiken, erzeugt klare Rückfragen, liefert Angebotsklarstellungen und identifiziert
-                      Nachtragspotenzial. Ergebnisorientiert, managementtauglich, ohne Buzzword-Show.
+                      In TGA-Projekten entscheidet, was im LV steht – und was fehlt. LV Scope strukturiert Risiken, erzeugt klare Rückfragen und Angebotsklarstellungen und identifiziert Nachtragspotenzial. Ergebnisorientiert und managementtauglich.
                     </p>
 
                     <div style={{ marginTop: 18, display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -106,62 +106,8 @@ export default function Home() {
 
               </div>
 
-              <div style={{ position: "relative" }}>
-                <div
-                  style={{
-                    borderRadius: 22,
-                    border: `1px solid ${T.border}`,
-                    background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
-                    boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
-                    overflow: "hidden",
-                  }}
-                >
-                      <div style={{ padding: "14px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                        <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: T.faint }}>Ergebnis-Überblick</div>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <span style={{ width: 8, height: 8, borderRadius: 999, background: "rgba(255,255,255,0.20)" }} />
-                          <span style={{ width: 8, height: 8, borderRadius: 999, background: "rgba(255,255,255,0.20)" }} />
-                          <span style={{ width: 8, height: 8, borderRadius: 999, background: "rgba(255,255,255,0.20)" }} />
-                        </div>
-                      </div>
-                      <div style={{ padding: 16, display: "grid", gap: 10 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                          <div style={{ border: `1px solid ${T.border}`, borderRadius: 16, padding: 12, background: "rgba(255,255,255,0.03)" }}>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: T.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Score</div>
-                            <div style={{ marginTop: 8, fontSize: 28, fontWeight: 950, letterSpacing: "-0.02em" }}>74</div>
-                            <div style={{ marginTop: 6, fontSize: 12, color: T.muted }}>Ampel je Kategorie</div>
-                          </div>
-                          <div style={{ border: `1px solid ${T.border}`, borderRadius: 16, padding: 12, background: "rgba(255,255,255,0.03)" }}>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: T.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Kritische Trigger</div>
-                            <div style={{ marginTop: 8, fontSize: 28, fontWeight: 950, letterSpacing: "-0.02em" }}>6</div>
-                            <div style={{ marginTop: 6, fontSize: 12, color: T.muted }}>mit hoher Relevanz</div>
-                          </div>
-                        </div>
-
-                        <div style={{ border: `1px solid ${T.border}`, borderRadius: 16, padding: 12, background: "rgba(255,255,255,0.03)" }}>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: T.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Management Summary</div>
-                          <p style={{ margin: "10px 0 0", fontSize: 13, lineHeight: 1.6, color: T.muted }}>
-                            Drei Kernaussagen, Sofortmaßnahmen, Top-Risiken – komprimiert für Projektleitung und Kalkulation.
-                          </p>
-                        </div>
-
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                          <div style={{ border: `1px solid ${T.border}`, borderRadius: 16, padding: 12, background: "rgba(255,255,255,0.03)" }}>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: T.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Rückfragen</div>
-                            <div style={{ marginTop: 8, fontSize: 16, fontWeight: 900 }}>Gruppiert</div>
-                            <div style={{ marginTop: 6, fontSize: 12, color: T.muted }}>nach Themen & Bauteilen</div>
-                          </div>
-                          <div style={{ border: `1px solid ${T.border}`, borderRadius: 16, padding: 12, background: "rgba(255,255,255,0.03)" }}>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: T.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Klarstellungen</div>
-                            <div style={{ marginTop: 8, fontSize: 16, fontWeight: 900 }}>Formulierbar</div>
-                            <div style={{ marginTop: 6, fontSize: 12, color: T.muted }}>für Angebotstext</div>
-                          </div>
-                        </div>
-                      </div>
-                </div>
-                <div style={{ marginTop: 10, color: T.faint, fontSize: 12 }}>
-                  Platzhalter-UI. Später ideal mit echten Screenshots ersetzen.
-                </div>
+              <div style={{ position: "relative", display: "flex", justifyContent: "flex-end" }}>
+                <AnalysisPreviewShowcase />
               </div>
             </div>
           </Container>
@@ -171,24 +117,24 @@ export default function Home() {
             <MarketingSection
               eyebrow="Warum"
               title="Von Upload zu Entscheidungsvorlage"
-              lead="Nicht „noch ein Viewer“, sondern ein Ergebnis-Workflow: Score, Summary und konkrete Maßnahmen. Damit Teams schneller, konsistenter und nachvollziehbar entscheiden."
+              lead="Score, Summary und konkrete Maßnahmen statt LV-Chaos. Kalkulation und Projektleitung erhalten eine gemeinsame Basis – klarere Entscheidungen, weniger Interpretationsspielraum, schneller zur Freigabe."
             >
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
                 <MarketingCard
                   title="Risiken sichtbar machen"
                   accent="risk"
-                  text="Kritische Stellen werden strukturiert – inklusive Kategorien, Severity und Kontext."
-                  bullets={["Ampel je Kategorie", "Top Findings & Trigger", "Transparenz/Debug für Nachvollziehbarkeit"]}
+                  text="Kritische Stellen strukturiert nach Kategorie und Relevanz – so können Angebots-Teams und Projektleitung dieselbe Grundlage nutzen und zügiger entscheiden."
+                  bullets={["Ampel je Kategorie", "Top Findings & Trigger", "Nachvollziehbare Grundlage für Freigaben"]}
                 />
                 <MarketingCard
                   title="Rückfragen ableiten"
                   accent="ops"
-                  text="Aus Unsicherheiten werden klare Fragen, die du in die Klärung geben kannst."
-                  bullets={["Gruppierung nach Themen", "Konkrete Formulierungen", "Quelle/Begründung je Punkt"]}
+                  text="Aus Unsicherheiten werden klare, formulierte Fragen für die Klärung – weniger Hin und Her, schnelleres Arbeiten in Kalkulation und Einkauf."
+                  bullets={["Gruppierung nach Themen", "Konkrete Formulierungen fürs Angebot", "Quelle/Begründung je Punkt"]}
                 />
                 <MarketingCard
                   title="Nachtragspotenzial erkennen"
-                  text="Finde typische Nachtragsmechanismen (Leistungsabgrenzung, Mengenrisiko, Schnittstellen) und priorisiere."
+                  text="Typische Nachtragsmechanismen (Leistungsabgrenzung, Mengenrisiko, Schnittstellen) priorisiert – für bessere Freigabefähigkeit und weniger böse Überraschungen."
                   bullets={["Opportunities & Cluster", "Claim-Potenzial (hoch/mittel/niedrig)", "Management Summary für Entscheider"]}
                 />
               </div>
@@ -196,29 +142,29 @@ export default function Home() {
 
             <MarketingSection
               eyebrow="Für Teams"
-              title="Kalkulation, Projektleitung, Einkauf – eine Sicht"
-              lead="Das Tool übersetzt LV-Komplexität in eine konsistente Struktur: Ergebnis oben, Details in Tabs. Für Angebote, die sauber begründet und intern anschlussfähig sind."
+              title="Kalkulation, Projektleitung, Freigabe – konkreter Nutzen je Rolle"
+              lead="LV Scope liefert für jede Rolle die passende Sicht: strukturierte Vorarbeit für die Kalkulation, frühe Risiko- und Schnittstellensicht für die Projektleitung, komprimierte Entscheidungsgrundlage für Einkauf und Geschäftsführung."
             >
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
                 <div style={{ border: `1px solid ${T.border}`, borderRadius: 18, padding: 18, background: "rgba(255,255,255,0.03)" }}>
-                  <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.10em", textTransform: "uppercase", color: T.faint }}>Einsatz</div>
-                  <div style={{ marginTop: 10, fontSize: 16, fontWeight: 900 }}>Vor Angebotsabgabe</div>
+                  <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.10em", textTransform: "uppercase", color: T.faint }}>Kalkulation</div>
+                  <div style={{ marginTop: 10, fontSize: 16, fontWeight: 900 }}>Risiken und Rückfragen vor Abgabe bündeln</div>
                   <p style={{ margin: "10px 0 0", fontSize: 13, lineHeight: 1.7, color: T.muted }}>
-                    Schnellcheck für Vollständigkeit/Abgrenzung, Ableitung von Rückfragen und Klarstellungen als Angebotsbestandteil.
+                    Typisch: Risiken, Unklarheiten und offene Rückfragen verstreut, Angebotsklarstellungen im Nachlauf. LV Scope strukturiert beides vor Abgabe – nach Kategorien, mit konkreten Formulierungen. Ergebnis: weniger Nacharbeit, sauberere Angebotsunterlagen.
                   </p>
                 </div>
                 <div style={{ border: `1px solid ${T.border}`, borderRadius: 18, padding: 18, background: "rgba(255,255,255,0.03)" }}>
-                  <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.10em", textTransform: "uppercase", color: T.faint }}>Einsatz</div>
-                  <div style={{ marginTop: 10, fontSize: 16, fontWeight: 900 }}>Interne Freigabe</div>
+                  <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.10em", textTransform: "uppercase", color: T.faint }}>Projektleitung</div>
+                  <div style={{ marginTop: 10, fontSize: 16, fontWeight: 900 }}>Kritische Punkte und Nachtragspotenzial früh erkennen</div>
                   <p style={{ margin: "10px 0 0", fontSize: 13, lineHeight: 1.7, color: T.muted }}>
-                    Management Summary + Top-Risiken als Entscheidungsgrundlage – weniger Interpretationsspielraum, mehr Konsistenz.
+                    Kritische Stellen, Schnittstellen und typisches Nachtragspotenzial fallen oft erst spät auf. LV Scope hebt sie priorisiert hervor – mit Score, Top-Risiken und Potenzial-Clustern. Ergebnis: bessere Steuerung vor Projektstart, weniger böse Überraschungen.
                   </p>
                 </div>
                 <div style={{ border: `1px solid ${T.border}`, borderRadius: 18, padding: 18, background: "rgba(255,255,255,0.03)" }}>
-                  <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.10em", textTransform: "uppercase", color: T.faint }}>Einsatz</div>
-                  <div style={{ marginTop: 10, fontSize: 16, fontWeight: 900 }}>Nachtragsprävention</div>
+                  <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.10em", textTransform: "uppercase", color: T.faint }}>Einkauf / Freigabe / Geschäftsführung</div>
+                  <div style={{ marginTop: 10, fontSize: 16, fontWeight: 900 }}>Komprimierte Sicht für bessere Entscheidungen</div>
                   <p style={{ margin: "10px 0 0", fontSize: 13, lineHeight: 1.7, color: T.muted }}>
-                    Unklare Leistungsgrenzen, Schnittstellen und Mengen früh markieren – bevor sie teuer werden.
+                    Zu viel Detail im LV, zu wenig vergleichbare Grundlage für Freigaben. LV Scope liefert Management Summary, Kernaussagen und Top-Risiken auf einen Blick. Ergebnis: bessere Entscheidungsgrundlage, weniger Interpretationsspielraum, schnellere Freigabefähigkeit.
                   </p>
                 </div>
               </div>
@@ -240,6 +186,25 @@ export default function Home() {
                       Features im Detail
                     </a>
                   </div>
+                </div>
+              </Container>
+            </section>
+
+            {/* Blueprint / Workflow-Illustration – zentriert vor Footer */}
+            <section style={{ padding: "32px 0 56px" }}>
+              <Container>
+                <div style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
+                  <img
+                    src="/images/blueprint-dashboard.png"
+                    alt="LV Scope: Von technischem Dokument zur Analyse und zum Dashboard"
+                    style={{
+                      maxWidth: "100%",
+                      maxWidth: 900,
+                      height: "auto",
+                      display: "block",
+                      borderRadius: 12,
+                    }}
+                  />
                 </div>
               </Container>
             </section>
