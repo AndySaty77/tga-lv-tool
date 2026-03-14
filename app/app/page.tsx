@@ -10,7 +10,7 @@ import { getUserPlan } from "@/lib/billing/userPlan";
 import { getMonthlyUsageForPlan, type MonthlyUsageInfo } from "@/lib/billing/usage";
 
 export const metadata = {
-  title: "Dashboard – TGA LV Tool",
+  title: "Dashboard – LV Scope",
   description: "Übersicht und Einstieg in die LV-Analyse.",
 };
 

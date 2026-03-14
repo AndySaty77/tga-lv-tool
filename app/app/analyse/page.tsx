@@ -8,7 +8,7 @@ import { getUserPlan } from "@/lib/billing/userPlan";
 import { getMonthlyUsageForPlan } from "@/lib/billing/usage";
 
 export const metadata = {
-  title: "Leistungsverzeichnis analysieren – TGA LV Tool",
+  title: "Leistungsverzeichnis analysieren – LV Scope",
   description:
     "Risiken, Unklarheiten und Nachtragspotenziale vor der Angebotsabgabe erkennen – mit Rückfragen und Angebotsklarstellungen.",
 };

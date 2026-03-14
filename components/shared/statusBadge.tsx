@@ -14,9 +14,9 @@ const variantStyles: Record<
     border: "rgba(74,222,128,0.35)",
   },
   "In Analyse": {
-    bg: "rgba(56,189,248,0.15)",
-    text: "rgba(56,189,248,0.95)",
-    border: "rgba(56,189,248,0.35)",
+    bg: "rgba(126,184,212,0.15)",
+    text: "rgba(126,184,212,0.95)",
+    border: "rgba(126,184,212,0.35)",
   },
   Fehler: {
     bg: "rgba(248,113,113,0.15)",

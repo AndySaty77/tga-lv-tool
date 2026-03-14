@@ -178,7 +178,7 @@ export function AppHeader() {
                 padding: "6px 10px",
                 borderRadius: T.radiusSm,
                 fontSize: 13,
-                color: "#fecaca",
+                color: T.danger,
                 textDecoration: "none",
               }}
             >

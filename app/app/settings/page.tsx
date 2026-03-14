@@ -7,7 +7,7 @@ import { getUserPlan } from "@/lib/billing/userPlan";
 import { getMonthlyUsageForPlan, type MonthlyUsageInfo } from "@/lib/billing/usage";
 
 export const metadata = {
-  title: "Settings – TGA LV Tool",
+  title: "Settings – LV Scope",
   description: "Profil, Plan und grundlegende Einstellungen.",
 };
 
@@ -55,7 +55,7 @@ export default async function AppSettingsPage() {
           Settings
         </h1>
         <p style={{ margin: "8px 0 0", fontSize: 14, color: T.muted, lineHeight: 1.5 }}>
-          Kontodaten, Plan und Nutzung für dein TGA LV Tool Konto.
+          Kontodaten, Plan und Nutzung für dein LV Scope Konto.
         </p>
       </div>
 

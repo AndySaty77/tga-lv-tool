@@ -12,7 +12,7 @@ const inter = Inter({
 });
 
 export const metadata = {
-  title: "App – TGA LV Tool",
+  title: "App – LV Scope",
   description: "Geschützter Kundenbereich: Dashboard, Analysen, Einstellungen.",
 };
 

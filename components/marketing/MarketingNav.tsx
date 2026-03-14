@@ -6,8 +6,8 @@ import { Container } from "@/components/shared/Container";
 import { marketingTheme as T } from "./MarketingTheme";
 import { useSessionClient } from "@/lib/auth/use-session-client";
 
-/** Echtes LV-Scope-Logo: public/brand/lv-scope-logo.png. Bei viel transparentem Rand in der PNG wirkt es trotz CSS-Höhe kleiner – dann PNG zuschneiden oder separates Header-Logo-Asset nutzen. */
-const LOGO_SRC = "/brand/lv-scope-logo.png";
+/** Header-Logo: public/brand/lv-scope-logo-neu-tr.png (transparenter Hintergrund) */
+const LOGO_SRC = "/brand/lv-scope-logo-neu-tr.png";
 
 const linkStyle: React.CSSProperties = {
   color: T.muted,
@@ -83,17 +83,16 @@ export function MarketingNav({ active }: { active?: string }) {
         }}
       >
         <Container style={{ display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 88, paddingTop: 14, paddingBottom: 14, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 18, minWidth: 280, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
             <Link href="/" style={{ display: "block", lineHeight: 0, flexShrink: 0 }} title="LV Scope – Startseite">
               <img
                 src={LOGO_SRC}
                 alt="LV Scope"
                 width={400}
                 height={110}
-                style={{ display: "block", height: 72, width: "auto", minHeight: 72, objectFit: "contain", objectPosition: "left center" }}
+                style={{ display: "block", height: 60, width: "auto", minHeight: 60, objectFit: "contain", objectPosition: "left center" }}
               />
             </Link>
-            <span style={{ color: T.faint, fontSize: 11, fontWeight: 600, letterSpacing: "0.03em", whiteSpace: "nowrap", flexShrink: 1, borderLeft: `1px solid ${T.border}`, paddingLeft: 18, overflow: "hidden", textOverflow: "ellipsis", maxWidth: 240 }}>KI-gestützte LV-/GAEB-Analyse</span>
           </div>
 
           <nav aria-label="Produktseiten" style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -168,14 +167,14 @@ export function MarketingNav({ active }: { active?: string }) {
             minWidth: 0,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", minWidth: 180, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
             <Link href="/" style={{ display: "block", lineHeight: 0, flexShrink: 0 }} onClick={closeMenu} title="LV Scope – Startseite">
               <img
                 src={LOGO_SRC}
                 alt="LV Scope"
                 width={340}
                 height={94}
-                style={{ display: "block", height: 48, width: "auto", minHeight: 48, objectFit: "contain", objectPosition: "left center" }}
+                style={{ display: "block", height: 42, width: "auto", minHeight: 42, objectFit: "contain", objectPosition: "left center" }}
               />
             </Link>
           </div>

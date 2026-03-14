@@ -1,37 +1,37 @@
 /**
  * Design-System für den geschützten App-Bereich (/app).
- * Dark SaaS: ruhig, professionell, B2B. Keine verspielte AI-Optik, keine übertriebenen Verläufe/Neon.
+ * LV-Scope: Navy + Coral, ruhig, professionell, B2B. Nüchterner als Landing.
  */
+const navy = {
+  bg: "#0a0e1a",
+  sidebar: "#080c14",
+  surface: "#0f1420",
+  card: "#131a28",
+};
+const coral = "#e07c5e";
+const coralMuted = "rgba(224, 124, 94, 0.18)";
+
 export const appTheme = {
-  /** Hintergrund Hauptbereich */
-  bg: "#0c1222",
-  /** Hintergrund Sidebar (etwas dunkler als Content) */
-  sidebarBg: "#0a0e18",
-  /** Hintergrund Panels / Cards-Container */
-  surface: "#111827",
-  /** Karten, Cards */
-  card: "#151d2e",
-  /** Border (dezent) */
+  bg: navy.bg,
+  sidebarBg: navy.sidebar,
+  surface: navy.surface,
+  card: navy.card,
+
   border: "rgba(255,255,255,0.08)",
-  /** Border bei Hover/Focus */
   borderHover: "rgba(255,255,255,0.12)",
-  /** Primärtext */
-  text: "rgba(255,255,255,0.92)",
-  /** Sekundärtext */
-  muted: "rgba(255,255,255,0.65)",
-  /** Tertiär / Labels */
-  faint: "rgba(255,255,255,0.45)",
-  /** Akzent sparsam: primäre Aktionen (ein Farbton, kein Neon) */
-  accent: "#38bdf8",
-  /** Akzent gedämpft für Badges/Scores */
-  accentMuted: "rgba(56,189,248,0.25)",
-  /** Erfolg / niedriges Risiko */
+
+  text: "rgba(255,255,255,0.94)",
+  muted: "rgba(255,255,255,0.62)",
+  faint: "rgba(255,255,255,0.42)",
+
+  /** LV-Scope Coral – primäre Aktionen, Akzente */
+  accent: coral,
+  accentMuted: coralMuted,
+
   success: "rgba(74,222,128,0.9)",
-  /** Warnung / mittleres Risiko */
   warning: "rgba(251,191,36,0.9)",
-  /** Gefahr / hohes Risiko */
   danger: "rgba(248,113,113,0.9)",
-  /** Abstände konsistent */
+
   space: {
     xs: 6,
     sm: 10,
@@ -39,7 +39,7 @@ export const appTheme = {
     lg: 24,
     xl: 32,
   },
-  /** Radius Karten */
+
   radius: 12,
   radiusSm: 8,
-};
+} as const;

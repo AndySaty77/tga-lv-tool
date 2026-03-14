@@ -1655,11 +1655,6 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
               <h1 style={{ margin: 0, fontSize: hasResult ? 18 : 26, fontWeight: hasResult ? 700 : 800, color: T.text, letterSpacing: "-0.025em", lineHeight: 1.2 }}>
                 Leistungsverzeichnis analysieren
               </h1>
-              {!hasResult && (
-                <p style={{ margin: 0, fontSize: 13, color: T.muted, fontWeight: 400, maxWidth: 480, lineHeight: 1.5 }}>
-                  Erkennen Sie Risiken, Unklarheiten und mögliche Nachtragspotenziale vor der Angebotsabgabe.
-                </p>
-              )}
               {fileMeta?.name && (
                 <span style={{ fontSize: 12, color: T.faint, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(hasResult ? { marginLeft: 8, paddingLeft: 12, borderLeft: `1px solid ${T.border}` } : { marginTop: 4 }) }}>
                   {fileMeta.name}

@@ -7,6 +7,8 @@ import { AppSidebar } from "@/components/app/sidebar";
 import { AppHeader } from "@/components/app/appHeader";
 import { appTheme as T } from "@/components/app/appTheme";
 
+const APP_LOGO_SRC = "/brand/lv-scope-logo-neu-tr.png";
+
 const SIDEBAR_WIDTH = 248;
 const BREAKPOINT = 768;
 
@@ -56,17 +58,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             borderBottom: `1px solid ${T.border}`,
         }}
       >
-        <Link
-          href="/app"
-          style={{
-            fontSize: 15,
-            fontWeight: 800,
-            letterSpacing: "-0.02em",
-            color: T.text,
-            textDecoration: "none",
-          }}
-        >
-          TGA LV Tool
+        <Link href="/app" style={{ display: "block", lineHeight: 0 }} title="LV Scope – App">
+          <img
+            src={APP_LOGO_SRC}
+            alt="LV Scope"
+            width={160}
+            height={44}
+            style={{ display: "block", height: 32, width: "auto", minHeight: 32, objectFit: "contain", objectPosition: "left center" }}
+          />
         </Link>
         <div style={{ display: "flex", alignItems: "center", gap: T.space.sm }}>
           <Link

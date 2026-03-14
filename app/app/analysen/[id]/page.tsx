@@ -9,7 +9,7 @@ type Props = { params: Promise<{ id: string }> };
 export async function generateMetadata({ params }: Props) {
   const { id } = await params;
   return {
-    title: `Analyse ${id} – TGA LV Tool`,
+    title: `Analyse ${id} – LV Scope`,
     description: "Ergebnisansicht der LV-Analyse.",
   };
 }

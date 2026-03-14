@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 import { BarChart3, FileSearch, FolderSearch, Settings, CreditCard } from "lucide-react";
 import { appTheme as T } from "./appTheme";
 
+const APP_LOGO_SRC = "/brand/lv-scope-logo-neu-tr.png";
+
 const navItems = [
   { href: "/app", label: "Dashboard", icon: BarChart3 },
   { href: "/app/analyse", label: "Analyse", icon: FileSearch },
@@ -33,19 +35,16 @@ export function AppSidebar() {
       }}
     >
       <div style={{ marginBottom: T.space.sm }}>
-        <Link
-          href="/app"
-          style={{
-            fontSize: 15,
-            fontWeight: 800,
-            letterSpacing: "-0.02em",
-            color: T.text,
-            textDecoration: "none",
-          }}
-        >
-          TGA LV Tool
+        <Link href="/app" style={{ display: "block", lineHeight: 0 }} title="LV Scope – App">
+          <img
+            src={APP_LOGO_SRC}
+            alt="LV Scope"
+            width={180}
+            height={50}
+            style={{ display: "block", height: 36, width: "auto", minHeight: 36, objectFit: "contain", objectPosition: "left center" }}
+          />
         </Link>
-        <div style={{ fontSize: 11, fontWeight: 600, color: T.faint, marginTop: 2, letterSpacing: "0.04em" }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: T.faint, marginTop: 6, letterSpacing: "0.04em" }}>
           App-Bereich
         </div>
       </div>

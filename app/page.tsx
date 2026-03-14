@@ -39,7 +39,7 @@ export default function Home() {
                   </span>
                 </div>
 
-                    <h1 style={{ margin: "16px 0 0", fontSize: 46, lineHeight: 1.05, fontWeight: 950, letterSpacing: "-0.04em", color: T.text }}>
+                    <h1 style={{ margin: "16px 0 0", fontSize: 34, lineHeight: 1.1, fontWeight: 800, letterSpacing: "-0.03em", color: T.text }}>
                       LV prüfen wie ein <span style={{ color: T.brand }}>Profi</span>.
                     </h1>
                     <p style={{ margin: "14px 0 0", fontSize: 16, lineHeight: 1.75, color: T.muted, maxWidth: 780 }}>

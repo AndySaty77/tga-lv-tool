@@ -1,13 +1,13 @@
-/* Hover-States für App-Sidebar (nur /app-Bereich) */
+/* Hover-States für App-Sidebar (LV-Scope) */
 .app-sidebar-link:hover {
-  background: rgba(255, 255, 255, 0.05) !important;
-  color: rgba(255, 255, 255, 0.92) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: rgba(255, 255, 255, 0.94) !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
 }
 
 /* App-Header: Links zur öffentlichen Website */
 .app-header-public-link:hover {
-  color: rgba(255, 255, 255, 0.92) !important;
+  color: rgba(255, 255, 255, 0.94) !important;
   background: rgba(255, 255, 255, 0.06) !important;
 }
 
@@ -37,7 +37,7 @@
   max-width: 248px;
   box-sizing: border-box;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
 }
 .app-layout .app-main-wrapper {
   grid-column: 2;

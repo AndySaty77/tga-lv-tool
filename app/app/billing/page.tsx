@@ -2,7 +2,7 @@ import React from "react";
 import { appTheme as T } from "@/components/app/appTheme";
 
 export const metadata = {
-  title: "Billing – TGA LV Tool",
+  title: "Billing – LV Scope",
   description: "Plan und Abrechnung.",
 };
 
