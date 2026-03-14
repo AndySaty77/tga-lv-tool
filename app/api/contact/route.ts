@@ -6,8 +6,12 @@
  * - CONTACT_FORM_TO_EMAIL – E-Mail-Adresse, an die Anfragen gesendet werden
  *
  * Optional:
- * - CONTACT_FORM_FROM_EMAIL – Absender-Adresse (z. B. "TGA LV Tool <kontakt@ihredomain.de>").
+ * - CONTACT_FORM_FROM_EMAIL – Absender-Adresse (z. B. "LV Scope <kontakt@lvscope.de>").
  *   Wenn nicht gesetzt: "TGA LV Tool <onboarding@resend.dev>" (Resend-Test-Absender, nur für Tests).
+ * - CONTACT_FORM_REPLY_TO – Reply-To der Bestätigungsmail (z. B. support@lvscope.de), damit Antworten beim Support landen.
+ *
+ * Ablauf: Zuerst interne Mail an CONTACT_FORM_TO_EMAIL; nur bei Erfolg Bestätigungsmail an den Absender.
+ * Schlägt die Bestätigungsmail fehl, antwortet die API weiterhin mit 200 (Anfrage ist angekommen), Fehler wird nur geloggt.
  *
  * Lokal: .env.local mit RESEND_API_KEY und CONTACT_FORM_TO_EMAIL anlegen.
  * Vercel: gleiche Variablen im Projekt unter Settings → Environment Variables setzen.
@@ -52,6 +56,34 @@ function buildEmailBody(p: {
   if (p.teamSize) lines.push(`Teamgröße: ${p.teamSize}`, "");
   if (p.interest) lines.push(`Interesse: ${INTEREST_LABELS[p.interest] ?? p.interest}`, "");
   lines.push("---", "", `Eingegangen: ${p.timestamp}`);
+  return lines.join("\n");
+}
+
+/** Bestätigungsmail an den Absender (nur wenn interne Mail erfolgreich war). */
+function buildConfirmationBody(p: {
+  name: string;
+  company: string;
+  interest?: string;
+  message: string;
+}): string {
+  const interestLabel = p.interest ? INTEREST_LABELS[p.interest] ?? p.interest : null;
+  const lines: string[] = [
+    `Hallo ${p.name},`,
+    "",
+    "vielen Dank für Ihre Anfrage. Wir haben sie erhalten und melden uns zeitnah bei Ihnen.",
+    "",
+    "Ihre Angaben:",
+    `  Name:         ${p.name}`,
+    `  Unternehmen:  ${p.company}`,
+    ...(interestLabel ? [`  Interesse:   ${interestLabel}`] : []),
+    "",
+    "Ihre Nachricht:",
+    p.message.slice(0, 800) + (p.message.length > 800 ? "…" : ""),
+    "",
+    "---",
+    "Mit freundlichen Grüßen",
+    "Ihr Team von LV Scope",
+  ];
   return lines.join("\n");
 }
 
@@ -110,8 +142,8 @@ export async function POST(req: Request) {
   });
 
   const resend = new Resend(apiKey);
-  const subject = `Neue Team-/Individuelle Anfrage – ${company}`;
-  const textBody = buildEmailBody({
+  const subjectInternal = `Neue Team-/Individuelle Anfrage – ${company}`;
+  const textBodyInternal = buildEmailBody({
     name,
     company,
     email,
@@ -122,20 +154,40 @@ export async function POST(req: Request) {
     timestamp,
   });
 
+  // 1. Interne Mail zuerst – nur bei Erfolg Bestätigungsmail an den Nutzer
   const { data, error } = await resend.emails.send({
     from: fromEmail,
     to: [toEmail],
     replyTo: email,
-    subject,
-    text: textBody,
+    subject: subjectInternal,
+    text: textBodyInternal,
   });
 
   if (error) {
-    console.error("[contact] Resend error:", error.message);
+    console.error("[contact] internal-email failed:", error.message);
     return NextResponse.json(
       { error: "E-Mail konnte nicht gesendet werden. Bitte später erneut versuchen." },
       { status: 500 }
     );
+  }
+  console.error("[contact] internal-email ok, id:", data?.id ?? "—");
+
+  // 2. Bestätigungsmail an den Absender (nur wenn interne Mail erfolgreich)
+  // Bei Fehler der Bestätigungsmail: Anfrage gilt als angekommen, wir loggen nur und antworten weiterhin mit Erfolg.
+  const replyToSupport = process.env.CONTACT_FORM_REPLY_TO ?? undefined;
+  const { error: autoReplyError } = await resend.emails.send({
+    from: fromEmail,
+    to: [email],
+    ...(replyToSupport ? { replyTo: replyToSupport } : {}),
+    subject: "Ihre Anfrage bei LV Scope ist eingegangen",
+    text: buildConfirmationBody({ name, company, interest, message }),
+  });
+
+  if (autoReplyError) {
+    console.error("[contact] auto-reply failed (internal mail was ok):", autoReplyError.message);
+    // Bewusst weiterhin 200: Die Anfrage ist bei uns angekommen; die Bestätigungsmail ist Zusatzservice.
+  } else {
+    console.error("[contact] auto-reply ok");
   }
 
   return NextResponse.json({ ok: true, id: data?.id });

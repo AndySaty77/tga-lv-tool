@@ -46,7 +46,7 @@ export function LoginClient() {
       <MarketingSection
         eyebrow="SaaS"
         title="Login"
-        lead="Melden Sie sich mit Ihrem TGA LV Tool Konto an oder setzen Sie bei Bedarf Ihr Passwort zurück."
+        lead="Melden Sie sich mit Ihrem LV Scope Konto an oder setzen Sie bei Bedarf Ihr Passwort zurück."
       >
         <Container>
           <div

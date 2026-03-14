@@ -2,10 +2,14 @@
  * API: Angebots-Annahmen-Generator.
  * Erzeugt Annahmen aus Findings, Rückfragen, Vortext-Risiken, KeyFacts.
  * LLM optional für Textoptimierung und Plausibilität.
+ * Pro-Feature: Free-User erhalten 403.
  */
 
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { getUser } from "@/lib/auth/get-user";
+import { getUserPlan } from "@/lib/billing/userPlan";
+import { hasFeature } from "@/lib/billing/plans";
 import { generateOfferAssumptions, type OfferAssumption } from "../../../lib/offerAssumptions";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -64,6 +68,18 @@ Gib ein JSON-Objekt zurück: { "assumptions": [ { "id": "...", "assumption": "op
 }
 
 export async function POST(req: Request) {
+  const user = await getUser().catch(() => null);
+  if (!user) {
+    return NextResponse.json({ error: "Nicht angemeldet" }, { status: 401 });
+  }
+  const plan = await getUserPlan();
+  if (!hasFeature(plan, "advancedFeatures")) {
+    return NextResponse.json(
+      { error: "Angebotsklarstellungen sind nur im Pro-Plan verfügbar." },
+      { status: 403 }
+    );
+  }
+
   try {
     const body = await req.json().catch(() => ({}));
     const findings = Array.isArray(body.findings) ? body.findings : [];

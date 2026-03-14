@@ -86,7 +86,7 @@ export function ContactForm() {
           Anfrage gesendet
         </div>
         <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.6 }}>
-          Vielen Dank. Wir melden uns in Kürze bei Ihnen.
+          Sie erhalten in Kürze eine Bestätigung per E-Mail.
         </p>
       </div>
     );

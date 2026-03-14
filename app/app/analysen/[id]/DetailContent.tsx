@@ -122,7 +122,7 @@ function getFilenameFromDisposition(header: string | null): string | null {
   return match ? match[1].trim() : null;
 }
 
-export function DetailContent({ id }: { id: string }) {
+export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfExport?: boolean }) {
   const [item, setItem] = React.useState<AnalyseItem | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -154,7 +154,7 @@ export function DetailContent({ id }: { id: string }) {
   }, [id]);
 
   const handlePdfExport = React.useCallback(async () => {
-    if (!item) return;
+    if (!item || !canPdfExport) return;
     setExportError(null);
     setExportLoading(true);
     try {
@@ -185,7 +185,7 @@ export function DetailContent({ id }: { id: string }) {
     } finally {
       setExportLoading(false);
     }
-  }, [item, id]);
+  }, [item, id, canPdfExport]);
 
   if (loading) {
     return (
@@ -292,24 +292,32 @@ export function DetailContent({ id }: { id: string }) {
               )}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handlePdfExport}
-            disabled={exportLoading}
-            style={{
-              padding: "8px 14px",
-              fontSize: 13,
-              fontWeight: 600,
-              color: T.text,
-              background: T.card,
-              border: `1px solid ${T.border}`,
-              borderRadius: T.radiusSm,
-              cursor: exportLoading ? "not-allowed" : "pointer",
-              opacity: exportLoading ? 0.7 : 1,
-            }}
-          >
-            {exportLoading ? "Export läuft…" : "PDF exportieren"}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {!canPdfExport && (
+              <>
+                <span style={{ fontSize: 12, fontWeight: 600, color: T.muted }}>Nur in Pro</span>
+                <Link href="/pricing" style={{ fontSize: 12, fontWeight: 600, color: T.accent, textDecoration: "none" }}>→ Pro</Link>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={handlePdfExport}
+              disabled={exportLoading || !canPdfExport}
+              style={{
+                padding: "8px 14px",
+                fontSize: 13,
+                fontWeight: 600,
+                color: T.text,
+                background: T.card,
+                border: `1px solid ${T.border}`,
+                borderRadius: T.radiusSm,
+                cursor: exportLoading || !canPdfExport ? "not-allowed" : "pointer",
+                opacity: exportLoading || !canPdfExport ? 0.7 : 1,
+              }}
+            >
+              {exportLoading ? "Export läuft…" : "PDF exportieren"}
+            </button>
+          </div>
         </div>
         {exportError && (
           <p style={{ margin: "10px 0 0", fontSize: 13, color: T.danger }}>{exportError}</p>

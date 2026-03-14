@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { sanitizeForDisplay } from "@/lib/displayText";
 import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
 import type {
@@ -1218,6 +1219,8 @@ type Props = {
   isExpertMode: boolean;
   /** Kundenroute /analyse: optional andere Styles. */
   customerRoute?: boolean;
+  /** Wenn true: Button deaktiviert, Hinweis „Nur in Pro“ (Feature-Gate Free vs. Pro). */
+  proFeatureLocked?: boolean;
   /** Optionale Design-Tokens (z. B. PAGE_DESIGN) für einheitliche Karten/Typo/Farben. */
   designTokens?: {
     cardBorder: string;
@@ -1248,6 +1251,7 @@ export function NachtragspotenzialBlock({
   deduplicatedOpportunities,
   isExpertMode,
   customerRoute = false,
+  proFeatureLocked = false,
   designTokens,
 }: Props) {
   const [systemOpen, setSystemOpen] = useState(false);
@@ -1286,19 +1290,25 @@ export function NachtragspotenzialBlock({
             KI‑Veredelung aktivieren
           </label>
         )}
+        {proFeatureLocked && (
+          <>
+            <span style={{ fontSize: 12, fontWeight: 600, color: textMuted }}>Nur in Pro</span>
+            <Link href="/pricing" style={{ fontSize: 12, fontWeight: 600, color: primary }}>→ Pro</Link>
+          </>
+        )}
         <button
           onClick={onGenerate}
-          disabled={loading}
+          disabled={loading || proFeatureLocked}
           style={{
             padding: "10px 18px",
             borderRadius: radius,
             border: "none",
-            background: loading ? textMuted : primary,
+            background: loading || proFeatureLocked ? textMuted : primary,
             color: "#fff",
             fontSize: 13,
             fontWeight: 600,
-            cursor: loading ? "wait" : "pointer",
-            opacity: loading ? 0.9 : 1,
+            cursor: loading || proFeatureLocked ? "not-allowed" : "pointer",
+            opacity: loading || proFeatureLocked ? 0.8 : 1,
           }}
         >
           {loading

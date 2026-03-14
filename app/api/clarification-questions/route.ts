@@ -1,12 +1,28 @@
 /**
  * API: Rückfragen-Generator für Bieterfragen / Klarstellungen.
  * Regelbasiert; nutzt Findings, Vortext-Risiken, KeyFacts.
+ * Pro-Feature: Free-User erhalten 403.
  */
 
 import { NextResponse } from "next/server";
+import { getUser } from "@/lib/auth/get-user";
+import { getUserPlan } from "@/lib/billing/userPlan";
+import { hasFeature } from "@/lib/billing/plans";
 import { generateClarificationQuestions } from "../../../lib/clarificationQuestions";
 
 export async function POST(req: Request) {
+  const user = await getUser().catch(() => null);
+  if (!user) {
+    return NextResponse.json({ error: "Nicht angemeldet" }, { status: 401 });
+  }
+  const plan = await getUserPlan();
+  if (!hasFeature(plan, "advancedFeatures")) {
+    return NextResponse.json(
+      { error: "Rückfragen sind nur im Pro-Plan verfügbar." },
+      { status: 403 }
+    );
+  }
+
   try {
     const body = await req.json().catch(() => ({}));
     const findings = Array.isArray(body.findings) ? body.findings : [];

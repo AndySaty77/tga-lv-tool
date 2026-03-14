@@ -1,10 +1,13 @@
- "use client";
+"use client";
 
 import Link from "next/link";
 import React from "react";
 import { Container } from "@/components/shared/Container";
 import { marketingTheme as T } from "./MarketingTheme";
 import { useSessionClient } from "@/lib/auth/use-session-client";
+
+/** Logo: public/brand/lv-scope-logo.png → /brand/lv-scope-logo.png. Enthält die PNG viel transparenten Rand, wirkt das Logo trotz Höhe 52px klein; dann Datei zuschneiden oder Rendergröße hier weiter erhöhen. */
+const LOGO_SRC = "/brand/lv-scope-logo.png";
 
 const linkStyle: React.CSSProperties = {
   color: T.muted,
@@ -67,7 +70,7 @@ export function MarketingNav({ active }: { active?: string }) {
         position: "sticky",
         top: 0,
         zIndex: 10,
-        background: "rgba(11, 18, 32, 0.82)",
+        background: "rgba(10, 14, 26, 0.88)",
         backdropFilter: "blur(10px)",
         borderBottom: `1px solid ${T.border}`,
       }}
@@ -79,12 +82,18 @@ export function MarketingNav({ active }: { active?: string }) {
           display: isMobile ? "none" : "block",
         }}
       >
-        <Container style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-            <Link href="/" style={{ color: T.text, textDecoration: "none", fontWeight: 900, letterSpacing: "-0.02em" }}>
-              TGA&nbsp;LV&nbsp;Tool
+        <Container style={{ display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 72, paddingTop: 10, paddingBottom: 10, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, flexShrink: 0 }}>
+            <Link href="/" style={{ display: "flex", alignItems: "center", lineHeight: 0 }} title="LV Scope – Startseite">
+              <img
+                src={LOGO_SRC}
+                alt="LV Scope"
+                width={320}
+                height={88}
+                style={{ display: "block", height: 52, width: "auto", maxWidth: "none", objectFit: "contain", flexShrink: 0, verticalAlign: "middle" }}
+              />
             </Link>
-            <span style={{ color: T.faint, fontSize: 12, fontWeight: 700 }}>LV-/GAEB-Analyse</span>
+            <span style={{ color: T.faint, fontSize: 12, fontWeight: 600, letterSpacing: "0.02em", whiteSpace: "nowrap", flexShrink: 0, borderLeft: `1px solid ${T.border}`, paddingLeft: 14 }}>KI-gestützte LV-/GAEB-Analyse</span>
           </div>
 
           <nav aria-label="Produktseiten" style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -157,9 +166,15 @@ export function MarketingNav({ active }: { active?: string }) {
             minWidth: 0,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexShrink: 1 }}>
-            <Link href="/" style={{ color: T.text, textDecoration: "none", fontWeight: 900, letterSpacing: "-0.02em", fontSize: 14 }} onClick={closeMenu}>
-              TGA&nbsp;LV&nbsp;Tool
+          <div style={{ display: "flex", alignItems: "center", minWidth: 0, flexShrink: 1 }}>
+            <Link href="/" style={{ display: "flex", alignItems: "center", lineHeight: 0 }} onClick={closeMenu} title="LV Scope">
+              <img
+                src={LOGO_SRC}
+                alt="LV Scope"
+                width={280}
+                height={76}
+                style={{ display: "block", height: 44, width: "auto", maxWidth: "none", objectFit: "contain", flexShrink: 0, verticalAlign: "middle" }}
+              />
             </Link>
           </div>
 

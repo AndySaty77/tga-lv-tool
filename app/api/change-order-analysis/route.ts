@@ -1,12 +1,28 @@
 /**
  * API: Nachtragsanalyse (Change Order Opportunities).
  * Hybrid: regelbasiert aus Findings/Vortext/KeyFacts + optional LLM.
+ * Pro-Feature: Free-User erhalten 403.
  */
 
 import { NextResponse } from "next/server";
+import { getUser } from "@/lib/auth/get-user";
+import { getUserPlan } from "@/lib/billing/userPlan";
+import { hasFeature } from "@/lib/billing/plans";
 import { runChangeOrderAnalysis } from "../../../lib/changeOrderAnalysis";
 
 export async function POST(req: Request) {
+  const user = await getUser().catch(() => null);
+  if (!user) {
+    return NextResponse.json({ error: "Nicht angemeldet" }, { status: 401 });
+  }
+  const plan = await getUserPlan();
+  if (!hasFeature(plan, "advancedChangeOrderAnalysis")) {
+    return NextResponse.json(
+      { error: "Nachtragsanalyse ist nur im Pro-Plan verfügbar." },
+      { status: 403 }
+    );
+  }
+
   try {
     const body = await req.json().catch(() => ({}));
     const findings = Array.isArray(body.findings) ? body.findings : [];

@@ -16,7 +16,9 @@ import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
 import { PAGE_DESIGN } from "@/lib/ui/pageDesign";
 import { SectionCard, StatusBadge } from "@/components/ui";
 import { colors as themeColors } from "@/lib/ui/theme";
+import Link from "next/link";
 import { appTheme as T } from "@/components/app/appTheme";
+import type { PlanId } from "@/lib/billing/plans";
 
 /** Einheitliches Design für alle Tabs (Rückfragen, Risiken, Angebotsklarstellungen, Admin). */
 const D = PAGE_DESIGN;
@@ -405,8 +407,11 @@ type SplitResult = {
   meta?: any;
 };
 
-export function ScorePage(props: { customerRoute?: boolean } = {}) {
-  const { customerRoute = false } = props;
+export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}) {
+  const { customerRoute = false, plan } = props;
+  /** In der Kundenroute: Pro-Features nur bei plan === "pro". Admin-Route: immer erlaubt. */
+  const canUseChangeOrder = !customerRoute || plan !== "free";
+  const canUseAdvancedFeatures = !customerRoute || plan !== "free";
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [lvText, setLvText] = useState("");
@@ -2767,6 +2772,7 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
               isExpertMode={isExpertMode}
               customerRoute={!!customerRoute}
               designTokens={D}
+              proFeatureLocked={!canUseChangeOrder}
             />
           </div>
           )}
@@ -3011,23 +3017,31 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           <SectionCard accent="primary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: clarificationQuestions ? 16 : 0 }}>
               <div style={{ fontSize: 15, color: D.textPrimary, fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.rueckfragenBlock}</div>
-              <button
-                onClick={generateClarificationQuestions}
-                disabled={clarificationQuestionsLoading}
-                style={{
-                  padding: "10px 18px",
-                  borderRadius: D.radiusButton,
-                  border: "none",
-                  background: clarificationQuestionsLoading ? D.textMuted : D.primary,
-                  color: "#fff",
-                  fontWeight: 600,
-                  fontSize: 13,
-                  cursor: clarificationQuestionsLoading ? "wait" : "pointer",
-                  opacity: clarificationQuestionsLoading ? 0.9 : 1,
-                }}
-              >
-                {clarificationQuestionsLoading ? DEFAULT_TEXTS_CONFIG.rueckfragen.generateButtonLoading : DEFAULT_TEXTS_CONFIG.rueckfragen.generateButton}
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {!canUseAdvancedFeatures && (
+                  <>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: D.textMuted }}>Nur in Pro</span>
+                    <Link href="/pricing" style={{ fontSize: 12, fontWeight: 600, color: D.primary }}>→ Pro</Link>
+                  </>
+                )}
+                <button
+                  onClick={generateClarificationQuestions}
+                  disabled={clarificationQuestionsLoading || !canUseAdvancedFeatures}
+                  style={{
+                    padding: "10px 18px",
+                    borderRadius: D.radiusButton,
+                    border: "none",
+                    background: !canUseAdvancedFeatures ? D.textMuted : clarificationQuestionsLoading ? D.textMuted : D.primary,
+                    color: "#fff",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: clarificationQuestionsLoading || !canUseAdvancedFeatures ? "not-allowed" : "pointer",
+                    opacity: clarificationQuestionsLoading || !canUseAdvancedFeatures ? 0.8 : 1,
+                  }}
+                >
+                  {clarificationQuestionsLoading ? DEFAULT_TEXTS_CONFIG.rueckfragen.generateButtonLoading : DEFAULT_TEXTS_CONFIG.rueckfragen.generateButton}
+                </button>
+              </div>
             </div>
 
             {clarificationQuestions && (
@@ -3091,23 +3105,31 @@ export function ScorePage(props: { customerRoute?: boolean } = {}) {
           <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: offerAssumptions ? 16 : 0 }}>
               <div style={{ fontSize: 15, color: D.textPrimary, fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.angebotsBlock}</div>
-              <button
-                onClick={generateOfferAssumptions}
-                disabled={offerAssumptionsLoading}
-                style={{
-                  padding: "10px 18px",
-                  borderRadius: D.radiusButton,
-                  border: "none",
-                  background: offerAssumptionsLoading ? D.textMuted : D.secondary,
-                  color: "#fff",
-                  fontWeight: 600,
-                  fontSize: 13,
-                  cursor: offerAssumptionsLoading ? "wait" : "pointer",
-                  opacity: offerAssumptionsLoading ? 0.9 : 1,
-                }}
-              >
-                {offerAssumptionsLoading ? DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.generateButtonLoading : DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.generateButton}
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {!canUseAdvancedFeatures && (
+                  <>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: D.textMuted }}>Nur in Pro</span>
+                    <Link href="/pricing" style={{ fontSize: 12, fontWeight: 600, color: D.primary }}>→ Pro</Link>
+                  </>
+                )}
+                <button
+                  onClick={generateOfferAssumptions}
+                  disabled={offerAssumptionsLoading || !canUseAdvancedFeatures}
+                  style={{
+                    padding: "10px 18px",
+                    borderRadius: D.radiusButton,
+                    border: "none",
+                    background: !canUseAdvancedFeatures ? D.textMuted : offerAssumptionsLoading ? D.textMuted : D.secondary,
+                    color: "#fff",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: offerAssumptionsLoading || !canUseAdvancedFeatures ? "not-allowed" : "pointer",
+                    opacity: offerAssumptionsLoading || !canUseAdvancedFeatures ? 0.8 : 1,
+                  }}
+                >
+                  {offerAssumptionsLoading ? DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.generateButtonLoading : DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.generateButton}
+                </button>
+              </div>
             </div>
 
             {offerAssumptions && (

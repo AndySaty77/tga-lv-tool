@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getUser } from "@/lib/auth/get-user";
+import { getUserPlan } from "@/lib/billing/userPlan";
+import { hasFeature } from "@/lib/billing/plans";
 import { buildPdfReport } from "@/lib/pdf/buildPdfReport";
 import { renderPdfHtml } from "@/lib/pdf/renderPdfHtml";
 import { htmlToPdfBuffer } from "@/lib/pdf/pdfEngine";
@@ -87,6 +89,13 @@ export async function POST(request: NextRequest) {
       if (!data) {
         console.error("[PDF export] load-analysis: no row found for analysisId");
         return NextResponse.json({ error: true, stage: "load-analysis", message: "Analyse nicht gefunden oder kein Zugriff." }, { status: 404 });
+      }
+      const plan = await getUserPlan();
+      if (!hasFeature(plan, "pdfExport")) {
+        return NextResponse.json(
+          { error: true, stage: "plan", message: "PDF-Export ist nur im Pro-Plan verfügbar." },
+          { status: 403 }
+        );
       }
       payload = data;
     } else {

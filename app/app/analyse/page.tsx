@@ -20,8 +20,14 @@ export default async function AppAnalysePage() {
     return null;
   }
 
+  let plan: "free" | "pro" = "free";
   try {
-    const plan = await getUserPlan();
+    plan = await getUserPlan();
+  } catch {
+    plan = "free";
+  }
+
+  try {
     const usage = await getMonthlyUsageForPlan(user.id, plan);
 
     if (usage.hasReachedLimit && usage.limit != null) {
@@ -94,5 +100,5 @@ export default async function AppAnalysePage() {
     // Bei Fehlern in der Limitprüfung Analyse nicht blockieren
   }
 
-  return <ScorePage customerRoute />;
+  return <ScorePage customerRoute plan={plan} />;
 }

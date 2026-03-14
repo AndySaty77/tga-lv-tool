@@ -9,9 +9,9 @@ export function MarketingFooter() {
       <Container style={{ paddingTop: 28, paddingBottom: 32 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 18 }}>
           <div>
-            <div style={{ fontWeight: 900, color: T.text, letterSpacing: "-0.01em" }}>TGA LV Tool</div>
+            <div style={{ fontWeight: 900, color: T.text, letterSpacing: "-0.01em" }}>LV Scope</div>
             <p style={{ margin: "10px 0 0", color: T.muted, fontSize: 13, lineHeight: 1.6, maxWidth: 440 }}>
-              B2B-Tool für LV-/GAEB-Analyse: Risiken erkennen, Rückfragen ableiten, Angebotsklarstellungen formulieren und Nachtragspotenzial managementtauglich zusammenfassen.
+              KI-gestützte LV-/GAEB-Analyse für TGA-Angebote: Risiken erkennen, Rückfragen ableiten, Klarstellungen formulieren und Nachtragspotenzial managementtauglich zusammenfassen.
             </p>
           </div>
 
@@ -37,9 +37,9 @@ export function MarketingFooter() {
         </div>
 
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <span style={{ color: T.faint, fontSize: 12 }}>© {new Date().getFullYear()} TGA LV Tool</span>
+          <span style={{ color: T.faint, fontSize: 12 }}>© {new Date().getFullYear()} LV Scope</span>
           <span style={{ color: T.faint, fontSize: 12 }}>
-            Hinweis: Marketingseiten sind öffentlich; Analyse (`/app/analyse`) und Admin bleiben unverändert.
+            Analyse starten über App; Marketingseiten öffentlich.
           </span>
         </div>
       </Container>

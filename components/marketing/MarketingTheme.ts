@@ -1,16 +1,18 @@
-import { appTheme as App } from "@/components/app/appTheme";
+/**
+ * Marketing/Landing: LV Scope Brand (Navy + Coral).
+ * Verwendet für Startseite, Header, Footer und alle öffentlichen Marketing-Seiten.
+ */
+import { landingTheme as L } from "./LandingTheme";
 
 export const marketingTheme = {
-  bg: App.bg,
-  surface: App.surface,
-  card: App.card,
-  border: App.border,
-  text: App.text,
-  muted: App.muted,
-  faint: App.faint,
-  // Akzentfarben an App anlehnen, aber sparsam nutzen
-  brand: App.accent,
-  brand2: "#7dd3fc",
-  danger: App.danger,
+  bg: L.bg,
+  surface: L.surface,
+  card: L.card,
+  border: L.border,
+  text: L.text,
+  muted: L.muted,
+  faint: L.faint,
+  brand: L.brand,
+  brand2: L.brand2,
+  danger: L.danger,
 };
-
