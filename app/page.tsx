@@ -198,7 +198,7 @@ export default function Home() {
                     src="/images/blueprint-dashboard.png"
                     alt="LV Scope: Von technischem Dokument zur Analyse und zum Dashboard"
                     style={{
-                      maxWidth: "100%",
+                      width: "100%",
                       maxWidth: 900,
                       height: "auto",
                       display: "block",
