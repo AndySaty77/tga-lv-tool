@@ -295,7 +295,7 @@ function evaluateTrigger(text: string, trigger: DbTrigger): TriggerEvalResult {
       fire: true,
       hits: validHits,
       matchedKeyword: firstValid?.keyword,
-      matchedContext: firstValid?.matchedContext,
+      matchedContext: firstValid?.context,
       reason: contextRequired.length
         ? "Keyword + mind. ein context_required im Fenster, kein exclude_keyword"
         : "Keyword getroffen, keine Kontext-/Ausschlussbedingung",
