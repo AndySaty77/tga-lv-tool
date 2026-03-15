@@ -46,6 +46,9 @@ const CATEGORY_ORDER: CategoryKey[] = [
   "kalkulationsunsicherheit",
 ];
 
+const GAEB_TABS = ["raw", "structure", "basis_vortext", "basis_positions"] as const;
+type GaebTab = (typeof GAEB_TABS)[number];
+
 /** Kategorie-Labels aus zentraler Textkonfiguration (kundenfreundlich). */
 function catLabel(k: string) {
   return DEFAULT_TEXTS_CONFIG.internal.categoryLabels[k as keyof typeof DEFAULT_TEXTS_CONFIG.internal.categoryLabels] ?? k;
@@ -408,9 +411,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
   const [gaebPreviewLoading, setGaebPreviewLoading] = useState(false);
   const [gaebPreviewError, setGaebPreviewError] = useState<string | null>(null);
   const [gaebPreview, setGaebPreview] = useState<any>(null);
-  const [gaebTab, setGaebTab] = useState<
-    "structure" | "basis_vortext" | "basis_positions" | "raw"
-  >("basis_vortext");
+  const [gaebTab, setGaebTab] = useState<GaebTab>("basis_vortext");
 
   // ===== SPLIT (LLM) STATE =====
   const [splitLoading, setSplitLoading] = useState(false);
@@ -2079,12 +2080,10 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
         {!gaebPreviewLoading && (gaebPreview || split) && (
           <>
             <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              {[
-                ...(gaebPreview?.normalized ? (["structure"] as const) : []),
-                "basis_vortext",
-                "basis_positions",
-                "raw",
-              ].map((t) => (
+              {(gaebPreview?.normalized
+                ? (["structure", "basis_vortext", "basis_positions", "raw"] as const)
+                : (["basis_vortext", "basis_positions", "raw"] as const)
+              ).map((t: GaebTab) => (
                 <button
                   key={t}
                   type="button"
