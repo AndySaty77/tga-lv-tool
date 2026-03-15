@@ -558,7 +558,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
     setGaebPreview(null);
     setGaebPreviewError(null);
     setGaebPreviewLoading(false);
-    setGaebTab("vortext");
+    setGaebTab("basis_vortext");
   };
 
   const resetSplit = () => {
