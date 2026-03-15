@@ -180,7 +180,7 @@ export function AnalyseCockpitView({
                 {(result.detectedTrades.secondaryTrades ?? []).length > 0 && (
                   <>
                     {(result.detectedTrades.secondaryTrades ?? []).map((s) => (
-                      <span key={s} style={{ fontSize: 12, padding: "3px 8px", borderRadius: 6, background: colors.border, color: colors.textSecondary, fontWeight: 500 }}>{s}</span>
+                      <span key={s} style={{ fontSize: 12, padding: "3px 8px", borderRadius: 6, background: colors.border, color: colors.textSubtle, fontWeight: 500 }}>{s}</span>
                     ))}
                   </>
                 )}
