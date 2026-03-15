@@ -6,7 +6,8 @@ export type ScoreCategory =
   | "vortext"
   | "mengen_schnittstellen"
   | "nachtrag"
-  | "ausfuehrung";
+  | "ausfuehrung"
+  | "kalkulation";
 
 /** Aus zentraler Konfiguration (scoringConfig). */
 export const CATEGORY_WEIGHTS: Record<ScoreCategory, number> = CATEGORY_WEIGHTS_6 as Record<ScoreCategory, number>;
@@ -52,7 +53,7 @@ const levelFromTotal = (t: number): ScoreResult["level"] => {
 export function computeScore(input: ScoreInput): ScoreResult {
   const findings = [...input.findings];
 
-  // Start = volle Punktzahl je Kategorie
+  // Start = volle Punktzahl je Kategorie (kalkulation = 0, nur Durchlauf für 5er)
   const perCategory: Record<ScoreCategory, number> = {
     normen: CATEGORY_WEIGHTS.normen,
     vollstaendigkeit: CATEGORY_WEIGHTS.vollstaendigkeit,
@@ -60,6 +61,7 @@ export function computeScore(input: ScoreInput): ScoreResult {
     mengen_schnittstellen: CATEGORY_WEIGHTS.mengen_schnittstellen,
     nachtrag: CATEGORY_WEIGHTS.nachtrag,
     ausfuehrung: CATEGORY_WEIGHTS.ausfuehrung,
+    kalkulation: CATEGORY_WEIGHTS.kalkulation ?? 0,
   };
 
   // Abzüge

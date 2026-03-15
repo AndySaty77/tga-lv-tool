@@ -5,7 +5,7 @@ import { DeleteAccountBlock } from "@/components/app/DeleteAccountBlock";
 import { getUser } from "@/lib/auth/get-user";
 import type { PlanId } from "@/lib/billing/plans";
 import { getUserPlan } from "@/lib/billing/userPlan";
-import { getMonthlyUsageForPlan, type MonthlyUsageInfo } from "@/lib/billing/usage";
+import { getTotalUsageForPlan, type TotalUsageInfo } from "@/lib/billing/usage";
 
 export const metadata = {
   title: "Settings – LV Scope",
@@ -35,12 +35,12 @@ export default async function AppSettingsPage() {
   const user = await getUser().catch(() => null);
 
   let plan: PlanId = "free";
-  let usage: MonthlyUsageInfo | null = null;
+  let usage: TotalUsageInfo | null = null;
 
   if (user) {
     try {
       plan = await getUserPlan();
-      usage = await getMonthlyUsageForPlan(user.id, plan);
+      usage = await getTotalUsageForPlan(user.id, plan);
     } catch {
       plan = "free";
       usage = null;
@@ -113,31 +113,27 @@ export default async function AppSettingsPage() {
         <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
           {isPro
             ? "Mit Pro stehen Ihnen unbegrenzt viele Analysen und erweiterte Auswertungen zur Verfügung."
-            : "Mit dem Free-Plan können Sie bis zu 3 Analysen pro Monat durchführen und alle Basisfunktionen testen."}
+            : "Mit dem Free-Plan können Sie insgesamt 3 kostenlose Analysen durchführen; das Löschen gibt das Kontingent nicht frei."}
         </p>
       </SettingsCard>
 
-      <SettingsCard title="Nutzung im aktuellen Monat">
+      <SettingsCard title="Nutzung (kostenlose Analysen)">
         {usage ? (
           <>
             {usage.limit == null ? (
               <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
-                Sie nutzen Pro mit unbegrenzten Analysen. Aktuell wurden in diesem Monat{" "}
-                <span style={{ fontWeight: 600, color: T.text }}>{usage.usedThisMonth}</span> Analysen durchgeführt.
+                Sie nutzen Pro mit unbegrenzten Analysen.
               </p>
             ) : (
               <>
                 <p style={{ margin: "0 0 4px", fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
-                  Sie haben in diesem Monat{" "}
-                  <span style={{ fontWeight: 600, color: T.text }}>{usage.usedThisMonth}</span> von{" "}
-                  <span style={{ fontWeight: 600, color: T.text }}>{usage.limit}</span> möglichen Analysen genutzt.
+                  <span style={{ fontWeight: 600, color: T.text }}>{usage.used}</span> von{" "}
+                  <span style={{ fontWeight: 600, color: T.text }}>{usage.limit}</span> kostenlosen Analysen verbraucht.
                 </p>
                 <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
-                  {usage.remaining && usage.remaining > 0
-                    ? `Es verbleiben noch ${usage.remaining} Analyse${
-                        usage.remaining === 1 ? "" : "n"
-                      } in diesem Monat.`
-                    : "Das Monatslimit ist erreicht. Weitere Analysen sind im Free-Plan aktuell nicht möglich."}
+                  {usage.remaining != null && usage.remaining > 0
+                    ? `Noch ${usage.remaining} Analyse${usage.remaining === 1 ? "" : "n"} verfügbar.`
+                    : "Kontingent verbraucht. Weitere Analysen sind nur mit Pro möglich."}
                 </p>
               </>
             )}

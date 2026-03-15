@@ -3,7 +3,7 @@ import { Finding } from "./scoring";
 export const PRESET_FINDINGS = {
   DIN_1988_FEHLT: (detail?: string): Finding => ({
     id: "DIN_1988_FEHLT",
-    category: "normen",
+    category: "vollstaendigkeit",
     title: "DIN 1988 nicht genannt (Trinkwasserinstallation)",
     detail,
     severity: "high",
@@ -11,7 +11,7 @@ export const PRESET_FINDINGS = {
   }),
   DRUCKPRUEFUNG_UNKLAR: (detail?: string): Finding => ({
     id: "DRUCKPRUEFUNG_UNKLAR",
-    category: "vollstaendigkeit",
+    category: "kalkulation",
     title: "Druckprüfung/Protokoll nicht eindeutig beschrieben",
     detail,
     severity: "high",

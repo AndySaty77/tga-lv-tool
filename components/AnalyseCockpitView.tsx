@@ -1,18 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import {
   PageShell,
   MetricCard,
   AccentCard,
   SectionCard,
   ScoreBadge,
-  AccordionSection,
   InsightList,
 } from "@/components/ui";
 import { colors, spacing, radius, shadows } from "@/lib/ui/theme";
 import type { ChangeOrderResult } from "@/lib/changeOrderAnalysis";
 import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
+import { formatTradeConfidence, formatTradeConfidencePercent } from "@/lib/detectedTrades";
 
 type CategoryKey =
   | "vertrags_lv_risiken"
@@ -64,6 +64,13 @@ export type AnalyseCockpitViewProps = {
     perCategory?: Record<string, number>;
     level?: string;
     findingsSorted?: Array<{ id: string; title?: string; severity?: string; category?: string }>;
+    detectedTrades?: {
+      primaryTrade: string | null;
+      secondaryTrades: string[];
+      confidence: number | string | null;
+      signals?: string[];
+      scores?: Record<string, number>;
+    } | null;
   };
   /** Nachtragsanalyse (Claim-Potenzial, Management Summary) – vollständiger Typ aus API */
   changeOrderAnalysis?: ChangeOrderResult | null;
@@ -71,11 +78,14 @@ export type AnalyseCockpitViewProps = {
   clarificationQuestions?: { questions?: unknown[]; byGroup?: Record<string, Array<{ question?: string; title?: string }>> } | null;
   /** Angebotsklarstellungen (gruppiert) */
   offerAssumptions?: { assumptions?: unknown[]; byGroup?: Record<string, Array<{ assumption?: string; title?: string }>> } | null;
-  /** KeyFacts / Projektdaten für Detailanalyse */
-  keyFactsProjektdaten?: Array<[string, string]>;
-  keyFactLabels?: Record<string, string>;
+  /** Feste 12 Key Facts mit Anzeigewert und Fallback-Status (immer 12 Einträge in fester Reihenfolge) */
+  keyFactsDisplayList?: Array<{ key: string; label: string; value: string; isFallback: boolean }>;
+  /** Confidence pro KeyFact (0..1); nur im Expertenmodus anzeigen */
+  keyFactConfidence?: Record<string, number>;
   /** Sanitize-Funktion für Text */
   sanitize: (s: string) => string;
+  /** Expertenmodus: Confidence, sourceType, rejectionReason anzeigen */
+  expertMode?: boolean;
   /** Wechsel zu anderem Tab (z. B. "nachtragspotenzial", "rueckfragen") */
   onTabChange?: (tab: string) => void;
 };
@@ -100,12 +110,12 @@ export function AnalyseCockpitView({
   changeOrderAnalysis,
   clarificationQuestions,
   offerAssumptions,
-  keyFactsProjektdaten = [],
-  keyFactLabels = {},
+  keyFactsDisplayList = [],
+  keyFactConfidence,
   sanitize,
+  expertMode = false,
   onTabChange,
 }: AnalyseCockpitViewProps) {
-  const [keyFactsOpen, setKeyFactsOpen] = useState(false);
   const total = clamp0_100(result?.total ?? 0);
   const perCategory = result?.perCategory ?? {};
   const findings = result?.findingsSorted ?? [];
@@ -160,8 +170,72 @@ export function AnalyseCockpitView({
               <div style={{ fontSize: 14, color: colors.text }}>{analysisTimestamp}</div>
             </div>
           )}
+          {result?.detectedTrades != null && (result.detectedTrades.primaryTrade || (result.detectedTrades.secondaryTrades?.length ?? 0) > 0) && (
+            <div>
+              <div style={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Erkannte Gewerke</div>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 2 }}>
+                {result.detectedTrades.primaryTrade && (
+                  <span style={{ fontSize: 14, fontWeight: 700, color: colors.text }}>{result.detectedTrades.primaryTrade}</span>
+                )}
+                {(result.detectedTrades.secondaryTrades ?? []).length > 0 && (
+                  <>
+                    {(result.detectedTrades.secondaryTrades ?? []).map((s) => (
+                      <span key={s} style={{ fontSize: 12, padding: "3px 8px", borderRadius: 6, background: colors.border, color: colors.textSecondary, fontWeight: 500 }}>{s}</span>
+                    ))}
+                  </>
+                )}
+                {result.detectedTrades.confidence != null && (
+                  <span style={{ fontSize: 11, color: colors.textMuted }}>
+                    {typeof result.detectedTrades.confidence === "number" && Number.isFinite(result.detectedTrades.confidence)
+                      ? formatTradeConfidencePercent(result.detectedTrades.confidence)
+                      : formatTradeConfidence(result.detectedTrades.confidence)}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </header>
+
+      {/* 1 Projektinformationen aus dem Leistungsverzeichnis – fester Prüfblock mit 12 Key Facts */}
+      <div style={{ marginBottom: spacing[4] }}>
+        <SectionCard accent="primary" style={{ borderLeftWidth: 4, borderLeftColor: colors.primary }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: colors.text, margin: "0 0 " + spacing[3] }}>Projektinformationen aus dem Leistungsverzeichnis</h2>
+          {keyFactsDisplayList.length === 0 ? (
+            <p style={{ margin: 0, fontSize: 14, color: colors.textMuted, lineHeight: 1.5 }}>
+              Keine Key Facts geladen.
+            </p>
+          ) : (
+            <InsightList
+              items={keyFactsDisplayList.map((item) => {
+                const maxLen = expertMode ? 90 : 70;
+                const raw = sanitize(item.value);
+                const displayValue = raw.length > maxLen ? raw.slice(0, maxLen) + "…" : raw;
+                const conf = keyFactConfidence?.[item.key];
+                const showConf = expertMode && !item.isFallback && typeof conf === "number" && Number.isFinite(conf) && conf >= 0.55;
+                const valueNode = item.isFallback ? (
+                  <span style={{ fontStyle: "italic", color: colors.textMuted }}>{displayValue}</span>
+                ) : showConf ? (
+                  <span>
+                    {displayValue}
+                    <span style={{ marginLeft: 6, fontSize: "0.7rem", color: colors.textMuted, fontWeight: 500 }}>
+                      {Math.round(conf * 100)} %
+                    </span>
+                  </span>
+                ) : (
+                  displayValue
+                );
+                return {
+                  label: item.label,
+                  value: valueNode,
+                  variant: "neutral" as const,
+                };
+              })}
+              compact
+            />
+          )}
+        </SectionCard>
+      </div>
 
       {/* 2 Kennzahlen-Row – nur diese 4 KPI-Karten zentriert */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: spacing[3], marginBottom: spacing[4] }}>
@@ -222,7 +296,7 @@ export function AnalyseCockpitView({
         </div>
       </div>
 
-      {/* Aktionsbereiche: ruhige Dark-Cards wie KPI/Kategorien, Farbe nur als Akzent (linker Rand + Button) */}
+      {/* 3 Aktionen – ans Ende der Übersicht (Rückfragen, Annahmen, Nachtragspotenzial) */}
       {(() => {
         const actionCardStyle = (accent: string) => ({
           background: colors.card,
@@ -258,7 +332,6 @@ export function AnalyseCockpitView({
 
         return (
           <>
-            {/* 5 Nachtragspotenzial */}
             <div style={{ marginBottom: spacing[4] }}>
               <div style={actionCardStyle(colors.secondary)}>
                 <h2 style={actionTitleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}</h2>
@@ -273,7 +346,6 @@ export function AnalyseCockpitView({
               </div>
             </div>
 
-            {/* 6 Rückfragen */}
             <div style={{ marginBottom: spacing[4] }}>
               <div style={actionCardStyle(colors.primary)}>
                 <h2 style={actionTitleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.rueckfragen}</h2>
@@ -293,7 +365,6 @@ export function AnalyseCockpitView({
               </div>
             </div>
 
-            {/* 7 Angebotsklarstellungen */}
             <div style={{ marginBottom: spacing[4] }}>
               <div style={actionCardStyle(colors.accent)}>
                 <h2 style={actionTitleStyle}>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.angebotsklarstellungen}</h2>
@@ -315,28 +386,6 @@ export function AnalyseCockpitView({
           </>
         );
       })()}
-
-      {/* 8 KeyFacts / Detailanalyse – einklappbar */}
-      <AccordionSection
-        title="KeyFacts / Detailanalyse"
-        defaultOpen={false}
-        open={keyFactsOpen}
-        onToggle={setKeyFactsOpen}
-        accentColor={colors.accent}
-      >
-        {keyFactsProjektdaten.length > 0 ? (
-          <InsightList
-            items={keyFactsProjektdaten.map(([k, v]) => ({
-              label: keyFactLabels[k] ?? k,
-              value: sanitize(v).slice(0, 80) + (v.length > 80 ? "…" : ""),
-              variant: "neutral",
-            }))}
-            compact
-          />
-        ) : (
-          <p style={{ margin: 0, fontSize: 14, color: colors.textMuted }}>Keine Projektdaten extrahiert.</p>
-        )}
-      </AccordionSection>
     </PageShell>
   );
 }

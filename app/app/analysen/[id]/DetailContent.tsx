@@ -4,6 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { appTheme as T } from "@/components/app/appTheme";
+import { KEYFACT_LABELS } from "@/lib/keyFactsDefinition";
 
 type AnalyseItem = {
   id: string;
@@ -46,24 +47,6 @@ function Block({
     </section>
   );
 }
-
-const KEYFACT_LABELS: Record<string, string> = {
-  bauvorhaben: "Bauvorhaben",
-  ort: "Ort",
-  gewerk: "Gewerk",
-  bauherr_ag: "Bauherr",
-  planer: "Planer",
-  baubeginn: "Baubeginn",
-  bauzeit: "Bauzeit",
-  fertigstellung: "Fertigstellung",
-  ausfuehrungsfrist: "Ausführungsfrist",
-  ausfuehrungszeit: "Ausführungszeit",
-  fristAngebot: "Angebotsfrist",
-  bindefrist: "Bindefrist",
-  submission_einreichung: "Submission / Einreichung",
-  vob_bgb: "Vertragsgrundlage",
-  vertragsgrundlagen: "Vertragsgrundlagen",
-};
 
 const RISK_CATEGORY_LABELS: Record<string, string> = {
   vertrags_lv_risiken: "Vertrags- und LV-Risiken",

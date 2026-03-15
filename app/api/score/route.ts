@@ -3,10 +3,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getUser } from "@/lib/auth/get-user";
 import { checkRateLimit } from "@/lib/rateLimit";
-import { analyzeLvText, DbTrigger } from "../../../lib/analyzeLvText";
+import { analyzeLvText, DbTrigger, TriggerEvaluation } from "../../../lib/analyzeLvText";
 import { computeScore } from "../../../lib/scoring";
 import { analyzeLvTextWithLLM } from "../../../lib/llmRelevanceFilter";
 import { FALLBACK_SCORING_CONFIG } from "../../../lib/scoringConfig";
+import { buildDetectedTrades, emptyDetectedTrades } from "../../../lib/detectedTrades";
 
 type CategoryKey =
   | "vertrags_lv_risiken"
@@ -39,8 +40,9 @@ function mapCategoryTo5(cat: string, title?: string, detail?: string): CategoryK
   if (c === "normen") return "vertrags_lv_risiken";
   if (c === "vollstaendigkeit") return "technische_vollstaendigkeit";
   if (c === "vortext") return "vertrags_lv_risiken";
-  // Strang A: Weichwörter-Finding (nachtrag) → Score-Kategorie; echtes Nachtragspotenzial (Strang B) ist getrennt.
+  // Strang A: Weichwörter-Finding (nachtrag) → vertrags_lv_risiken; echtes Nachtragspotenzial (Strang B) ist getrennt.
   if (c === "nachtrag") return "vertrags_lv_risiken";
+  if (c === "kalkulation") return "kalkulationsunsicherheit";
   if (c === "ausfuehrung") return "technische_vollstaendigkeit";
 
   if (c === "mengen_schnittstellen") {
@@ -266,7 +268,9 @@ export async function POST(req: Request) {
       question_template,
       offer_text_template,
       is_active,
-      disciplines
+      disciplines,
+      context_required,
+      exclude_keywords
     `);
 
   if (error) {
@@ -299,29 +303,43 @@ export async function POST(req: Request) {
   let findingsBeforeLlm = 0;
   let findingsAfterLlm = 0;
 
+  let triggerEvaluations: TriggerEvaluation[] = [];
+  const analyzeOpts = {
+    vortext: hasSplit ? vortext : undefined,
+    allowDisciplines: allowDisciplines,
+    ...(debug ? { collectTriggerEvaluations: triggerEvaluations } : {}),
+  };
+
   if (useLlmRelevance) {
     // LLM-Modus: eigene Recherche im LV-Text, Trigger werden ignoriert
-    const systemFindings = analyzeLvText(textForAnalysis, [], {
-      vortext: hasSplit ? vortext : undefined,
-    });
+    const systemFindings = analyzeLvText(textForAnalysis, [], analyzeOpts);
     const llmFindings = await analyzeLvTextWithLLM(textForAnalysis);
     findings = [...systemFindings, ...llmFindings];
     findingsBeforeLlm = systemFindings.length;
     findingsAfterLlm = findings.length;
   } else {
-    // Trigger-Modus: kontextbewusstes Matching
-    findings = analyzeLvText(textForAnalysis, dbTriggers, {
-      vortext: hasSplit ? vortext : undefined,
-    });
+    // Trigger-Modus: Fenster-Logik (context_required / exclude_keywords)
+    findings = analyzeLvText(textForAnalysis, dbTriggers, analyzeOpts);
     findingsBeforeLlm = findings.length;
     findingsAfterLlm = findings.length;
   }
 
-  // 4) Kategorien mappen
-  const findingsMapped = (findings ?? []).map((f: any) => ({
-    ...f,
-    category: mapCategoryTo5(f.category, f.title, f.detail),
-  }));
+  // 4) Kategorien mappen: DB-Trigger mit 5er-Kategorie in Supabase behalten, sonst 6er→5er-Mapping
+  const findingsMapped = (findings ?? []).map((f: any) => {
+    let category5: CategoryKey;
+    if (f.id && String(f.id).startsWith("DB_") && dbTriggers.length) {
+      const triggerId = String(f.id).replace(/^DB_/, "");
+      const trigger = dbTriggers.find((t: DbTrigger) => t.id === triggerId);
+      if (trigger && isCategoryKey(String(trigger.category ?? "").trim())) {
+        category5 = trigger.category as CategoryKey;
+      } else {
+        category5 = mapCategoryTo5(f.category, f.title, f.detail);
+      }
+    } else {
+      category5 = mapCategoryTo5(f.category, f.title, f.detail);
+    }
+    return { ...f, category: category5 };
+  });
 
   // 5) computeScore behalten (Detailausgaben)
   const result = computeScore({ findings: findingsMapped });
@@ -375,11 +393,16 @@ export async function POST(req: Request) {
     )
   );
 
+  const detectedTrades = det.all?.length
+    ? buildDetectedTrades(det)
+    : emptyDetectedTrades();
+
   const json: Record<string, unknown> = {
     ...result,
     total: totalNormalized,
     perCategory,
     findingsSorted: findingsMapped,
+    detectedTrades,
     ...(debug
       ? {
           debug: {
@@ -397,6 +420,23 @@ export async function POST(req: Request) {
             sizeF,
             scoringConfigVersion: cfg.version,
             easing: cfg.easing.type,
+            /** Gefeuerte Findings: ID, 5er-Kategorie, Penalty, Titel (Nachvollziehbarkeit Score). */
+            firedFindings: (findingsMapped as any[]).map((f: any) => ({
+              triggerId: f.id,
+              category: mapCategoryTo5(f.category, f.title, f.detail),
+              penalty: f.penalty,
+              title: f.title,
+            })),
+            /** Pro Trigger: ob gefeuert/verhindert, getroffenes Keyword, Kontext, exclude_keyword, Begründung. */
+            triggerEvaluations: triggerEvaluations.map((e) => ({
+              triggerId: e.triggerId,
+              name: e.name,
+              fired: e.fired,
+              matchedKeyword: e.matchedKeyword,
+              matchedContext: e.matchedContext,
+              excludedBy: e.excludedBy,
+              reason: e.reason,
+            })),
           },
         }
       : {}),

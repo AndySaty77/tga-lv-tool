@@ -7,7 +7,7 @@ import { StatusBadge } from "@/components/shared/statusBadge";
 import { getUser } from "@/lib/auth/get-user";
 import type { PlanId } from "@/lib/billing/plans";
 import { getUserPlan } from "@/lib/billing/userPlan";
-import { getMonthlyUsageForPlan, type MonthlyUsageInfo } from "@/lib/billing/usage";
+import { getTotalUsageForPlan, type TotalUsageInfo } from "@/lib/billing/usage";
 
 export const metadata = {
   title: "Dashboard – LV Scope",
@@ -59,7 +59,7 @@ export default async function AppDashboardPage() {
   let letzteAnalyseIso: string | null = null;
   let lastAnalysen: AnalyseRunRow[] = [];
   let plan: PlanId = "free";
-  let usageInfo: MonthlyUsageInfo | null = null;
+  let usageInfo: TotalUsageInfo | null = null;
 
   if (user && supabase) {
     try {
@@ -111,7 +111,7 @@ export default async function AppDashboardPage() {
 
     try {
       plan = await getUserPlan();
-      usageInfo = await getMonthlyUsageForPlan(user.id, plan);
+      usageInfo = await getTotalUsageForPlan(user.id, plan);
     } catch {
       plan = "free";
       usageInfo = null;
@@ -171,17 +171,17 @@ export default async function AppDashboardPage() {
             </div>
             {usageInfo.limit == null ? (
               <div style={{ fontSize: 13, color: T.muted }}>
-                Unbegrenzte Analysen pro Monat.
+                Unbegrenzte Analysen.
               </div>
             ) : (
               <>
                 <div style={{ fontSize: 13, color: T.muted }}>
-                  {usageInfo.usedThisMonth} von {usageInfo.limit} Analysen in diesem Monat genutzt.
+                  {usageInfo.used} von {usageInfo.limit} kostenlosen Analysen verbraucht.
                 </div>
                 <div style={{ fontSize: 13, color: T.muted }}>
-                  {usageInfo.remaining && usageInfo.remaining > 0
+                  {usageInfo.remaining != null && usageInfo.remaining > 0
                     ? `Noch ${usageInfo.remaining} Analyse${usageInfo.remaining === 1 ? "" : "n"} verfügbar.`
-                    : "Monatslimit erreicht."}
+                    : "Kontingent verbraucht."}
                 </div>
                 <div style={{ marginTop: 6, fontSize: 12 }}>
                   <Link
@@ -202,24 +202,63 @@ export default async function AppDashboardPage() {
       )}
 
       <div style={{ marginBottom: T.space.xl }}>
-        <Link
-          href="/app/analyse"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: `${T.space.sm}px ${T.space.md}px`,
-            borderRadius: T.radiusSm,
-            fontSize: 13,
-            fontWeight: 700,
-            color: "#0c1222",
-            background: T.accent,
-            border: "none",
-            textDecoration: "none",
-          }}
-        >
-          Neue Analyse starten
-        </Link>
+        {usageInfo?.hasReachedLimit ? (
+          <div
+            style={{
+              display: "inline-flex",
+              flexDirection: "column",
+              gap: T.space.sm,
+              padding: T.space.md,
+              borderRadius: T.radiusSm,
+              border: `1px solid ${T.border}`,
+              background: "rgba(255,255,255,0.02)",
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 600, color: T.muted }}>
+              Neue Analyse (Limit erreicht)
+            </span>
+            <p style={{ margin: 0, fontSize: 12, color: T.faint, maxWidth: 360 }}>
+              Sie haben Ihr Kontingent an kostenlosen Analysen verbraucht. Upgraden Sie auf Pro für unbegrenzte Analysen.
+            </p>
+            <Link
+              href="/pricing"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "8px 14px",
+                borderRadius: T.radiusSm,
+                fontSize: 13,
+                fontWeight: 700,
+                color: "#020617",
+                background: T.accent,
+                textDecoration: "none",
+                alignSelf: "flex-start",
+              }}
+            >
+              Zu den Plänen →
+            </Link>
+          </div>
+        ) : (
+          <Link
+            href="/app/analyse"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: `${T.space.sm}px ${T.space.md}px`,
+              borderRadius: T.radiusSm,
+              fontSize: 13,
+              fontWeight: 700,
+              color: "#0c1222",
+              background: T.accent,
+              border: "none",
+              textDecoration: "none",
+            }}
+          >
+            Neue Analyse starten
+          </Link>
+        )}
       </div>
 
       <section aria-label="Letzte Analysen">

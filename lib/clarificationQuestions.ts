@@ -9,6 +9,7 @@ import {
   isSimilarToExistingQuestion,
 } from "./changePotentialCommercialActions";
 import type { ChangePotentialSummary } from "./changePotentialModel";
+import { KEYFACT_LABELS } from "./keyFactsDefinition";
 
 export type ScoreCategory =
   | "vertrags_lv_risiken"
@@ -92,32 +93,6 @@ const MISSING_KEYFACT_GROUPS: Record<string, QuestionGroup> = {
   bauherr_ag: "vertraglich",
   planer: "vertraglich",
   rangfolge: "vertraglich",
-};
-
-const KEYFACT_LABELS: Record<string, string> = {
-  baubeginn: "Baubeginn",
-  bauzeit: "Bauzeit / Dauer",
-  fertigstellung: "Fertigstellung / Abnahme",
-  ausfuehrungsfrist: "Ausführungsfrist / Terminplan",
-  ausfuehrungszeit: "Ausführungszeit",
-  fristAngebot: "Angebotsfrist",
-  bindefrist: "Bindefrist",
-  submission_einreichung: "Submission / Einreichung",
-  vertragsgrundlagen: "Vertragsgrundlagen",
-  vertragsstrafe: "Vertragsstrafe",
-  gewaerhleistung: "Gewährleistung",
-  wartung_instandhaltung: "Wartung / Instandhaltung",
-  vob_bgb: "VOB/BGB",
-  zahlungsbedingungen: "Zahlungsbedingungen",
-  abschlagszahlung: "Abschlagszahlung",
-  schlussrechnung: "Schlussrechnung / Zahlungsziel",
-  preisgleitung: "Preisgleitung",
-  bauvorhaben: "Bauvorhaben",
-  ort: "Ort / Standort",
-  gewerk: "Gewerk",
-  bauherr_ag: "Bauherr / Auftraggeber",
-  planer: "Planer",
-  rangfolge: "Rangfolge",
 };
 
 const IMPORTANT_KEYFACTS = [

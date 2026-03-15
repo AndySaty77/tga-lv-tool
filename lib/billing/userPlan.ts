@@ -43,7 +43,7 @@ export async function getUserPlan(): Promise<PlanId> {
     }
 
     const raw = data.plan.toLowerCase();
-    if (raw === "pro") return "pro";
+    if (raw === "pro" || raw === "admin") return "pro";
     return "free";
   } catch {
     return getDefaultPlan();

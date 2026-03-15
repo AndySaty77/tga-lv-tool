@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getUser } from "@/lib/auth/get-user";
 import { buildManagementSummary, type ManagementSummaryInput } from "@/lib/managementSummary";
+import type { PlanId } from "@/lib/billing/plans";
 import { getUserPlan } from "@/lib/billing/userPlan";
-import { getMonthlyUsageForPlan } from "@/lib/billing/usage";
+import { canCreateAnalysis, incrementAnalysisUsedTotal } from "@/lib/billing/usage";
 
 type Payload = {
   projectName?: string | null;
@@ -45,19 +46,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "resultJson ist erforderlich" }, { status: 400 });
   }
 
-  // Analyse-Limitierung pro Monat (Free vs. Pro) nur für eingeloggte Nutzer
+  let plan: PlanId = "free";
   if (user) {
     try {
-      const plan = await getUserPlan();
-      const usage = await getMonthlyUsageForPlan(user.id, plan);
-
-      if (usage.hasReachedLimit) {
+      plan = await getUserPlan();
+      const allowed = await canCreateAnalysis(user.id, plan);
+      if (!allowed) {
         return NextResponse.json(
           {
             ok: false,
             code: "LIMIT_REACHED",
             message:
-              "Ihr Free-Plan enthält 3 Analysen pro Monat. Bitte upgraden Sie auf Pro, um weitere Analysen durchzuführen.",
+              "Sie haben Ihr Kontingent an kostenlosen Analysen verbraucht. Bitte upgraden Sie auf Pro, um weitere Analysen durchzuführen.",
           },
           { status: 403 },
         );
@@ -124,6 +124,35 @@ export async function POST(req: Request) {
       ? "Speichern durch RLS blockiert. SUPABASE_SERVICE_ROLE_KEY setzen oder RLS-Policy für analyse_runs anlegen."
       : error.message;
     return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
+  const analyseGespeichert = true;
+  // Temporäres Logging (Debug: warum wird analysis_used_total nicht erhöht?)
+  const logCtx = {
+    "save-route": true,
+    userId: user?.id ?? null,
+    plan,
+    analyseGespeichert,
+  };
+
+  // Zähler nur für Free-User nach erfolgreichem Speichern erhöhen (Löschen gibt Kontingent nicht frei).
+  if (user?.id && plan === "free") {
+    const incrementResult = await incrementAnalysisUsedTotal(user.id);
+    console.error("[analyse/save] Inkrement-Log", {
+      ...logCtx,
+      incrementGestartet: true,
+      incrementOk: incrementResult.ok,
+      incrementError: incrementResult.ok ? null : incrementResult.error,
+    });
+    if (!incrementResult.ok) {
+      // Antwort trotzdem 200 – Analyse ist gespeichert; Zähler-Reparatur ggf. manuell
+    }
+  } else {
+    console.error("[analyse/save] Inkrement-Log", {
+      ...logCtx,
+      incrementGestartet: false,
+      reason: !user?.id ? "kein user" : "plan !== free",
+    });
   }
 
   return NextResponse.json({ ok: true, item: data });

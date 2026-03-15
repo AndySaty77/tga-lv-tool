@@ -22,6 +22,7 @@ export const LEVEL_THRESHOLDS = {
 } as const;
 
 // ==================== 6er-Kategorien (lib/scoring.ts computeScore) ====================
+/** kalkulation: Durchlauf für 5er "kalkulationsunsicherheit", Gewicht 0 damit 6er-Summe 100 bleibt. */
 export const CATEGORY_WEIGHTS_6: Record<string, number> = {
   normen: 15,
   vollstaendigkeit: 20,
@@ -29,6 +30,7 @@ export const CATEGORY_WEIGHTS_6: Record<string, number> = {
   mengen_schnittstellen: 15,
   nachtrag: 20,
   ausfuehrung: 15,
+  kalkulation: 0,
 };
 
 // ==================== 5er-Kategorien + API-Fallback (scoring_config) ====================

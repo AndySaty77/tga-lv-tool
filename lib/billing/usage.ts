@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { PlanId } from "./plans";
-import { getPlanLimits } from "./plans";
+
+const FREE_DEFAULT_LIMIT = 3;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -11,55 +12,55 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-function startOfMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
-}
-
-/**
- * Zählt, wie viele Analysen ein Nutzer im aktuellen Kalendermonat bereits durchgeführt hat.
- */
-export async function getMonthlyAnalysisCount(userId: string, now: Date = new Date()): Promise<number> {
-  const supabase = getSupabase();
-  if (!supabase) return 0;
-
-  const from = startOfMonth(now).toISOString();
-
-  try {
-    const { count, error } = await supabase
-      .from("analyse_runs")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .gte("created_at", from);
-
-    if (error) return 0;
-    return count ?? 0;
-  } catch {
-    return 0;
-  }
-}
-
-export type MonthlyUsageInfo = {
-  usedThisMonth: number;
-  limit: number | null; // null = unbegrenzt
-  remaining: number | null; // null = unbegrenzt
+/** Nutzungsinformationen (gesamte Lebenszeit für Free; Pro unbegrenzt). */
+export type TotalUsageInfo = {
+  used: number;
+  limit: number | null;
+  remaining: number | null;
   isLimited: boolean;
   hasReachedLimit: boolean;
 };
 
+/** Liest aus `profiles`: analysis_used_total, analysis_limit_total, plan. */
+export async function getProfileUsageFields(userId: string): Promise<{
+  plan: string | null;
+  analysis_used_total: number;
+  analysis_limit_total: number | null;
+} | null> {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("plan, analysis_used_total, analysis_limit_total")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const used = typeof data.analysis_used_total === "number" && data.analysis_used_total >= 0
+    ? data.analysis_used_total
+    : 0;
+  const limit = typeof data.analysis_limit_total === "number" && data.analysis_limit_total >= 0
+    ? data.analysis_limit_total
+    : null;
+  return {
+    plan: data.plan ?? null,
+    analysis_used_total: used,
+    analysis_limit_total: limit,
+  };
+}
+
 /**
- * Liefert Nutzungsinformationen für den aktuellen Monat, abhängig vom Plan.
+ * Liefert Nutzungsinformationen für das Analyse-Limit (Lebenszeit).
+ * Free: limit aus profiles (oder 3), used = analysis_used_total.
+ * Pro/Admin: unbegrenzt (limit/remaining null, hasReachedLimit false).
  */
-export async function getMonthlyUsageForPlan(
+export async function getTotalUsageForPlan(
   userId: string,
   plan: PlanId,
-  now: Date = new Date(),
-): Promise<MonthlyUsageInfo> {
-  const usedThisMonth = await getMonthlyAnalysisCount(userId, now);
-  const limits = getPlanLimits(plan);
-
-  if (limits.analysesPerMonth == null) {
+): Promise<TotalUsageInfo> {
+  const normalizedPlan = plan.toLowerCase() as PlanId;
+  if (normalizedPlan === "pro") {
     return {
-      usedThisMonth,
+      used: 0,
       limit: null,
       remaining: null,
       isLimited: false,
@@ -67,12 +68,14 @@ export async function getMonthlyUsageForPlan(
     };
   }
 
-  const limit = limits.analysesPerMonth;
-  const remaining = Math.max(limit - usedThisMonth, 0);
-  const hasReachedLimit = usedThisMonth >= limit;
+  const profile = await getProfileUsageFields(userId);
+  const limit = profile?.analysis_limit_total ?? FREE_DEFAULT_LIMIT;
+  const used = profile?.analysis_used_total ?? 0;
+  const remaining = Math.max(limit - used, 0);
+  const hasReachedLimit = used >= limit;
 
   return {
-    usedThisMonth,
+    used,
     limit,
     remaining,
     isLimited: true,
@@ -80,4 +83,53 @@ export async function getMonthlyUsageForPlan(
   };
 }
 
+/**
+ * Zentrale Prüfung: Darf dieser User eine neue Analyse anlegen?
+ * Pro/Admin: ja. Free: nur wenn analysis_used_total < analysis_limit_total.
+ */
+export async function canCreateAnalysis(userId: string, plan: PlanId): Promise<boolean> {
+  const usage = await getTotalUsageForPlan(userId, plan);
+  return !usage.hasReachedLimit;
+}
 
+export type IncrementResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Erhöht den Zähler „insgesamt verbrauchte Analysen“ um 1.
+ * Nur nach erfolgreichem Speichern einer Analyse und nur für Free-User aufrufen.
+ * Löschen einer Analyse darf diesen Zähler nicht reduzieren.
+ *
+ * Verwendet direkten UPDATE (kein RPC), damit keine DB-Funktion in Produktion nötig ist.
+ */
+export async function incrementAnalysisUsedTotal(userId: string): Promise<IncrementResult> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { ok: false, error: "Supabase nicht konfiguriert" };
+  }
+
+  const { data: row, error: selectError } = await supabase
+    .from("profiles")
+    .select("analysis_used_total")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (selectError) {
+    return { ok: false, error: `Select: ${selectError.message}` };
+  }
+
+  const current = typeof row?.analysis_used_total === "number" && row.analysis_used_total >= 0
+    ? row.analysis_used_total
+    : 0;
+  const nextValue = current + 1;
+
+  const { error: updateError } = await supabase
+    .from("profiles")
+    .update({ analysis_used_total: nextValue })
+    .eq("id", userId);
+
+  if (updateError) {
+    return { ok: false, error: `Update: ${updateError.message}` };
+  }
+
+  return { ok: true };
+}

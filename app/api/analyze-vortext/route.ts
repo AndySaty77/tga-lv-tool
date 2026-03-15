@@ -3,6 +3,12 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { getUser } from "@/lib/auth/get-user";
 import { checkRateLimit } from "@/lib/rateLimit";
+import { KEYFACTS_CORE_12_KEYS } from "@/lib/keyFactsDefinition";
+import {
+  buildKeyFactsValidated,
+  toLegacyKeyFacts,
+  toLegacyKeyFactConfidence,
+} from "@/lib/keyFactsValidation";
 
 // ================= Types =================
 type RiskLevel = "low" | "medium" | "high";
@@ -82,29 +88,20 @@ const HARD_MAX_VALUE_CHARS = 260;
 const MAX_RISK_CLAUSES = 14;
 
 const KEYSET = [
-  // Projekt & Beteiligte
-  "bauvorhaben",
-  "ort",
-  "gewerk",
-  "bauherr_ag",
+  ...KEYFACTS_CORE_12_KEYS,
+  // Optionale Felder (nicht priorisiert)
   "planer",
-  // Termine/Fristen
   "baubeginn",
   "bauzeit",
   "fertigstellung",
   "ausfuehrungsfrist",
   "ausfuehrungszeit",
-  "fristAngebot",
-  "bindefrist",
   "submission_einreichung",
-  // Vertrag
-  "vertragsgrundlagen",
   "vertragsstrafe",
   "gewaerhleistung",
   "wartung_instandhaltung",
   "vob_bgb",
   "rangfolge",
-  // Zahlung/Preis
   "zahlungsbedingungen",
   "abschlagszahlung",
   "schlussrechnung",
@@ -395,6 +392,33 @@ function extractKeyFactsRegex(input: string): KeyFacts {
     out.rangfolge = m?.[1]?.trim() ?? "";
   }
 
+  // Kern V1: Projektart (Neubau / Sanierung / Umbau / Erweiterung)
+  out.projektart = pickAny([
+    /(?:Projektart|Bauart)\s*[:\-]?\s*([^\n\r;.]{4,80})/i,
+    /(?:^|\n)(Neubau|Sanierung|Umbau|Erweiterung|Bestandssanierung)(?:\s*[:\-]|\s|$)/i,
+  ]);
+  if (!out.projektart && /(?:Bei dem |Es handelt sich um ein? )(Neubau|Sanierung|Umbau|Erweiterung)/i.test(text)) {
+    const m = /(Neubau|Sanierung|Umbau|Erweiterung)/i.exec(text);
+    if (m) out.projektart = m[1];
+  }
+  if (out.projektart) out.projektart = out.projektart.replace(/\s*[:\-].*$/, "").trim();
+
+  // Kern V1: Zusätzliche Vertragsbedingungen (Rangfolge oder eigener Abschnitt)
+  out.zusatzvertragsbedingungen = pickAny([
+    /Zusätzliche\s+Vertragsbedingungen\s*[:\-]?\s*([\s\S]{10,400}?)(?:\n{2,}|$)/i,
+    /Besondere\s+Vertragsbedingungen\s*[:\-]?\s*([\s\S]{10,400}?)(?:\n{2,}|$)/i,
+  ]);
+  if (!out.zusatzvertragsbedingungen && out.rangfolge) out.zusatzvertragsbedingungen = out.rangfolge;
+
+  // Kern V1: Ausführungszeitraum (Bauzeit / Ausführungszeit / Ausführungsdauer)
+  out.ausfuehrungszeitraum = pickAny([
+    /Ausführungszeitraum\s*[:\-]?\s*([^\n\r;.]{6,120})/i,
+    /\bBauzeit\b\s*[:\-]?\s*([^\n\r;.]{6,120})/i,
+    /\bAusführungszeit\b\s*[:\-]?\s*([^\n\r;.]{6,120})/i,
+    /Ausführungsdauer\s*[:\-]?\s*([^\n\r;.]{6,120})/i,
+    /Dauer\s*[:\-]?\s*([^\n\r;.]{6,120})/i,
+  ]);
+
   // Gewährleistung
   {
     const m = /Gewährleistung(?:\s+und\s+Abnahme)?\s*[:\-]?\s*([\s\S]{10,240}?)(?:\n|$)/i.exec(text);
@@ -623,6 +647,10 @@ KEYFACTS – WICHTIG (dynamisch aus dem Text auswerten):
 - bauzeit, baubeginn, fertigstellung: Datum oder konkrete Frist (z. B. "2026-01-09"). NICHT Handlungsanweisungen ("vorzulegen", "zu bestätigen").
 - bauherr_ag, planer: Konkreter Name/Firma (z. B. "G&W Software AG"). NICHT "(Auftraggeber)" oder Beschreibung von Plänen.
 - ausfuehrungsfrist: Konkrete Frist (z. B. "Siehe Vertragsunterlagen"). NICHT Überschriften wie "BESONDERE VERTRAGSBEDINGUNGEN".
+- projektart: Nur wenn explizit genannt: Neubau, Sanierung, Umbau oder Erweiterung. Sonst "".
+- zusatzvertragsbedingungen: Nur wenn Abschnitt "Zusätzliche Vertragsbedingungen" oder "Besondere Vertragsbedingungen" mit Inhalt. Sonst "".
+- ausfuehrungszeitraum: Konkreter Zeitraum (z. B. "6 Monate", "bis 30.06.2026"). NICHT Handlungsanweisungen.
+- lv_strukturgroesse, vorbemerkungsumfang: Leer lassen (werden serverseitig gesetzt).
 
 Regeln:
 - Nichts erfinden. Unklar = "" und confidence niedrig.
@@ -872,18 +900,21 @@ export type NormalizedPayload = {
   groupRemarks?: string[];
 };
 
-/** Felder, die zuerst aus strukturierten Quellen extrahiert werden (bei gaeb-xml). */
+/** Felder, die zuerst aus strukturierten Quellen extrahiert werden (bei gaeb-xml). Inkl. Kern V1. */
 const STRUCTURED_KEYFACT_FIELDS: KeyFactKey[] = [
   "bauherr_ag",
   "ort",
   "bauvorhaben",
   "gewerk",
+  "projektart",
   "submission_einreichung",
   "bindefrist",
   "baubeginn",
   "fertigstellung",
   "vob_bgb",
   "vertragsgrundlagen",
+  "zusatzvertragsbedingungen",
+  "ausfuehrungszeitraum",
 ];
 
 /** Phase-1-Felder für LLM-Fallback (nur fehlende/unsichere aus strukturierten Quellen ergänzen). */
@@ -1194,7 +1225,7 @@ function isInvalidOrGenericValue(value: string, field: string): boolean {
   if (/^(zu\s+benennen|noch\s+zu\s+benennen|wird\s+(noch\s+)?bekannt\s+gegeben|siehe\s+anlage|\.\.\.|n\.\s*b\.|tbd|k\.\s*a\.)$/i.test(lower)) return true;
   if (/^(n\.?\s*v\.?|n\/a|–|—|-)$/i.test(lower)) return true;
   // Lange Satzfetzen bei Termin/Frist-Feldern nicht übernehmen
-  const dateLikeFields = ["baubeginn", "fertigstellung", "bauzeit", "ausfuehrungsfrist", "ausfuehrungszeit", "bindefrist", "submission_einreichung"];
+  const dateLikeFields = ["baubeginn", "fertigstellung", "bauzeit", "ausfuehrungsfrist", "ausfuehrungszeit", "ausfuehrungszeitraum", "bindefrist", "submission_einreichung"];
   if (dateLikeFields.includes(field) && s.length > 100) return true;
   if (dateLikeFields.includes(field) && /(vorzulegen|zu bestätigen|entnommen werden|der die zeitliche)/i.test(s)) return true;
   return false;
@@ -1523,10 +1554,36 @@ export async function POST(req: Request) {
       mergeWinnerPerField[field] = keyFactsSourceByField[field]?.sourcePath ?? "unknown";
     }
 
-    const keyFactConfidenceOut: KeyFactConfidence = {};
-    for (const [k, val] of Object.entries(keyFacts)) {
+    // Kern V1: lv_strukturgroesse und vorbemerkungsumfang serverseitig setzen (nicht aus Text extrahiert)
+    if (useNormalizedStructure && body?.normalized && Array.isArray((body.normalized as NormalizedPayload).groups)) {
+      const groupCount = (body.normalized as NormalizedPayload).groups.length;
+      if (groupCount > 0 && !keyFacts.lv_strukturgroesse) {
+        keyFacts.lv_strukturgroesse = `${groupCount} Gruppen`;
+        keyFactsSourceByField.lv_strukturgroesse = { sourceTextType: "normalized-groups", sourcePath: "structure" };
+        mergeWinnerPerField.lv_strukturgroesse = "structure";
+      }
+    }
+    if (legacyVortext.length > 0 && !keyFacts.vorbemerkungsumfang) {
+      const len = legacyVortext.length;
+      const umfang = len < 2000 ? "kurz" : len < 8000 ? "mittel" : "lang";
+      keyFacts.vorbemerkungsumfang = `${umfang} (${len} Zeichen)`;
+      keyFactsSourceByField.vorbemerkungsumfang = { sourceTextType: vortextSource.sourceTextType, sourcePath: "vortext-length" };
+      mergeWinnerPerField.vorbemerkungsumfang = "vortext-length";
+    }
+
+    let keyFactConfidenceOut: KeyFactConfidence = {};
+    for (const [k] of Object.entries(keyFacts)) {
       keyFactConfidenceOut[k] = keyFactsSourceByField[k]?.sourcePath === "legacy-fallback" ? 0.75 : 0.85;
     }
+
+    // Härtung: Validierung pro Feld (found | rejected | missing); nur belastbare Werte behalten
+    const keyFactsValidated = buildKeyFactsValidated(
+      keyFacts,
+      keyFactConfidenceOut,
+      keyFactsSourceByField
+    );
+    keyFacts = toLegacyKeyFacts(keyFactsValidated);
+    keyFactConfidenceOut = toLegacyKeyFactConfidence(keyFactsValidated);
 
     const keyFactsWithSource: KeyFactWithSource[] = Object.entries(keyFacts).map(([field, value]) => {
       const v = String(value ?? "");
@@ -1554,11 +1611,32 @@ export async function POST(req: Request) {
       return out;
     });
 
+    // Optionale Debug-Ausgabe: erkannte KeyFacts (Quelle + Confidence) – nur Struktur, keine LV-Inhalte
+    if (process.env.NODE_ENV === "development") {
+      const filledKeys = Object.entries(keyFacts).filter(([, v]) => typeof v === "string" && v.trim().length > 0);
+      const withConf = filledKeys.map(([k]) => ({
+        key: k,
+        confidence: keyFactConfidenceOut[k] ?? null,
+      }));
+      console.log(
+        "[KeyFacts]",
+        "mode:",
+        keyFactsSourceMode,
+        "| filled:",
+        filledKeys.length,
+        "| keys:",
+        filledKeys.map(([k]) => k).join(", "),
+        "| confidence:",
+        withConf.length ? withConf : "n/a"
+      );
+    }
+
     return NextResponse.json(
       {
         riskClauses,
         keyFacts,
         keyFactConfidence: keyFactConfidenceOut,
+        keyFactsValidated,
         keyFactsDebug: {
           mode: llmResult?.mode,
           llmOk: llmResult?.ok,
@@ -1568,6 +1646,7 @@ export async function POST(req: Request) {
           repairApplied: true,
           keyFactsSourceMode,
           keyFactsWithSource,
+          keyFactsValidated,
           llmFallbackUsed,
           llmFieldsRequested,
           llmFieldsAccepted,

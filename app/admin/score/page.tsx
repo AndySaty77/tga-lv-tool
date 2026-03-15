@@ -13,6 +13,14 @@ import { normalizeViewerPositionenText, normalizeViewerVorbemerkungenText } from
 import type { ChangeOrderResult } from "@/lib/changeOrderAnalysis";
 import { AMPEL_THRESHOLDS } from "@/lib/scoringConfig";
 import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
+import { formatTradeConfidence, formatTradeConfidencePercent } from "@/lib/detectedTrades";
+import { KEYFACT_LABELS } from "@/lib/keyFactsDefinition";
+import {
+  KEYFACTS_DISPLAY_ORDER_12,
+  KEYFACT_FALLBACK_LABEL,
+  getDisplayValueForStatus,
+  type KeyFactFieldEntry,
+} from "@/lib/keyFactsValidation";
 import { PAGE_DESIGN } from "@/lib/ui/pageDesign";
 import { SectionCard, StatusBadge } from "@/components/ui";
 import { colors as themeColors } from "@/lib/ui/theme";
@@ -149,11 +157,20 @@ type DebugBlock = {
   easing?: string;
 };
 
+type DetectedTradesResult = {
+  primaryTrade: string | null;
+  secondaryTrades: string[];
+  confidence: number | string | null;
+  signals?: string[];
+  scores?: Record<string, number>;
+};
+
 type ScoreResult = {
   total: number;
   level: "hochriskant" | "mittel" | "solide" | "sauber" | string;
   perCategory: Record<string, number>; // Keys
   findingsSorted: Finding[];
+  detectedTrades?: DetectedTradesResult | null;
   debug?: DebugBlock;
   llmMode?: boolean;
   findingsBeforeLlm?: number;
@@ -283,64 +300,19 @@ function extractVortextUI(full: string) {
   return hardCut(candidate.trim());
 }
 
-// ===== KEY FACT LABELS (optional nice names) =====
-const KEYFACT_LABELS: Record<string, string> = {
-  // Projekt & Beteiligte
-  bauvorhaben: "Bauvorhaben / Objekt",
-  ort: "Ort / Standort",
-  gewerk: "Gewerk",
-  bauherr_ag: "Bauherr / Auftraggeber",
-  planer: "Planer / Architekt",
-
-  // Termine/Fristen
-  baubeginn: "Baubeginn",
-  bauzeit: "Bauzeit / Dauer",
-  fertigstellung: "Fertigstellung / Abnahme",
-  ausfuehrungsfrist: "Ausführungsfrist / Terminplan",
-  ausfuehrungszeit: "Ausführungszeit",
-  fristAngebot: "Angebotsfrist",
-  bindefrist: "Bindefrist",
-  submission_einreichung: "Submission / Einreichung",
-
-  // Vertrag
-  vertragsgrundlagen: "Vertragsgrundlagen",
-  vertragsstrafe: "Vertragsstrafe / Pönale",
-  gewaerhleistung: "Gewährleistung / Mängelhaftung",
-  wartung_instandhaltung: "Wartung / Instandhaltung",
-  vob_bgb: "VOB/B / BGB",
-  rangfolge: "Rangfolge Vertragsunterlagen",
-
-  // Zahlung/Preis
-  zahlungsbedingungen: "Zahlungsbedingungen",
-  abschlagszahlung: "Abschlagszahlung",
-  schlussrechnung: "Schlussrechnung / Zahlungsziel",
-  preisgleitung: "Preisgleitklausel / Rohstoffpreise",
-};
-
 function prettyKey(k: string) {
   return (k ?? "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-// ===== UI KeyFacts: Projektdaten vs. Vertragsrahmen =====
-/** Nur diese Felder im oberen Block „Projektdaten aus dem Leistungsverzeichnis“ (Reihenfolge für Anzeige). */
-const PROJEKTDATEN_KEYS_ORDER = [
-  "bauherr_ag",
-  "ort",
-  "gewerk",
-  "bindefrist",
-  "submission_einreichung",
-  "baubeginn",
-  "fertigstellung",
-  "bauzeit",
-  "vob_bgb",
-  "vertragsgrundlagen",
-];
+// ===== UI KeyFacts: 12 Kern-KeyFacts (zentrale Definition aus keyFactsDefinition) =====
+/** Projektinformationen = die 12 Kern-KeyFacts (feste Reihenfolge). */
+const PROJEKTDATEN_KEYS_ORDER = KEYFACTS_DISPLAY_ORDER_12;
 const PROJEKTDATEN_KEYS = new Set(PROJEKTDATEN_KEYS_ORDER);
 
-/** Diese Felder im separaten Block „Vertrags- und Abrechnungsrahmen“ (Reihenfolge für Anzeige). */
-const VERTRAGSRAHMEN_KEYS_ORDER = ["abschlagszahlung", "schlussrechnung", "gewaerhleistung", "vertragsstrafe"];
+/** Vertragsrahmen: vorerst leer – Kern V1 zeigt nur die 9 Projektdaten-KeyFacts. */
+const VERTRAGSRAHMEN_KEYS_ORDER: string[] = [];
 const VERTRAGSRAHMEN_KEYS = new Set(VERTRAGSRAHMEN_KEYS_ORDER);
 
 // ===== UI KeyFacts Cleaning (Fix) =====
@@ -437,8 +409,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
   const [gaebPreviewError, setGaebPreviewError] = useState<string | null>(null);
   const [gaebPreview, setGaebPreview] = useState<any>(null);
   const [gaebTab, setGaebTab] = useState<
-    "structure" | "vortext" | "positions" | "raw" | "clean" | "llm_vortext" | "llm_positions"
-  >("vortext");
+    "structure" | "basis_vortext" | "basis_positions" | "raw"
+  >("basis_vortext");
 
   // ===== SPLIT (LLM) STATE =====
   const [splitLoading, setSplitLoading] = useState(false);
@@ -454,6 +426,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
   const [keyFacts, setKeyFacts] = useState<Record<string, string>>({});
   // optional: falls Route später confidence liefert
   const [keyFactConfidence, setKeyFactConfidence] = useState<Record<string, number>>({});
+  /** Validierte KeyFacts inkl. Status (found/missing/rejected) aus analyze-vortext API */
+  const [keyFactsValidated, setKeyFactsValidated] = useState<Record<string, KeyFactFieldEntry> | null>(null);
   /** Debug: Quelle der KeyFacts (aus analyze-vortext API) */
   const [keyFactsDebug, setKeyFactsDebug] = useState<{
     keyFactsSourceMode?: string;
@@ -571,6 +545,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
     setRiskClauses([]);
     setKeyFacts({});
     setKeyFactConfidence({});
+    setKeyFactsValidated(null);
     setKeyFactsDebug(null);
     setVortextLoading(false);
     setClarificationQuestions(null);
@@ -779,6 +754,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
         setRiskClauses([]);
         setKeyFacts({});
         setKeyFactConfidence({});
+        setKeyFactsValidated(null);
         return null;
       }
       const clauses = Array.isArray(vData?.riskClauses) ? vData.riskClauses : [];
@@ -790,6 +766,10 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
       const conf =
         vData?.keyFactConfidence && typeof vData.keyFactConfidence === "object" ? vData.keyFactConfidence : {};
       setKeyFactConfidence(conf);
+
+      const validated =
+        vData?.keyFactsValidated && typeof vData.keyFactsValidated === "object" ? vData.keyFactsValidated : null;
+      setKeyFactsValidated(validated);
 
       const debug =
         vData?.keyFactsDebug && typeof vData.keyFactsDebug === "object"
@@ -817,6 +797,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
       setRiskClauses([]);
       setKeyFacts({});
       setKeyFactConfidence({});
+      setKeyFactsValidated(null);
       setKeyFactsDebug(null);
       return null;
     } finally {
@@ -841,9 +822,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
     resetVortext();
 
     try {
-      const debug =
-        typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
-      const apiUrl = debug ? "/api/score?debug=1" : "/api/score";
+      // Debug-Modus: immer ?debug=1 für echte Analyse (firedFindings etc. sichtbar)
+      const apiUrl = "/api/score?debug=1";
 
       // Datenquelle: Override (frisch aus loadFile) oder State
       const preview = options?.gaebPreviewData ?? gaebPreview;
@@ -876,6 +856,10 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
       setResult(data);
       setClarificationQuestions(null);
       setOfferAssumptions(null);
+
+      if (typeof window !== "undefined" && (data as any)?.debug) {
+        console.log("SCORE DEBUG", (data as any).debug);
+      }
 
       const cats = new Set((data.findingsSorted ?? []).map((f) => f.category));
       if (categoryFilter !== "all" && !cats.has(categoryFilter)) setCategoryFilter("all");
@@ -1141,23 +1125,45 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
     setTop10(false);
   };
 
-  // Projektdaten: nur belastbare Stammdaten (Bauherr, Ort, Gewerk, Fristen, VOB/BGB etc.)
-  const keyFactsProjektdaten = useMemo(() => {
-    const conf = keyFactConfidence ?? {};
-    const entries = Object.entries(keyFacts ?? {})
-      .filter(([k]) => PROJEKTDATEN_KEYS.has(k))
-      .map(([k, v]) => [k, normKeyFactValue(v)] as const)
-      .filter(([k, v]) => {
-        if (!v) return false;
-        if (isGarbageKeyFactValue(v)) return false;
-        if (isWeakKeyFactValueForDisplay(v, k)) return false;
-        const c = Number(conf[k]);
-        if (Number.isFinite(c) && c > 0 && c < 0.55) return false;
-        return true;
-      });
-    entries.sort(([a], [b]) => PROJEKTDATEN_KEYS_ORDER.indexOf(a) - PROJEKTDATEN_KEYS_ORDER.indexOf(b));
-    return entries;
-  }, [keyFacts, keyFactConfidence]);
+  // Feste 12 Key Facts: immer alle in Reihenfolge anzeigen; found → Wert, missing/rejected → "im LV nicht zuverlässig erkannt"
+  const keyFactsDisplayList = useMemo(() => {
+    const validated = keyFactsValidated ?? null;
+    const primaryTrade = (result as any)?.detectedTrades?.primaryTrade ?? null;
+    return KEYFACTS_DISPLAY_ORDER_12.map((key) => {
+      const entry = validated?.[key];
+      const status = entry?.status ?? "missing";
+      let value: string;
+      let isFallback: boolean;
+      if (key === "gewerk") {
+        if (status === "found" && entry?.value) {
+          value = entry.value;
+          isFallback = false;
+        } else if (primaryTrade) {
+          value = primaryTrade;
+          isFallback = false;
+        } else {
+          value = KEYFACT_FALLBACK_LABEL;
+          isFallback = true;
+        }
+      } else {
+        value = validated ? getDisplayValueForStatus(entry) : (() => {
+          const raw = keyFacts?.[key];
+          const norm = raw != null ? normKeyFactValue(raw) : "";
+          const valid = !!norm && !isGarbageKeyFactValue(norm) && !isWeakKeyFactValueForDisplay(norm, key);
+          const c = Number(keyFactConfidence?.[key]);
+          const passesConf = !Number.isFinite(c) || c >= 0.55;
+          return valid && passesConf ? norm : KEYFACT_FALLBACK_LABEL;
+        })();
+        isFallback = value === KEYFACT_FALLBACK_LABEL;
+      }
+      return {
+        key,
+        label: KEYFACT_LABELS[key] ?? key,
+        value,
+        isFallback,
+      };
+    });
+  }, [keyFactsValidated, keyFacts, keyFactConfidence, result]);
 
   // Vertrags- und Abrechnungsrahmen: Abschlagszahlung, Schlussrechnung, Gewährleistung, Vertragsstrafe
   const keyFactsVertragsrahmen = useMemo(() => {
@@ -1177,10 +1183,10 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
     return entries;
   }, [keyFacts, keyFactConfidence]);
 
-  /** Alle KeyFacts (Projektdaten + Vertragsrahmen) für Stellen, die noch die Gesamtanzahl brauchen. */
+  /** Alle KeyFacts (12 Projekt + Vertragsrahmen) für Stellen, die die Gesamtanzahl brauchen. */
   const keyFactsEntries = useMemo(
-    () => [...keyFactsProjektdaten, ...keyFactsVertragsrahmen],
-    [keyFactsProjektdaten, keyFactsVertragsrahmen]
+    () => keyFactsDisplayList.map(({ key, value }) => [key, value] as [string, string]).concat(keyFactsVertragsrahmen),
+    [keyFactsDisplayList, keyFactsVertragsrahmen]
   );
 
   // UI-Debug: welche KeyFacts werden angezeigt, welche ausgeblendet und warum (nur für Keys, die in keyFacts vorkommen)
@@ -1223,18 +1229,6 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
       hiddenReasonPerField: reasonPerField,
     };
   }, [keyFacts, keyFactConfidence]);
-
-  const gaebTextForTab = useMemo(() => {
-    if (gaebTab === "llm_vortext") return (split?.vortext ?? "").toString();
-    if (gaebTab === "llm_positions") return (split?.positions ?? "").toString();
-
-    if (!gaebPreview) return "";
-    if (gaebTab === "structure") return gaebPreview.vortextGuessClean ?? "";
-    if (gaebTab === "vortext") return gaebPreview.vortextGuessClean ?? "";
-    if (gaebTab === "positions") return gaebPreview.positionsGuessClean ?? "";
-    if (gaebTab === "raw") return gaebPreview.rawPreview ?? "";
-    return gaebPreview.cleanPreview ?? "";
-  }, [gaebPreview, gaebTab, split]);
 
   const structureVortext = useMemo(() => {
     const s = gaebPreview?.structure;
@@ -1421,6 +1415,15 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
     () => stripTechnicalNoiseForDisplay(sanitizeForDisplay(positionsForDocumentView)),
     [positionsForDocumentView]
   );
+
+  /** Text für aktuellen Expert-Tab (u. a. für „In Textfeld übernehmen“). Analysebasis = dieselbe Quelle wie Vorbemerkungen-/Positionen-Tab. */
+  const gaebTextForTab = useMemo(() => {
+    if (gaebTab === "structure") return "";
+    if (gaebTab === "basis_vortext") return vortextForDocumentViewDisplay;
+    if (gaebTab === "basis_positions") return positionsForDocumentViewDisplay;
+    if (gaebTab === "raw" && gaebPreview) return gaebPreview.rawPreview ?? "";
+    return "";
+  }, [gaebTab, vortextForDocumentViewDisplay, positionsForDocumentViewDisplay, gaebPreview]);
 
   /** Trefferanzahl für Suche im Vorbemerkungen-Tab (nur angezeigter Text, case-insensitive). */
   const vorbemerkungenMatchCount = useMemo(() => {
@@ -1671,6 +1674,24 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: hasResult ? 12 : (customerRoute ? 24 : 20), flexShrink: 0 }}>
+          {hasResult && (
+            <button
+              type="button"
+              onClick={() => { setLvText(""); setResult(null); setError(null); setFileMeta(null); setLastFile(null); resetVortext(); resetGaebPreview(); resetSplit(); }}
+              style={{
+                padding: customerRoute ? "8px 14px" : "6px 12px",
+                borderRadius: customerRoute ? T.radiusSm : D.radiusButton,
+                border: "none",
+                background: customerRoute ? T.accent : "#111",
+                color: customerRoute ? "#0c1222" : "#fff",
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Neue Analyse
+            </button>
+          )}
           {analysisStatus && (
             <span
               style={{
@@ -1761,8 +1782,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
             </span>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input ref={fileInputRef} type="file" accept=".txt,.xml,.gaeb,.x83,.x84,.x86,.json" onChange={(e) => onPickFile(e.target.files?.[0] ?? null)} style={{ display: "none" }} />
-              <button type="button" onClick={() => fileInputRef.current?.click()} style={{ padding: "6px 12px", borderRadius: customerRoute ? T.radiusSm : D.radiusButton, border: `1px solid ${customerRoute ? T.border : D.cardBorder}`, background: customerRoute ? T.card : D.cardBg, color: customerRoute ? T.muted : D.textSecondary, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Andere Datei</button>
-              <button type="button" onClick={() => { setLvText(""); setResult(null); setError(null); setFileMeta(null); setLastFile(null); resetVortext(); resetGaebPreview(); resetSplit(); }} style={{ padding: "6px 12px", borderRadius: customerRoute ? T.radiusSm : D.radiusButton, border: `1px solid ${customerRoute ? T.border : D.cardBorder}`, background: "transparent", color: customerRoute ? T.muted : D.textSecondary, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>Neue Analyse starten</button>
+              <button type="button" onClick={() => fileInputRef.current?.click()} style={{ padding: "6px 12px", borderRadius: customerRoute ? T.radiusSm : D.radiusButton, border: `1px solid ${customerRoute ? T.border : D.cardBorder}`, background: customerRoute ? T.card : D.cardBg, color: customerRoute ? T.muted : D.textSecondary, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Andere Datei laden</button>
             </div>
           </div>
         ) : (
@@ -1864,11 +1884,16 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
         </div>
 
         {/* Textarea */}
+        {customerRoute && (
+          <label style={{ display: "block", marginTop: customerRoute ? T.space.md : 12, marginBottom: 6, fontSize: 13, fontWeight: 600, color: T.text }}>
+            LV-Text einfügen (Beta)
+          </label>
+        )}
         <textarea
           rows={10}
           style={{
             width: "100%",
-            marginTop: customerRoute ? T.space.md : 12,
+            marginTop: customerRoute ? 0 : 12,
             borderRadius: customerRoute ? T.radiusSm : 12,
             border: customerRoute ? `1px solid ${T.border}` : "1px solid #ddd",
             padding: customerRoute ? T.space.md : 12,
@@ -1878,10 +1903,15 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
             lineHeight: 1.5,
             ...(customerRoute ? { background: T.surface, color: T.text } : {}),
           }}
-          placeholder={customerRoute ? "Optional: Text hier einfügen oder nur Datei nutzen …" : "LV Text hier einfügen..."}
+          placeholder={customerRoute ? "LV-Text hier einfügen …" : "LV Text hier einfügen..."}
           value={lvText}
           onChange={(e) => setLvText(e.target.value)}
         />
+        {customerRoute && (
+          <p style={{ margin: "8px 0 0", fontSize: 12, color: T.muted, lineHeight: 1.5 }}>
+            Diese Funktion funktioniert nur bei strukturiertem LV-Text. Für zuverlässige Ergebnisse empfehlen wir den Import einer GAEB-Datei.
+          </p>
+        )}
 
         {/* Actions */}
         <div style={{ display: "flex", gap: customerRoute ? 12 : 10, marginTop: customerRoute ? 20 : 14, flexWrap: "wrap", alignItems: "center" }}>
@@ -2031,6 +2061,10 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
           </div>
         </div>
 
+        <p style={{ margin: "10px 0 0", fontSize: 12, color: D.textMuted, lineHeight: 1.5, maxWidth: 720 }}>
+          <strong>Struktur</strong> zeigt die erkannte GAEB-/LV-Gliederung. <strong>Analysebasis Vorbemerkungen</strong> und <strong>Analysebasis Positionen</strong> zeigen den bereinigten Text, auf dem die Analyse tatsächlich basiert. <strong>Diagnose / Rohdaten</strong> ist nur für technische Prüfung gedacht.
+        </p>
+
         {(gaebPreviewError || splitError) && (
           <div style={{ marginTop: 10, color: "#b00020", fontWeight: 800 }}>
             {gaebPreviewError ? `Struktur: ${gaebPreviewError}` : ""}
@@ -2041,60 +2075,55 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
 
         {!gaebPreviewLoading && (gaebPreview || split) && (
           <>
-            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               {[
                 ...(gaebPreview?.normalized ? (["structure"] as const) : []),
-                ...(customerRoute
-                  ? (["llm_vortext", "llm_positions", "vortext", "positions", "clean", "raw"] as const)
-                  : (["llm_vortext", "llm_positions", "vortext", "positions", "raw", "clean"] as const)),
+                "basis_vortext",
+                "basis_positions",
+                "raw",
               ].map((t) => (
                 <button
                   key={t}
                   type="button"
                   onClick={() => setGaebTab(t)}
                   style={{
-                    padding: "8px 10px",
+                    padding: t === "raw" ? "6px 9px" : "8px 10px",
                     borderRadius: 10,
-                    border: "1px solid #e2e8f0",
-                    background: gaebTab === t ? (customerRoute ? D.primary : "#111") : "#fff",
-                    color: gaebTab === t ? "#fff" : D.textPrimary,
+                    border: `1px solid ${t === "raw" ? "#cbd5e1" : "#e2e8f0"}`,
+                    background: gaebTab === t ? (t === "raw" ? "#64748b" : (customerRoute ? D.primary : "#111")) : (t === "raw" ? "#f1f5f9" : "#fff"),
+                    color: gaebTab === t ? "#fff" : (t === "raw" ? "#64748b" : D.textPrimary),
                     cursor: "pointer",
-                    fontWeight: 700,
+                    fontWeight: t === "raw" ? 600 : 700,
+                    fontSize: t === "raw" ? 12 : undefined,
                   }}
                 >
                   {t === "structure"
                     ? "Struktur"
-                    : t === "llm_vortext"
-                      ? "Einleitung (KI)"
-                      : t === "llm_positions"
-                        ? "Positionen (KI)"
-                        : t === "vortext"
-                          ? "Einleitung"
-                          : t === "positions"
-                            ? "Positionen"
-                            : t === "raw"
-                              ? customerRoute
-                                ? "Rohdaten (technisch)"
-                                : "Rohdaten"
-                              : "Bereinigt"}
+                    : t === "basis_vortext"
+                      ? "Analysebasis Vorbemerkungen"
+                      : t === "basis_positions"
+                        ? "Analysebasis Positionen"
+                        : "Diagnose / Rohdaten"}
                 </button>
               ))}
 
-              <button
-                type="button"
-                onClick={() => setLvText(gaebTextForTab || "")}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  border: `1px solid ${D.textPrimary}`,
-                  background: "#fff",
-                  color: D.textPrimary,
-                  cursor: "pointer",
-                  fontWeight: 700,
-                }}
-              >
-                In Textfeld übernehmen
-              </button>
+              {!result && (
+                <button
+                  type="button"
+                  onClick={() => setLvText(gaebTextForTab || "")}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    border: `1px solid ${D.textPrimary}`,
+                    background: "#fff",
+                    color: D.textPrimary,
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  In Textfeld übernehmen
+                </button>
+              )}
             </div>
 
             <div style={{ marginTop: 10 }}>
@@ -2105,27 +2134,33 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
                   customerRoute={!!customerRoute}
                   customerDesign={customerRoute ? D : undefined}
                 />
+              ) : gaebTab === "structure" && !gaebPreview?.normalized ? (
+                <div style={{ padding: 12, color: D.textMuted, fontSize: 13 }}>Keine Strukturansicht verfügbar (nur bei GAEB-Daten mit Gliederung).</div>
               ) : gaebTab === "raw" ? (
-                <pre
-                  style={{
-                    margin: 0,
-                    padding: 12,
-                    borderRadius: 12,
-                    border: "1px solid #e2e8f0",
-                    background: "#f8fafc",
-                    color: D.textPrimary,
-                    fontSize: 12,
-                    whiteSpace: "pre-wrap",
-                    maxHeight: 320,
-                    overflow: "auto",
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                  }}
-                >
-                  {gaebTextForTab}
-                </pre>
+                gaebPreview ? (
+                  <pre
+                    style={{
+                      margin: 0,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid #e2e8f0",
+                      background: "#f8fafc",
+                      color: D.textPrimary,
+                      fontSize: 12,
+                      whiteSpace: "pre-wrap",
+                      maxHeight: 320,
+                      overflow: "auto",
+                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                    }}
+                  >
+                    {gaebTextForTab}
+                  </pre>
+                ) : (
+                  <div style={{ padding: 12, color: D.textMuted, fontSize: 13 }}>Rohdaten nur nach Datei-Upload verfügbar.</div>
+                )
               ) : (
                 <Lesansicht
-                  content={gaebTextForTab ?? ""}
+                  content={gaebTab === "basis_vortext" ? (vortextForDocumentViewDisplay ?? "") : (positionsForDocumentViewDisplay ?? "")}
                   maxHeight="320px"
                   styles={
                     customerRoute
@@ -2220,20 +2255,56 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
           {resultTab === "uebersicht" && (
           customerRoute && result ? (
             <AnalyseCockpitView
-              projectName={(keyFacts as Record<string, string> | undefined)?.objektbezeichnung ?? (keyFacts as Record<string, string> | undefined)?.projektbezeichnung}
+              projectName={(keyFacts as Record<string, string> | undefined)?.objektbezeichnung ?? (keyFacts as Record<string, string> | undefined)?.projektbezeichnung ?? (keyFacts as Record<string, string> | undefined)?.bauvorhaben}
               fileName={fileMeta?.name}
               fileSize={fileMeta?.size ?? undefined}
               result={result}
               changeOrderAnalysis={changeOrderAnalysis ?? undefined}
               clarificationQuestions={(clarificationQuestions ?? undefined) as AnalyseCockpitViewProps["clarificationQuestions"]}
               offerAssumptions={(offerAssumptions ?? undefined) as AnalyseCockpitViewProps["offerAssumptions"]}
-              keyFactsProjektdaten={keyFactsProjektdaten as [string, string][]}
-              keyFactLabels={KEYFACT_LABELS}
+              keyFactsDisplayList={keyFactsDisplayList}
+              keyFactConfidence={keyFactConfidence ?? undefined}
               sanitize={sanitizeForDisplay}
+              expertMode={isExpertMode}
               onTabChange={(tab) => setResultTab(tab as ResultTabId)}
             />
           ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: customerRoute ? D.spacingCard : 12, maxHeight: "calc(100vh - 220px)", minHeight: 0 }}>
+            {/* Erkannte Gewerke – kompakte Kopfzone (defensiv: nur wenn detectedTrades vorhanden) */}
+            {(result as any)?.detectedTrades != null && (
+              <div style={{ background: customerRoute ? D.cardBg : "#fff", border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? "12px 16px" : "10px 14px", boxShadow: customerRoute ? D.cardShadow : undefined }}>
+                <div style={{ fontSize: 11, color: customerRoute ? D.textMuted : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>Erkannte Gewerke</div>
+                {(() => {
+                  const dt = (result as any).detectedTrades as DetectedTradesResult | undefined;
+                  const primary = dt?.primaryTrade ?? null;
+                  const secondary = (dt?.secondaryTrades ?? []) as string[];
+                  const confidence = dt?.confidence;
+                  if (!primary && (!secondary || secondary.length === 0)) {
+                    return <span style={{ fontSize: 14, color: customerRoute ? D.textMuted : "#9ca3af", fontStyle: "italic" }}>Keine eindeutige Zuordnung</span>;
+                  }
+                  const confText = typeof confidence === "number" && Number.isFinite(confidence)
+                    ? formatTradeConfidencePercent(confidence)
+                    : formatTradeConfidence(confidence);
+                  return (
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+                      {primary && (
+                        <span style={{ fontSize: 16, fontWeight: 700, color: customerRoute ? D.textPrimary : "#111" }}>{primary}</span>
+                      )}
+                      {secondary.length > 0 && (
+                        <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {secondary.map((s) => (
+                            <span key={s} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 8, background: customerRoute ? "rgba(0,0,0,0.06)" : "#f3f4f6", color: customerRoute ? D.textSecondary : "#4b5563", fontWeight: 500 }}>{s}</span>
+                          ))}
+                        </span>
+                      )}
+                      {(confText && confText !== "—") && (
+                        <span style={{ fontSize: 12, color: customerRoute ? D.textMuted : "#9ca3af", fontWeight: 500 }}>Sicherheit: {confText}</span>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
             {/* Zeile 1: KPI-Karten Komplexität | Gesamt-Risiko | Claim-Potenzial */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: customerRoute ? 12 : 10 }}>
               <div style={{ background: customerRoute ? D.cardBg : "#fff", border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? "14px 16px" : "12px 14px", boxShadow: customerRoute ? D.cardShadow : undefined }}>
@@ -2317,77 +2388,6 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
               <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.risiken}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.risiken}
             </p>
           </SectionCard>
-          {/* ===== Projektdaten aus dem Leistungsverzeichnis (KeyFacts) ===== */}
-          <SectionCard accent="primary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.projektdaten}</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: D.textMuted, fontWeight: 600 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.projektdatenSub}</div>
-              </div>
-              <div style={{ color: D.textSecondary, fontWeight: 600 }}>
-                {vortextLoading ? "Extrahiere…" : `${keyFactsProjektdaten.length} Felder`}
-              </div>
-            </div>
-
-            {vortextError && (
-              <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: themeColors.dangerMuted, border: `1px solid ${D.danger}`, color: D.danger, fontWeight: 600 }}>
-                Projektdaten nicht verfügbar (Analyse des Einleitungstextes fehlgeschlagen).
-              </div>
-            )}
-
-            {!vortextLoading && !vortextError && keyFactsProjektdaten.length === 0 && (
-              <div style={{ marginTop: 10, color: D.textSecondary, fontWeight: 600 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noProjektdaten}</div>
-            )}
-
-            {!vortextError && keyFactsProjektdaten.length > 0 && (
-              <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
-                {keyFactsProjektdaten.map(([k, v]) => {
-                  const c = Number(keyFactConfidence?.[k]);
-                  const hasC = Number.isFinite(c) && c > 0;
-                  return (
-                    <div key={k} style={{ border: `1px solid ${D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: D.cardBg }}>
-                      <div style={{ fontSize: 12, color: D.textSecondary, fontWeight: 600 }}>
-                        {KEYFACT_LABELS[k] ?? prettyKey(k)}
-                      </div>
-                      {hasC && (
-                        <div style={{ marginTop: 4, fontSize: 11, color: D.textMuted, fontWeight: 500 }}>
-                          Sicherheit: {Math.round(c * 100)}%
-                        </div>
-                      )}
-                      <div style={{ marginTop: 6, fontWeight: 600, color: D.textPrimary, fontSize: 13, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(v)}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <div style={{ marginTop: 10, color: D.textMuted, fontSize: 12, fontWeight: 500 }}>
-              Der Einleitungstext wird automatisch aus der Datei ermittelt. Ist er leer, prüfen Sie die hochgeladene Datei bzw. den GAEB-Import.
-            </div>
-          </SectionCard>
-
-          {/* ===== Vertrags- und Abrechnungsrahmen ===== */}
-          {keyFactsVertragsrahmen.length > 0 && (
-            <SectionCard accent="secondary" style={{ marginTop: D.spacingCard, background: D.cardBg, borderColor: D.cardBorder }}>
-              <div style={{ fontSize: 14, color: D.textSecondary, fontWeight: 700 }}>Vertrags- und Abrechnungsrahmen</div>
-              <div style={{ marginTop: 4, fontSize: 12, color: D.textMuted, fontWeight: 500 }}>Zahlungsbedingungen, Gewährleistung, Vertragsstrafe</div>
-              <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
-                {keyFactsVertragsrahmen.map(([k, v]) => {
-                  const c = Number(keyFactConfidence?.[k]);
-                  const hasC = Number.isFinite(c) && c > 0;
-                  return (
-                    <div key={k} style={{ border: `1px solid ${D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: D.cardBg }}>
-                      <div style={{ fontSize: 12, color: D.textSecondary, fontWeight: 600 }}>{KEYFACT_LABELS[k] ?? prettyKey(k)}</div>
-                      {hasC && (
-                        <div style={{ marginTop: 4, fontSize: 11, color: D.textMuted, fontWeight: 500 }}>Sicherheit: {Math.round(c * 100)}%</div>
-                      )}
-                      <div style={{ marginTop: 6, fontWeight: 600, color: D.textPrimary, fontSize: 13, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(v)}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </SectionCard>
-          )}
 
           {/* ===== Risiken im Einleitungstext ===== */}
           <SectionCard accent="warning" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
@@ -3195,6 +3195,36 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
               {DEFAULT_TEXTS_CONFIG.explanation.scoreCalculation}
             </p>
           </div>
+          {/* Einklappbare Debug-Sektion: gefeuerte Findings (nur bei vorhandenen debug-Daten) */}
+          {(result as any)?.debug?.firedFindings != null && Array.isArray((result as any).debug.firedFindings) && (
+            <details style={{ border: "1px solid #e2e8f0", borderRadius: 12, background: "#f8fafc", overflow: "hidden", color: "#000" }}>
+              <summary style={{ padding: "12px 16px", cursor: "pointer", fontWeight: 700, fontSize: 13, color: "#000" }}>
+                Score-Debug: {((result as any).debug.firedFindings as any[]).length} gefeuerte Findings
+              </summary>
+              <div style={{ padding: "12px 16px", borderTop: "1px solid #e2e8f0", overflowX: "auto", color: "#000" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, color: "#000" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "2px solid #e2e8f0" }}>
+                      <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 700, color: "#000" }}>Trigger-ID</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 700, color: "#000" }}>Kategorie</th>
+                      <th style={{ textAlign: "right", padding: "6px 8px", fontWeight: 700, color: "#000" }}>Penalty</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 700, color: "#000" }}>Titel</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {((result as any).debug.firedFindings as any[]).map((row: any, i: number) => (
+                      <tr key={i} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                        <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11, color: "#000" }}>{row.triggerId ?? "—"}</td>
+                        <td style={{ padding: "6px 8px", color: "#000" }}>{row.category ?? "—"}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", color: "#000" }}>{row.penalty ?? "—"}</td>
+                        <td style={{ padding: "6px 8px", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#000" }} title={row.title}>{row.title ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
           </div>
           )}
         </div>

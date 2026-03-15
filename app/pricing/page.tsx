@@ -104,7 +104,7 @@ export default async function PricingPage() {
       name: "Free",
       price: "0 €",
       description: "Für den Einstieg und erste Tests im Arbeitsalltag.",
-      features: ["3 Analysen pro Monat", "Basis-Ergebnisansicht", "Basis-Risikoanalyse", "Management-Zusammenfassung", "Analyse-Archiv"],
+      features: ["3 Analysen", "Basis-Ergebnisansicht", "Basis-Risikoanalyse", "Management-Zusammenfassung", "Analyse-Archiv"],
       ctaHref: "/register",
       ctaLabel: "Kostenlos starten",
       featured: false,

@@ -2,6 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import { getUser } from "@/lib/auth/get-user";
 import { getDefaultPlan } from "./plans";
 
+const FREE_ANALYSIS_LIMIT_TOTAL = 3;
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -62,10 +64,13 @@ export async function ensureUserProfile() {
       return;
     }
 
+    const plan = getDefaultPlan();
     const insertPayload: Record<string, any> = {
       id: user.id,
       email: user.email,
-      plan: getDefaultPlan(),
+      plan,
+      analysis_used_total: 0,
+      ...(plan === "free" ? { analysis_limit_total: FREE_ANALYSIS_LIMIT_TOTAL } : {}),
     };
     if (typeof meta.first_name === "string" && meta.first_name.trim()) {
       insertPayload.first_name = meta.first_name.trim();

@@ -5,7 +5,7 @@ import { ScorePage } from "@/app/admin/score/page";
 import { appTheme as T } from "@/components/app/appTheme";
 import { getUser } from "@/lib/auth/get-user";
 import { getUserPlan } from "@/lib/billing/userPlan";
-import { getMonthlyUsageForPlan } from "@/lib/billing/usage";
+import { getTotalUsageForPlan } from "@/lib/billing/usage";
 
 export const metadata = {
   title: "Leistungsverzeichnis analysieren – LV Scope",
@@ -28,7 +28,7 @@ export default async function AppAnalysePage() {
   }
 
   try {
-    const usage = await getMonthlyUsageForPlan(user.id, plan);
+    const usage = await getTotalUsageForPlan(user.id, plan);
 
     if (usage.hasReachedLimit && usage.limit != null) {
       return (
@@ -55,12 +55,11 @@ export default async function AppAnalysePage() {
             Analyse-Limit erreicht
           </h1>
           <p style={{ margin: "0 0 8px", fontSize: 14, color: T.muted, lineHeight: 1.6 }}>
-            Ihr Free-Plan enthält {usage.limit} Analysen pro Monat. Für diesen Monat wurden bereits{" "}
-            {usage.usedThisMonth} Analysen durchgeführt.
+            Sie haben {usage.used} von {usage.limit} kostenlosen Analysen verbraucht. Das Löschen von Analysen gibt das
+            Kontingent nicht frei.
           </p>
           <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.6 }}>
-            Bitte upgraden Sie auf Pro, um weitere Analysen durchführen zu können, oder versuchen Sie es im nächsten
-            Monat erneut.
+            Bitte upgraden Sie auf Pro, um weitere Analysen durchführen zu können.
           </p>
           <div style={{ marginTop: T.space.lg, display: "flex", gap: T.space.md, flexWrap: "wrap" }}>
             <Link
