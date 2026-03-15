@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getUser } from "@/lib/auth/get-user";
+import { isAdmin } from "@/lib/auth/is-admin";
 import { DEFAULT_TEXTS_CONFIG, type TextsConfig } from "../../../../lib/textsConfig";
 
 const TEXTS_CONFIG_KEY = "default";
@@ -40,6 +42,10 @@ function deepMerge<T extends Record<string, unknown>>(base: T, ...sources: (Part
  * Quelle: DB (Tabelle texts_config, key "default") mit Fallback auf lib/textsConfig.
  */
 export async function GET() {
+  const user = await getUser().catch(() => null);
+  if (!user || !isAdmin(user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const supabase = getSupabase();
   if (!supabase) {
     return NextResponse.json({ config: DEFAULT_TEXTS_CONFIG, source: "default" });
@@ -67,6 +73,10 @@ export async function GET() {
  * Body wird mit bestehender Config zusammengeführt.
  */
 export async function PUT(req: Request) {
+  const user = await getUser().catch(() => null);
+  if (!user || !isAdmin(user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const supabase = getSupabase();
   if (!supabase) {
     return NextResponse.json(

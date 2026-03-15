@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getUser } from "@/lib/auth/get-user";
+import { isAdmin } from "@/lib/auth/is-admin";
 import {
   AMPEL_THRESHOLDS,
   CATEGORY_KEYS_5,
@@ -74,6 +76,10 @@ function getSupabase() {
  * Enthält alle Bereiche inkl. Ampel, Claim, Nachtrag, Projekttyp.
  */
 export async function GET() {
+  const user = await getUser().catch(() => null);
+  if (!user || !isAdmin(user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const supabase = getSupabase();
   if (!supabase) {
     return NextResponse.json({ config: FALLBACK_FULL, source: "fallback" });
@@ -153,6 +159,10 @@ function validateBody(body: any): { ok: true; value: any } | { ok: false; error:
  * Body kann Teilbereiche enthalten; wird mit bestehender Config zusammengeführt.
  */
 export async function PUT(req: Request) {
+  const user = await getUser().catch(() => null);
+  if (!user || !isAdmin(user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const supabase = getSupabase();
   if (!supabase) {
     return NextResponse.json({ error: "Supabase nicht konfiguriert" }, { status: 503 });

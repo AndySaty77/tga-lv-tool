@@ -45,13 +45,10 @@ export default function DatenschutzPage() {
             </p>
             <p style={{ ...paragraph, marginLeft: 16 }}>
               LV Scope<br />
-              [Ihr Name / Firmenname]<br />
-              [Straße, Hausnummer]<br />
-              [PLZ, Ort]<br />
-              Deutschland
+              Kontaktdaten (Anschrift, E-Mail) siehe Impressum.
             </p>
             <p style={paragraph}>
-              E-Mail: [datenschutz@lvscope.de]<br />
+              Für Datenschutzanfragen: datenschutz@lvscope.de<br />
               Website: https://lvscope.de
             </p>
 
@@ -107,14 +104,17 @@ export default function DatenschutzPage() {
             <p style={subSectionTitle}>3.3 Zweck und Speicherdauer</p>
             <p style={paragraph}>
               Die vorübergehende Speicherung der IP-Adresse durch das System ist notwendig, um eine Auslieferung der
-              Website an den Rechner des Nutzers zu ermöglichen. Die Logfiles werden spätestens nach 30 Tagen gelöscht.
+              Website an den Rechner des Nutzers zu ermöglichen. Technische Logs werden nur so lange und in dem Umfang
+              aufbewahrt, wie es für den Betrieb erforderlich ist; die Löschung erfolgt in der Regel innerhalb von 30
+              Tagen, soweit durch uns oder unseren Hosting-Anbieter so umgesetzt.
             </p>
 
             <h2 style={sectionTitle}>4. Registrierung und Nutzerkonto</h2>
             <p style={subSectionTitle}>4.1 Beschreibung und Umfang der Datenverarbeitung</p>
             <p style={paragraph}>
-              Auf unserer Website bieten wir Nutzern die Möglichkeit, sich unter Angabe personenbezogener Daten zu
-              registrieren. Bei der Registrierung werden folgende Daten erhoben:
+              Auf unserer Website können Sie sich registrieren und ein Nutzerkonto anlegen. Die Anmeldung (Login) erfolgt
+              über dasselbe Konto. Für Registrierung, Login und die Speicherung von Kontodaten setzen wir den Dienst
+              Supabase (Authentifizierung und Datenbank) ein. Bei der Registrierung werden folgende Daten erhoben:
             </p>
             <ul style={list}>
               <li style={listItem}>E-Mail-Adresse</li>
@@ -131,11 +131,11 @@ export default function DatenschutzPage() {
             </p>
             <p style={subSectionTitle}>4.3 Speicherdauer</p>
             <p style={paragraph}>
-              Die Daten werden gelöscht, sobald sie für die Erreichung des Zweckes ihrer Erhebung nicht mehr
-              erforderlich sind. Dies ist für die während des Registrierungsvorgangs erhobenen Daten der Fall, wenn die
-              Registrierung auf unserer Website aufgehoben oder abgeändert wird. Nach Kündigung des Nutzerkontos werden
-              die personenbezogenen Daten innerhalb von 30 Tagen gelöscht, sofern keine gesetzlichen
-              Aufbewahrungspflichten entgegenstehen.
+              Registrierungs- und Kontodaten werden für die Dauer des Nutzerkontos gespeichert. Nach Kündigung bzw.
+              Löschung des Nutzerkontos werden die mit dem Konto verbundenen personenbezogenen Daten gelöscht, sofern
+              keine gesetzlichen Aufbewahrungspflichten entgegenstehen. Die konkrete Löschung erfolgt nach Ihrem Antrag
+              bzw. dem von uns definierten Prozess; eine automatische Löschung nach Ablauf einer Frist ist derzeit nicht
+              technisch umgesetzt.
             </p>
 
             <h2 style={sectionTitle}>5. Verarbeitung hochgeladener Dokumente (LV-/GAEB-Dateien)</h2>
@@ -155,26 +155,37 @@ export default function DatenschutzPage() {
             </p>
             <p style={subSectionTitle}>5.3 Einsatz von KI-Diensten (Sub-Prozessoren)</p>
             <p style={paragraph}>
-              Für die KI-gestützte Analyse können wir Dienste von Drittanbietern einsetzen (z. B. OpenAI, Anthropic). In
-              diesem Fall werden die hochgeladenen Dokumentinhalte an diese Anbieter übermittelt. Die Verarbeitung erfolgt
-              auf Grundlage von Auftragsverarbeitungsverträgen gemäß Art. 28 DSGVO. Wir setzen ausschließlich Anbieter
-              ein, die angemessene Datenschutzgarantien (z. B. EU-Standardvertragsklauseln) bieten. Die aktuell
-              eingesetzten Sub-Prozessoren können auf Anfrage mitgeteilt werden.
+              Für die KI-gestützte Analyse setzen wir Dienste von Drittanbietern ein (derzeit: OpenAI). Dabei werden
+              Dokumentinhalte zur Analyse an diesen Anbieter übermittelt. Die Verarbeitung erfolgt auf Grundlage von
+              Auftragsverarbeitungsverträgen gemäß Art. 28 DSGVO; wir setzen ausschließlich Anbieter mit angemessenen
+              Datenschutzgarantien (z. B. EU-Standardvertragsklauseln) ein. Eine aktuelle Liste der Sub-Prozessoren
+              erhalten Sie auf Anfrage.
             </p>
             <p style={subSectionTitle}>5.4 Speicherdauer</p>
             <p style={paragraph}>
-              Hochgeladene Dateien und die daraus generierten Analyseergebnisse werden nach Beendigung der
-              Analysesitzung bzw. spätestens nach [X Tagen] automatisch gelöscht, sofern der Nutzer keine aktive
-              Speicherung in seinem Konto vorgenommen hat.
+              Hochgeladene Dateien werden nicht dauerhaft als Dateien gespeichert; sie werden ausschließlich für die
+              Dauer der Verarbeitung zur Analyse genutzt. Die daraus erzeugten Analyseergebnisse werden in Ihrem
+              Nutzerkonto (Datenbank) gespeichert. Eine Löschung erfolgt durch Sie (Löschen einzelner Analysen bzw. des
+              Kontos) oder im Rahmen einer künftig implementierten Systemlöschlogik. Derzeit ist keine automatische
+              Löschung nach einer festen Frist technisch umgesetzt.
             </p>
 
-            <h2 style={sectionTitle}>6. Kontaktaufnahme / E-Mail-Kontakt</h2>
+            <h2 style={sectionTitle}>6. Kontaktformular und E-Mail-Kontakt</h2>
+            <p style={subSectionTitle}>6.1 Kontaktformular</p>
             <p style={paragraph}>
-              Wenn Sie uns per E-Mail kontaktieren, werden die von Ihnen mitgeteilten Daten (Ihre E-Mail-Adresse, ggf.
-              Ihr Name und Ihre Telefonnummer) gespeichert, um Ihre Fragen zu bearbeiten. Rechtsgrundlage ist Art. 6 Abs.
-              1 lit. f DSGVO (berechtigtes Interesse an der Bearbeitung von Anfragen). Die in diesem Zusammenhang
-              anfallenden Daten werden gelöscht, sobald die Speicherung nicht mehr erforderlich ist oder die
-              Verarbeitung eingeschränkt, falls gesetzliche Aufbewahrungspflichten bestehen.
+              Über das Kontaktformular auf der Website können Sie uns (Name, Unternehmen, E-Mail, Nachricht etc.)
+              anfragen. Die Angaben werden zur Bearbeitung Ihrer Anfrage per E-Mail an uns übermittelt. Hierfür setzen
+              wir den Dienst Resend ein; die Daten werden nicht in einer Datenbank unserer Anwendung gespeichert. Die
+              E-Mail-Kommunikation und ggf. bei uns gespeicherte Korrespondenz werden nach Erledigung der Anfrage
+              gelöscht oder in der Regel innerhalb von 6 Monaten, soweit keine gesetzlichen Aufbewahrungspflichten
+              entgegenstehen. Eine automatische Löschung nach genau 6 Monaten ist derzeit nicht technisch umgesetzt.
+            </p>
+            <p style={subSectionTitle}>6.2 E-Mail-Kontakt</p>
+            <p style={paragraph}>
+              Wenn Sie uns direkt per E-Mail kontaktieren, werden die von Ihnen mitgeteilten Daten zur Bearbeitung
+              Ihrer Anfrage verarbeitet. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse). Die
+              Daten werden gelöscht, sobald sie für den Zweck nicht mehr erforderlich sind, oder die Verarbeitung wird
+              eingeschränkt, falls Aufbewahrungspflichten bestehen.
             </p>
 
             <h2 style={sectionTitle}>7. Cookies</h2>
@@ -191,18 +202,17 @@ export default function DatenschutzPage() {
 
             <h2 style={sectionTitle}>8. Analyse- und Trackingdienste</h2>
             <p style={paragraph}>
-              Wir setzen derzeit [keine externen Analyse- oder Trackingdienste / z. B. Plausible Analytics
-              (datenschutzfreundlich, keine Cookies, kein personenbezogenes Tracking)] ein. Sollten wir künftig
-              Analysedienste einsetzen, werden wir diese Datenschutzerklärung entsprechend aktualisieren und ggf. Ihre
-              Einwilligung einholen.
+              Wir setzen derzeit keine externen Analyse- oder Trackingdienste (z. B. Google Analytics oder vergleichbare
+              Dienste) ein. Sollten wir künftig solche Dienste einsetzen, werden wir diese Datenschutzerklärung
+              aktualisieren und gegebenenfalls Ihre Einwilligung einholen.
             </p>
 
             <h2 style={sectionTitle}>9. Zahlungsabwicklung</h2>
             <p style={paragraph}>
-              Für die Abwicklung von Zahlungen setzen wir externe Zahlungsdienstleister ein (z. B. Stripe). Die
-              Übermittlung Ihrer Zahlungsdaten erfolgt direkt an den Zahlungsdienstleister; wir erhalten und speichern
-              keine vollständigen Zahlungsdaten (z. B. Kreditkartennummern). Die Verarbeitung erfolgt auf Grundlage von
-              Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung). Die Datenschutzhinweise des jeweiligen Zahlungsdienstleisters
+              Soweit wir für kostenpflichtige Leistungen externe Zahlungsdienstleister (z. B. Stripe) einsetzen, erfolgt
+              die Abwicklung über diese. Die Übermittlung von Zahlungsdaten erfolgt direkt an den jeweiligen Anbieter;
+              wir erhalten und speichern keine vollständigen Zahlungsdaten (z. B. Kreditkartennummern). Rechtsgrundlage
+              ist Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung). Die Datenschutzhinweise des eingesetzten Anbieters
               finden Sie auf dessen Website.
             </p>
 
@@ -234,7 +244,8 @@ export default function DatenschutzPage() {
               </li>
             </ul>
             <p style={paragraph}>
-              Zur Ausübung Ihrer Rechte wenden Sie sich bitte an: [datenschutz@lvscope.de]
+              Zur Ausübung Ihrer Rechte wenden Sie sich bitte an: datenschutz@lvscope.de (oder die im Impressum
+              genannte Kontaktstelle).
             </p>
             <p style={paragraph}>
               Unbeschadet eines anderweitigen verwaltungsrechtlichen oder gerichtlichen Rechtsbehelfs steht Ihnen das

@@ -18,6 +18,7 @@
  */
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -87,7 +88,19 @@ function buildConfirmationBody(p: {
   return lines.join("\n");
 }
 
+const CONTACT_RATE_LIMIT_PER_10MIN = 5;
+const CONTACT_RATE_WINDOW_MS = 10 * 60 * 1000;
+
 export async function POST(req: Request) {
+  const ip = getClientIp(req);
+  const rl = checkRateLimit(`contact:${ip}`, CONTACT_RATE_LIMIT_PER_10MIN, CONTACT_RATE_WINDOW_MS);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Zu viele Anfragen. Bitte später erneut versuchen." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();

@@ -54,9 +54,6 @@ export async function POST(request: NextRequest) {
       return errJson("parse-request", "Payload fehlt oder ist ungültig. Senden Sie Analysedaten oder analysisId.", 400);
     }
 
-    const topLevelKeys = Object.keys(body as object);
-    console.error("[PDF export] request body keys:", topLevelKeys.join(", "));
-
     const analysisId =
       typeof (body as { analysisId?: unknown }).analysisId === "string"
         ? (body as { analysisId: string }).analysisId.trim()

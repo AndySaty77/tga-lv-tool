@@ -1,6 +1,8 @@
 // app/api/analyze-vortext/route.ts
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { getUser } from "@/lib/auth/get-user";
+import { checkRateLimit } from "@/lib/rateLimit";
 
 // ================= Types =================
 type RiskLevel = "low" | "medium" | "high";
@@ -1299,7 +1301,23 @@ function extractKeyFactsFromNormalized(normalized: NormalizedPayload): {
   return { keyFacts, sources, extractionDebug };
 }
 
+const VORTEXT_RATE_LIMIT_PER_MINUTE = 5;
+const VORTEXT_RATE_WINDOW_MS = 60_000;
+
 export async function POST(req: Request) {
+  const user = await getUser().catch(() => null);
+  if (!user) {
+    return NextResponse.json({ error: "Nicht angemeldet" }, { status: 401 });
+  }
+
+  const rl = checkRateLimit(`vortext:${user.id}`, VORTEXT_RATE_LIMIT_PER_MINUTE, VORTEXT_RATE_WINDOW_MS);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Zu viele Anfragen. Bitte kurz warten." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
+
   try {
     const body = await req.json().catch(() => ({}));
     const vortext = sanitizeVortext((body?.text ?? "").toString());

@@ -33,7 +33,7 @@ export async function ensureUserProfile() {
 
     if (selectError) {
       // eslint-disable-next-line no-console
-      console.error("[ensureUserProfile] Fehler beim Laden des Profils", selectError);
+      console.error("[ensureUserProfile] Fehler beim Laden des Profils", selectError?.message ?? "Unbekannt");
       return;
     }
     if (existing) {
@@ -57,9 +57,7 @@ export async function ensureUserProfile() {
         .eq("id", user.id);
       if (updateError) {
         // eslint-disable-next-line no-console
-        console.error("[ensureUserProfile] Fehler beim Aktualisieren des Profils", updateError, {
-          payload: updatePayload,
-        });
+        console.error("[ensureUserProfile] Fehler beim Aktualisieren des Profils", updateError?.message ?? "Unbekannt");
       }
       return;
     }
@@ -82,13 +80,11 @@ export async function ensureUserProfile() {
     const { error: insertError } = await supabase.from("profiles").insert(insertPayload);
     if (insertError) {
       // eslint-disable-next-line no-console
-      console.error("[ensureUserProfile] Fehler beim Anlegen des Profils", insertError, {
-        payload: insertPayload,
-      });
+      console.error("[ensureUserProfile] Fehler beim Anlegen des Profils", insertError?.message ?? "Unbekannt");
     }
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.error("[ensureUserProfile] Unerwarteter Fehler", err);
+    console.error("[ensureUserProfile] Unerwarteter Fehler", err instanceof Error ? err.message : "Unbekannt");
   }
 }
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { isAdmin } from "@/lib/auth/is-admin";
 
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
@@ -30,7 +31,22 @@ export async function middleware(req: NextRequest) {
   } = await supabase.auth.getUser();
 
   const url = new URL(req.url);
-  // Geschützte Bereiche: kompletter /app (Dashboard, Analysen, Settings, Billing) und /analyse
+
+  // Admin: nur eingeloggt + Admin-Rolle (ADMIN_EMAILS)
+  const isAdminRoute = url.pathname === "/admin" || url.pathname.startsWith("/admin/");
+  if (isAdminRoute) {
+    if (!user) {
+      const redirectUrl = new URL("/login", req.url);
+      redirectUrl.searchParams.set("redirectTo", url.pathname + url.search);
+      return NextResponse.redirect(redirectUrl);
+    }
+    if (!isAdmin(user)) {
+      return new NextResponse("Forbidden", { status: 403 });
+    }
+    return res;
+  }
+
+  // Geschützte Bereiche: /app und /analyse
   const protectedRoots = ["/app", "/analyse"];
   const isProtected = protectedRoots.some((base) => url.pathname === base || url.pathname.startsWith(base + "/"));
 
@@ -45,6 +61,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/app/:path*", "/analyse", "/analyse/:path*"],
+  matcher: ["/app/:path*", "/analyse", "/analyse/:path*", "/admin", "/admin/:path*"],
 };
 

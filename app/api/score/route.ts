@@ -1,6 +1,8 @@
 // app/api/score/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getUser } from "@/lib/auth/get-user";
+import { checkRateLimit } from "@/lib/rateLimit";
 import { analyzeLvText, DbTrigger } from "../../../lib/analyzeLvText";
 import { computeScore } from "../../../lib/scoring";
 import { analyzeLvTextWithLLM } from "../../../lib/llmRelevanceFilter";
@@ -213,7 +215,23 @@ export async function GET() {
   return NextResponse.json({ ok: true, route: "/api/score" });
 }
 
+const SCORE_RATE_LIMIT_PER_MINUTE = 5;
+const SCORE_RATE_WINDOW_MS = 60_000;
+
 export async function POST(req: Request) {
+  const user = await getUser().catch(() => null);
+  if (!user) {
+    return NextResponse.json({ error: "Nicht angemeldet" }, { status: 401 });
+  }
+
+  const rl = checkRateLimit(`score:${user.id}`, SCORE_RATE_LIMIT_PER_MINUTE, SCORE_RATE_WINDOW_MS);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Zu viele Anfragen. Bitte kurz warten." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
+
   const url = new URL(req.url);
   const debug = url.searchParams.get("debug") === "1";
 
@@ -252,7 +270,7 @@ export async function POST(req: Request) {
     `);
 
   if (error) {
-    console.error("Supabase Trigger Fehler:", error);
+    console.error("Supabase Trigger Fehler:", error?.message ?? "Unbekannt");
   }
 
   // 1) Gewerke erkennen (primary + secondary) – auf dem Text, den wir wirklich analysieren
@@ -356,14 +374,6 @@ export async function POST(req: Request) {
         perCategory.kalkulationsunsicherheit) / 5
     )
   );
-
-  if (debug) {
-    console.log("Split used:", hasSplit, "lens:", { lvText: lvText.length, vortext: vortext.length, positions: positions.length });
-    console.log("Discipline scores:", det.scores);
-    console.log("Detected primary:", det.primary, "secondary:", det.secondary);
-    console.log("Triggers used:", dbTriggers.length);
-    console.log("perCategorySum(abs):", perCategorySum, "sizeF:", sizeF, "cfg.version:", cfg.version);
-  }
 
   const json: Record<string, unknown> = {
     ...result,

@@ -610,8 +610,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || "Rückfragen fehlgeschlagen");
       setClarificationQuestions(data);
-    } catch (e: unknown) {
-      console.error("Clarification questions:", e);
+    } catch {
+      console.error("Clarification questions: Fehler");
       setClarificationQuestions(null);
     } finally {
       setClarificationQuestionsLoading(false);
@@ -646,8 +646,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || "Nachtragsanalyse fehlgeschlagen");
       setChangeOrderAnalysis(data as ChangeOrderResult);
-    } catch (e: unknown) {
-      console.error("Change order analysis:", e);
+    } catch {
+      console.error("Change order analysis: Fehler");
       setChangeOrderAnalysis(null);
     } finally {
       setChangeOrderLoading(false);
@@ -676,8 +676,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || "Annahmen fehlgeschlagen");
       setOfferAssumptions(data);
-    } catch (e: unknown) {
-      console.error("Offer assumptions:", e);
+    } catch {
+      console.error("Offer assumptions: Fehler");
       setOfferAssumptions(null);
     } finally {
       setOfferAssumptionsLoading(false);
@@ -942,13 +942,6 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
             nameFromKeyFacts ??
             (typeof fileMeta?.name === "string" && fileMeta.name.trim() ? fileMeta.name.trim() : "Unbenannte Analyse");
 
-          // Minimaler Debug-Log für Analyse-Persistenz (kann nach Stabilisierung entfernt werden)
-          // eslint-disable-next-line no-console
-          console.log("[analyse/save debug]", {
-            keyFactsKeys: Object.keys(kf),
-            chosenProjectName: projectName,
-            fileMetaName: fileMeta?.name,
-          });
           const execSummary = (changeOrderAnalysis as ChangeOrderResult | null)?.offerStrategySummary?.executiveSummary;
           const payload = {
             projectName,

@@ -1,6 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { appTheme as T } from "@/components/app/appTheme";
+import { DeleteAccountBlock } from "@/components/app/DeleteAccountBlock";
 import { getUser } from "@/lib/auth/get-user";
 import type { PlanId } from "@/lib/billing/plans";
 import { getUserPlan } from "@/lib/billing/userPlan";
@@ -195,6 +196,12 @@ export default async function AppSettingsPage() {
           Logout
         </Link>
       </SettingsCard>
+
+      {user && (
+        <SettingsCard title="Konto löschen">
+          <DeleteAccountBlock />
+        </SettingsCard>
+      )}
     </>
   );
 }

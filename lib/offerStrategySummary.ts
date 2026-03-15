@@ -193,9 +193,9 @@ Antworte NUR mit einem JSON-Objekt im folgenden Schema (kein anderer Text):
       console.log("[buildOfferStrategySummary] success");
     }
     return result;
-  } catch (e) {
+  } catch {
     if (process.env.NODE_ENV !== "test") {
-      console.warn("[buildOfferStrategySummary] Fehler:", e);
+      console.warn("[buildOfferStrategySummary] Fehler");
     }
     return null;
   }

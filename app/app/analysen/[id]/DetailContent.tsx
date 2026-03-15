@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { appTheme as T } from "@/components/app/appTheme";
 
 type AnalyseItem = {
@@ -129,6 +130,8 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
   const [expandedRiskId, setExpandedRiskId] = React.useState<string | null>(null);
   const [exportLoading, setExportLoading] = React.useState(false);
   const [exportError, setExportError] = React.useState<string | null>(null);
+  const [deleteLoading, setDeleteLoading] = React.useState(false);
+  const router = useRouter();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -186,6 +189,20 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
       setExportLoading(false);
     }
   }, [item, id, canPdfExport]);
+
+  const handleDelete = React.useCallback(async () => {
+    if (!item || !window.confirm("Diese Analyse unwiderruflich löschen? Alle zugehörigen Daten (Ergebnis, Score, Rückfragen etc.) werden entfernt.")) return;
+    setDeleteLoading(true);
+    try {
+      const res = await fetch(`/api/analyse/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Löschen fehlgeschlagen");
+      router.push("/app/analysen");
+    } catch {
+      setDeleteLoading(false);
+      window.alert("Analyse konnte nicht gelöscht werden. Bitte erneut versuchen.");
+    }
+  }, [item, id, router]);
 
   if (loading) {
     return (
@@ -292,7 +309,7 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
               )}
             </p>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             {!canPdfExport && (
               <>
                 <span style={{ fontSize: 12, fontWeight: 600, color: T.muted }}>Nur in Pro</span>
@@ -316,6 +333,24 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
               }}
             >
               {exportLoading ? "Export läuft…" : "PDF exportieren"}
+            </button>
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleteLoading}
+              style={{
+                padding: "8px 14px",
+                fontSize: 13,
+                fontWeight: 600,
+                color: T.danger ?? "#f87171",
+                background: "transparent",
+                border: `1px solid ${T.border}`,
+                borderRadius: T.radiusSm,
+                cursor: deleteLoading ? "not-allowed" : "pointer",
+                opacity: deleteLoading ? 0.7 : 1,
+              }}
+            >
+              {deleteLoading ? "Wird gelöscht…" : "Analyse löschen"}
             </button>
           </div>
         </div>

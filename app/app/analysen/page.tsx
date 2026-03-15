@@ -14,6 +14,43 @@ type AnalyseRun = {
   status: string | null;
 };
 
+function DeleteButton({ rowId, onDeleted }: { rowId: string; onDeleted: () => void }) {
+  const [loading, setLoading] = React.useState(false);
+  const handleDelete = async () => {
+    if (!window.confirm("Diese Analyse unwiderruflich löschen?")) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/analyse/${rowId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Löschen fehlgeschlagen");
+      onDeleted();
+    } catch {
+      setLoading(false);
+      window.alert("Löschen fehlgeschlagen. Bitte erneut versuchen.");
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleDelete}
+      disabled={loading}
+      style={{
+        padding: "6px 12px",
+        borderRadius: T.radiusSm,
+        fontSize: 12,
+        fontWeight: 600,
+        color: T.danger,
+        background: "transparent",
+        border: `1px solid ${T.border}`,
+        cursor: loading ? "not-allowed" : "pointer",
+        opacity: loading ? 0.7 : 1,
+      }}
+    >
+      {loading ? "…" : "Löschen"}
+    </button>
+  );
+}
+
 export default function AppAnalysenPage() {
   const [items, setItems] = React.useState<AnalyseRun[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -142,7 +179,7 @@ export default function AppAnalysenPage() {
                   <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Datum</th>
                   <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", width: 72 }}>Score</th>
                   <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", width: 120 }}>Status</th>
-                  <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, width: 140 }}></th>
+                  <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, width: 180 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -165,22 +202,28 @@ export default function AppAnalysenPage() {
                       <StatusBadge status={row.status ?? "Abgeschlossen"} />
                     </td>
                     <td style={{ padding: T.space.md, textAlign: "right" }}>
-                      <Link
-                        href={`/app/analysen/${row.id}`}
-                        style={{
-                          display: "inline-block",
-                          padding: "6px 12px",
-                          borderRadius: T.radiusSm,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: T.accent,
-                          textDecoration: "none",
-                          border: `1px solid ${T.border}`,
-                          background: "rgba(255,255,255,0.03)",
-                        }}
-                      >
-                        Ergebnis ansehen
-                      </Link>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <Link
+                          href={`/app/analysen/${row.id}`}
+                          style={{
+                            display: "inline-block",
+                            padding: "6px 12px",
+                            borderRadius: T.radiusSm,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: T.accent,
+                            textDecoration: "none",
+                            border: `1px solid ${T.border}`,
+                            background: "rgba(255,255,255,0.03)",
+                          }}
+                        >
+                          Ergebnis ansehen
+                        </Link>
+                        <DeleteButton
+                          rowId={row.id}
+                          onDeleted={() => setItems((prev) => (prev ?? []).filter((r) => r.id !== row.id))}
+                        />
+                      </div>
                     </td>
                   </tr>
                 ))}

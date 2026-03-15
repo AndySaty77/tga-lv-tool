@@ -584,9 +584,7 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
           "[changeOrderAnalysis] LLM-Veredelung Fallback, Dauer ms:",
           llmRefinementDurationMs,
           "Timeout:",
-          llmRefinementTimedOut,
-          "Grund:",
-          llmRefinementFailureReason
+          llmRefinementTimedOut
         );
       }
       // Summary bleibt die regelbasierte Version (kein Overwrite).
@@ -596,17 +594,17 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
   // Optionale KI-Strategiebewertung pro Item (Top 5–8); bei Fehler läuft Pipeline weiter.
   try {
     summary = await enrichChangePotentialWithCommercialStrategy(summary);
-  } catch (e) {
+  } catch {
     if (process.env.NODE_ENV !== "test") {
-      console.warn("[changeOrderAnalysis] Commercial-Strategy-Anreicherung Fehler:", e);
+      console.warn("[changeOrderAnalysis] Commercial-Strategy-Anreicherung Fehler");
     }
   }
 
   try {
     summary = await buildNegotiationClusters(summary);
-  } catch (e) {
+  } catch {
     if (process.env.NODE_ENV !== "test") {
-      console.warn("[changeOrderAnalysis] Negotiation-Clusters Fehler:", e);
+      console.warn("[changeOrderAnalysis] Negotiation-Clusters Fehler");
     }
   }
 
@@ -642,9 +640,9 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
   try {
     const oss = await buildOfferStrategySummary(summary, commercialActionsFromChangePotential);
     if (oss) offerStrategySummary = oss;
-  } catch (e) {
+  } catch {
     if (process.env.NODE_ENV !== "test") {
-      console.warn("[changeOrderAnalysis] Offer-Strategy-Summary Fehler:", e);
+      console.warn("[changeOrderAnalysis] Offer-Strategy-Summary Fehler");
     }
   }
 
