@@ -1166,11 +1166,11 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
   }, [keyFactsValidated, keyFacts, keyFactConfidence, result]);
 
   // Vertrags- und Abrechnungsrahmen: Abschlagszahlung, Schlussrechnung, Gewährleistung, Vertragsstrafe
-  const keyFactsVertragsrahmen = useMemo(() => {
+  const keyFactsVertragsrahmen = useMemo((): [string, string][] => {
     const conf = keyFactConfidence ?? {};
-    const entries = Object.entries(keyFacts ?? {})
+    const entries: [string, string][] = Object.entries(keyFacts ?? {})
       .filter(([k]) => VERTRAGSRAHMEN_KEYS.has(k))
-      .map(([k, v]) => [k, normKeyFactValue(v)] as const)
+      .map(([k, v]) => [k, String(normKeyFactValue(v) ?? "")] as [string, string])
       .filter(([k, v]) => {
         if (!v) return false;
         if (isGarbageKeyFactValue(v)) return false;
@@ -1185,7 +1185,10 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
 
   /** Alle KeyFacts (12 Projekt + Vertragsrahmen) für Stellen, die die Gesamtanzahl brauchen. */
   const keyFactsEntries = useMemo(
-    () => keyFactsDisplayList.map(({ key, value }) => [key, value] as [string, string]).concat(keyFactsVertragsrahmen),
+    (): [string, string][] => [
+      ...keyFactsDisplayList.map(({ key, value }) => [key, value] as [string, string]),
+      ...keyFactsVertragsrahmen.map(([key, value]) => [key, String(value ?? "")] as [string, string]),
+    ],
     [keyFactsDisplayList, keyFactsVertragsrahmen]
   );
 
