@@ -133,9 +133,19 @@ export default function DatenschutzPage() {
             <p style={paragraph}>
               Registrierungs- und Kontodaten werden für die Dauer des Nutzerkontos gespeichert. Nach Kündigung bzw.
               Löschung des Nutzerkontos werden die mit dem Konto verbundenen personenbezogenen Daten gelöscht, sofern
-              keine gesetzlichen Aufbewahrungspflichten entgegenstehen. Die konkrete Löschung erfolgt nach Ihrem Antrag
-              bzw. dem von uns definierten Prozess; eine automatische Löschung nach Ablauf einer Frist ist derzeit nicht
-              technisch umgesetzt.
+              keine gesetzlichen Aufbewahrungspflichten entgegenstehen. Die Löschung können Sie selbst über die
+              Einstellungen der Anwendung vornehmen (siehe Ziff. 4.4); eine automatische Löschung nach Ablauf einer
+              Frist ist derzeit nicht technisch umgesetzt.
+            </p>
+            <p style={subSectionTitle}>4.4 Kontolöschung durch den Nutzer</p>
+            <p style={paragraph}>
+              Sie können Ihr Nutzerkonto jederzeit selbstständig löschen. Die Funktion steht in den Einstellungen der
+              Anwendung unter „Konto löschen“ zur Verfügung (nach Anmeldung). Bei der Kontolöschung werden Ihre
+              nutzerbezogenen Anwendungsdaten – einschließlich gespeicherter Analyseergebnisse und Profildaten – sowie
+              Ihr Authentifizierungszugang (Login) dauerhaft aus unseren Systemen entfernt. Es erfolgt eine echte
+              Löschung; ein erneuter Zugriff auf das Konto ist nicht mehr möglich. In Backups oder Snapshots können
+              Ihre Daten technisch bedingt noch für eine begrenzte Zeit vorhanden sein und werden mit der üblichen
+              Backup-Rotation überschrieben. Gesetzliche Aufbewahrungspflichten bleiben unberührt.
             </p>
 
             <h2 style={sectionTitle}>5. Verarbeitung hochgeladener Dokumente (LV-/GAEB-Dateien)</h2>
