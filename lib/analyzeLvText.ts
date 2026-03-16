@@ -24,6 +24,8 @@ export type DbTrigger = {
   context_required?: string[] | null;
   /** Optional: Trigger feuert nicht, wenn einer dieser Begriffe im Fenster um den Keyword-Treffer vorkommt */
   exclude_keywords?: string[] | null;
+  /** Optional: erlaubte Gewerke/Disziplinen für diesen Trigger (z. B. "elektro", "sanitaer", "global"). */
+  disciplines?: string[] | null;
 };
 
 /** Debug-Info pro ausgewertetem Trigger (gefeuert oder verhindert). */
