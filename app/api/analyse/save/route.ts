@@ -79,29 +79,27 @@ export async function POST(req: Request) {
   const status = (body.status && String(body.status)) || "completed";
 
   let managementSummary: string | null = null;
-  try {
-    if (body.resultJson && typeof body.resultJson === "object") {
-      const rj = body.resultJson as any;
-      const summaryInput: ManagementSummaryInput = {
-        scoreResult: rj.scoreResult,
-        keyFacts: rj.keyFacts ?? null,
-        changeOrderAnalysis: rj.changeOrderAnalysis ?? null,
-        clarificationQuestions: rj.clarificationQuestions ?? null,
-      };
-      managementSummary = buildManagementSummary(summaryInput);
-    }
-  } catch {
-    // Fehler bei der Summary-Erzeugung dürfen den Save-Flow nicht bremsen
-    managementSummary = null;
-  }
 
-  // Fallback: vorhandene Summary aus dem Request beibehalten (z. B. Executive Summary der Nachtragsanalyse)
-  if (
-    !managementSummary &&
-    typeof body.managementSummary === "string" &&
-    body.managementSummary.trim().length > 0
-  ) {
+  // 1) Primär: vorhandene Summary aus dem Request (z. B. LLM-Executive-Summary der Nachtragsanalyse)
+  if (typeof body.managementSummary === "string" && body.managementSummary.trim().length > 0) {
     managementSummary = body.managementSummary.trim();
+  } else {
+    // 2) Fallback: generische Template-Summary auf Basis der Kernanalyse
+    try {
+      if (body.resultJson && typeof body.resultJson === "object") {
+        const rj = body.resultJson as any;
+        const summaryInput: ManagementSummaryInput = {
+          scoreResult: rj.scoreResult,
+          keyFacts: rj.keyFacts ?? null,
+          changeOrderAnalysis: rj.changeOrderAnalysis ?? null,
+          clarificationQuestions: rj.clarificationQuestions ?? null,
+        };
+        managementSummary = buildManagementSummary(summaryInput);
+      }
+    } catch {
+      // Fehler bei der Summary-Erzeugung dürfen den Save-Flow nicht bremsen
+      managementSummary = null;
+    }
   }
 
   const { data, error } = await supabase

@@ -62,6 +62,15 @@ export async function POST(req: Request) {
     if (result.systemLogic != null) {
       payload.systemLogic = result.systemLogic;
     }
+    if (result.scoreBreakdown != null) {
+      payload.scoreBreakdown = result.scoreBreakdown;
+    }
+    if (result.scoreVersion != null) {
+      payload.scoreVersion = result.scoreVersion;
+    }
+    if (Array.isArray(result.deterministicImmediateActions) && result.deterministicImmediateActions.length > 0) {
+      payload.deterministicImmediateActions = result.deterministicImmediateActions;
+    }
     return NextResponse.json(payload);
   } catch (e: unknown) {
     return NextResponse.json(

@@ -226,17 +226,33 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
   };
 
   const scoreResult = rj.scoreResult as { total?: number; level?: string; findingsSorted?: RiskFinding[] } | undefined;
-  const changeOrder = rj.changeOrderAnalysis as { offerStrategySummary?: { executiveSummary?: string }; opportunities?: unknown[] } | undefined;
+  const changeOrder = rj.changeOrderAnalysis as {
+    offerStrategySummary?: { executiveSummary?: string };
+    opportunities?: unknown[];
+  } | undefined;
   const keyFacts = rj.keyFacts as Record<string, string> | undefined;
   const clarificationQuestions = rj.clarificationQuestions as unknown[] | undefined;
   const riskCategories = (scoreResult as { riskCategories?: unknown[] })?.riskCategories;
   const findingsSorted = scoreResult?.findingsSorted;
 
   const displayScore = item.score ?? scoreResult?.total ?? null;
+  const executiveSummary =
+    typeof changeOrder?.offerStrategySummary?.executiveSummary === "string"
+      ? changeOrder.offerStrategySummary.executiveSummary.trim()
+      : "";
+  const templateSummary =
+    typeof item.management_summary === "string" ? item.management_summary.trim() : "";
+
   const displaySummary =
-    (typeof item.management_summary === "string" && item.management_summary.trim())
-    || (typeof changeOrder?.offerStrategySummary?.executiveSummary === "string" && changeOrder.offerStrategySummary.executiveSummary.trim())
-    || null;
+    (executiveSummary && executiveSummary.length > 0 ? executiveSummary : null) ??
+    (templateSummary && templateSummary.length > 0 ? templateSummary : null);
+
+  const summarySource: "llm" | "template" | null =
+    displaySummary === executiveSummary && executiveSummary
+      ? "llm"
+      : displaySummary === templateSummary && templateSummary
+        ? "template"
+        : null;
   const title = ((typeof item.project_name === "string" && item.project_name.trim()) || item.file_name) ?? "Ergebnisansicht";
 
   const mappedStatus = mapStatus(item.status);

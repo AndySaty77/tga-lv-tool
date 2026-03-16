@@ -22,6 +22,16 @@ export type Finding = {
   severity: Severity;
   // points to deduct inside category weight, 0..weight
   penalty: number;
+  /** Original-LV-Ausschnitt um den Trigger-Treffer (±250 Zeichen); für LLM-Validierung. */
+  raw_excerpt?: string;
+  /** LLM-Validierung V1: bestätigt / unsicher / verworfen. */
+  validation_status?: "confirm" | "uncertain" | "reject";
+  validation_confidence?: number;
+  validation_reason?: string;
+  validation_suggested_category?: string;
+  validation_penalty_assessment?: "keep" | "lower";
+  /** true = für Score ignorieren, Finding bleibt in der Liste. */
+  score_excluded?: boolean;
 };
 
 export type ScoreInput = {

@@ -119,6 +119,39 @@ export type ChangePotentialItem = {
   commercialStrategy?: CommercialStrategy;
 };
 
+export type ChangePotentialScoreBreakdown = {
+  /** Version der Scoring-Logik (für Debug/Transparenz). */
+  version: string;
+  /** Maximaler Score pro Item (Impact 4 * maximale Faktoren). */
+  perItemMaxScore: number;
+  /** Theoretischer Maximalscore über alle Items (perItemMaxScore * n). */
+  maxScore: number;
+  /** Summe aller gewichteten Item-Scores. */
+  totalScore: number;
+  /** Ungeclampter, ungerundeter Index vor Math.round/Math.min. */
+  normalizedIndex: number;
+  /** Durchschnittlicher Impact (1–4). */
+  averageImpact: number;
+  /** Durchschnittliche Confidence (0–1). */
+  averageConfidence: number;
+  /** Durchschnittlicher Faktor aus Durchsetzbarkeit. */
+  averageEnforceabilityFactor: number;
+  /** Durchschnittlicher Faktor aus SourceType. */
+  averageSourceFactor: number;
+  /** Durchschnittlicher Faktor aus empfohlener Aktion. */
+  averageActionFactor: number;
+  /** Basiswert des Scores (Durchschnittsanteil). */
+  baseScore: number;
+  /** Zusatzbeitrag aus den Top-Items. */
+  topItemBoost: number;
+  /** Zusatzbeitrag aus Verdichtung/Cluster kritischer Hebel. */
+  concentrationBoost: number;
+  /** Durchschnittsscore der Top 3 Items. */
+  top3Average: number;
+  /** Durchschnittsscore der Top 5 Items. */
+  top5Average: number;
+};
+
 /** Empfohlene Aktion auf Cluster-Ebene (nur aktive Handlungsoptionen). */
 export type NegotiationClusterAction =
   | "rueckfrage"
@@ -147,6 +180,14 @@ export type NegotiationCluster = {
 
 export type ChangePotentialSummary = {
   overallIndex: number;
+  /** Ableitung aus overallIndex: moderat/erhöht/hoch/kritisch. */
+  riskClass: "moderat" | "erhöht" | "hoch" | "kritisch";
+  /** Für UI/Text: z. B. "Moderates Nachtragspotenzial". */
+  riskClassLabel: string;
+  /** Farbton-Hinweis für UI (Ampel). */
+  riskClassTone: "success" | "warning" | "danger" | "critical";
+  /** Kurzbegründung aus Top-Items (optional, für UI unter Score). */
+  shortRiskReason?: string;
   totalItems: number;
   highImpactCount: number;
   veryHighImpactCount: number;
@@ -154,6 +195,12 @@ export type ChangePotentialSummary = {
   items: ChangePotentialItem[];
   topFields: Array<{ fieldType: ChangePotentialFieldType; count: number }>;
   topMechanisms: Array<{ mechanism: ChangePotentialMechanism; count: number }>;
+  /** Wichtigste Items für Anzeige/Management-Sicht (5–8 Items, stabil sortiert). */
+  topItemsForDisplay?: ChangePotentialItem[];
+  /** Transparente Aufschlüsselung der Score-Berechnung. */
+  scoreBreakdown?: ChangePotentialScoreBreakdown;
+  /** Version der Scoring-Logik (z. B. "cp_score_v2"). */
+  scoreVersion?: string;
   /** Optionale LLM-Vorschläge (nicht in items enthalten). */
   candidateItems?: ChangePotentialItem[];
   /** Metadaten zur LLM-Veredelung. */
@@ -629,6 +676,89 @@ function mergeItems(items: ChangePotentialItem[], threshold = 0.65): ChangePoten
   return out;
 }
 
+const IMPACT_VALUE: Record<ChangePotentialImpactLevel, number> = {
+  niedrig: 1,
+  mittel: 2,
+  hoch: 3,
+  sehr_hoch: 4,
+};
+
+const ENFORCEABILITY_FACTOR: Record<ChangePotentialEnforceability, number> = {
+  schwach: 0.95,
+  mittel: 1.0,
+  gut: 1.05,
+  sehr_gut: 1.1,
+};
+
+const SOURCE_TYPE_FACTOR: Record<ChangePotentialSourceType, number> = {
+  vortext: 1.1,
+  position: 1.1,
+  remark: 1.05,
+  addtext: 1.05,
+  global: 1.0,
+  unknown: 0.95,
+};
+
+const RECOMMENDED_ACTION_FACTOR: Record<ChangePotentialRecommendedAction, number> = {
+  rueckfrage: 1.08,
+  angebotsklarstellung: 1.08,
+  kalkulatorisch_absichern: 1.05,
+  claim_feld_beobachten: 1.0,
+  nicht_verfolgen: 0.9,
+};
+
+const SCORE_VERSION = "cp_score_v2";
+const PER_ITEM_MAX_FACTOR = 1.3; // ca. ENFORCEABILITY(1.1) * SOURCE(1.1) * ACTION(1.08) ≈ 1.3
+
+function rankItemsForDisplay(items: ChangePotentialItem[]): ChangePotentialItem[] {
+  const enforceRank: Record<ChangePotentialEnforceability, number> = {
+    sehr_gut: 4,
+    gut: 3,
+    mittel: 2,
+    schwach: 1,
+  };
+  const actionRank: Record<ChangePotentialRecommendedAction, number> = {
+    rueckfrage: 4,
+    angebotsklarstellung: 4,
+    kalkulatorisch_absichern: 3,
+    claim_feld_beobachten: 2,
+    nicht_verfolgen: 1,
+  };
+  const sourceRank: Record<ChangePotentialSourceType, number> = {
+    vortext: 3,
+    position: 3,
+    addtext: 2,
+    remark: 2,
+    global: 2,
+    unknown: 1,
+  };
+
+  return [...items].sort((a, b) => {
+    const impactA = IMPACT_VALUE[a.impactLevel] ?? 0;
+    const impactB = IMPACT_VALUE[b.impactLevel] ?? 0;
+    if (impactB !== impactA) return impactB - impactA;
+
+    const enfA = enforceRank[a.enforceability] ?? 0;
+    const enfB = enforceRank[b.enforceability] ?? 0;
+    if (enfB !== enfA) return enfB - enfA;
+
+    const confA = a.confidence ?? 0;
+    const confB = b.confidence ?? 0;
+    if (confB !== confA) return confB - confA;
+
+    const actA = actionRank[a.recommendedAction] ?? 0;
+    const actB = actionRank[b.recommendedAction] ?? 0;
+    if (actB !== actA) return actB - actA;
+
+    const srcA = sourceRank[a.sourceType] ?? 0;
+    const srcB = sourceRank[b.sourceType] ?? 0;
+    if (srcB !== srcA) return srcB - srcA;
+
+    // Fallback: längeres Reasoning bevorzugen (mehr Substanz)
+    return (b.reasoning?.length ?? 0) - (a.reasoning?.length ?? 0);
+  });
+}
+
 export function runChangePotentialEngine(input: ChangePotentialEngineInput): ChangePotentialSummary {
   _itemIdCounter = 0;
   const items: ChangePotentialItem[] = [];
@@ -765,15 +895,136 @@ export function runChangePotentialEngine(input: ChangePotentialEngineInput): Cha
     .slice(0, 6)
     .map(([mechanism, count]) => ({ mechanism, count }));
 
-  const totalScore = merged.reduce((acc, i) => {
-    const impact = { niedrig: 1, mittel: 2, hoch: 3, sehr_hoch: 4 }[i.impactLevel];
-    return acc + impact * i.confidence;
-  }, 0);
-  const maxScore = merged.length * 4;
-  const overallIndex = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
+  let totalScore = 0;
+  let sumImpact = 0;
+  let sumConfidence = 0;
+  let sumEnfFactor = 0;
+  let sumSourceFactor = 0;
+  let sumActionFactor = 0;
+
+  for (const i of merged) {
+    const impact = IMPACT_VALUE[i.impactLevel] ?? 0;
+    const confidence = i.confidence ?? 0;
+    const enfFactor = ENFORCEABILITY_FACTOR[i.enforceability] ?? 1.0;
+    const srcFactor = SOURCE_TYPE_FACTOR[i.sourceType] ?? 1.0;
+    const actFactor = RECOMMENDED_ACTION_FACTOR[i.recommendedAction] ?? 1.0;
+    const compositeFactor = enfFactor * srcFactor * actFactor;
+
+    const itemScore = impact * confidence * compositeFactor;
+    totalScore += itemScore;
+    sumImpact += impact;
+    sumConfidence += confidence;
+    sumEnfFactor += enfFactor;
+    sumSourceFactor += srcFactor;
+    sumActionFactor += actFactor;
+  }
+
+  const n = merged.length;
+  const perItemMaxScore = 8.0;
+
+  const avgItemScore = n > 0 ? totalScore / n : 0;
+
+  // A) BaseScore – normierter Durchschnitt (0–70)
+  const BASE_MAX = 70;
+  const baseScore =
+    n > 0 ? Math.min(BASE_MAX, (avgItemScore / perItemMaxScore) * BASE_MAX) : 0;
+
+  // B) TopItemBoost – Zusatzgewicht der Top 3–5 Items (0–20)
+  const rankedByScore = [...merged].sort((a, b) => {
+    const sa = IMPACT_VALUE[a.impactLevel] * (a.confidence ?? 0);
+    const sb = IMPACT_VALUE[b.impactLevel] * (b.confidence ?? 0);
+    return sb - sa;
+  });
+  const top3 = rankedByScore.slice(0, 3);
+  const top5 = rankedByScore.slice(0, 5);
+  const top3Average =
+    top3.length > 0
+      ? top3.reduce((acc, it) => acc + (IMPACT_VALUE[it.impactLevel] * (it.confidence ?? 0)), 0) /
+        top3.length
+      : 0;
+  const top5Average =
+    top5.length > 0
+      ? top5.reduce((acc, it) => acc + (IMPACT_VALUE[it.impactLevel] * (it.confidence ?? 0)), 0) /
+        top5.length
+      : 0;
+  const TOP_MAX = 20;
+  const topItemBoost = Math.min(
+    TOP_MAX,
+    ((top3Average / perItemMaxScore) * 0.6 + (top5Average / perItemMaxScore) * 0.4) * TOP_MAX
+  );
+
+  // C) ConcentrationBoost – Ballung hoher Hebel mit guter Durchsetzbarkeit
+  const highStrong = merged.filter(
+    (it) =>
+      (it.impactLevel === "hoch" || it.impactLevel === "sehr_hoch") &&
+      (it.enforceability === "gut" || it.enforceability === "sehr_gut")
+  ).length;
+  const highTotal = merged.filter(
+    (it) => it.impactLevel === "hoch" || it.impactLevel === "sehr_hoch"
+  ).length;
+
+  let concentrationBoost = 0;
+  if (highStrong >= 3 && highStrong >= Math.ceil(highTotal * 0.6)) {
+    concentrationBoost = 5 + Math.min(10, (highStrong - 3) * 2);
+  } else if (highStrong >= 2) {
+    concentrationBoost = 3;
+  }
+
+  const normalizedIndex = baseScore + topItemBoost + concentrationBoost;
+  const overallIndex = Math.max(0, Math.min(100, Math.round(normalizedIndex)));
+
+  // Risikoklasse aus overallIndex ableiten
+  let riskClass: "moderat" | "erhöht" | "hoch" | "kritisch" = "moderat";
+  let riskClassLabel = "Moderates Nachtragspotenzial";
+  let riskClassTone: "success" | "warning" | "danger" | "critical" = "success";
+  if (overallIndex >= 80) {
+    riskClass = "kritisch";
+    riskClassLabel = "Kritisches Nachtragspotenzial";
+    riskClassTone = "critical";
+  } else if (overallIndex >= 60) {
+    riskClass = "hoch";
+    riskClassLabel = "Hohes Nachtragspotenzial";
+    riskClassTone = "danger";
+  } else if (overallIndex >= 40) {
+    riskClass = "erhöht";
+    riskClassLabel = "Erhöhtes Nachtragspotenzial";
+    riskClassTone = "warning";
+  }
+
+  // Kurzer Treibersatz aus den wichtigsten Items
+  const topItemsForReason = merged.slice(0, 3);
+  const driverPhrases = topItemsForReason.map((it) => it.fieldType.replace(/_/g, " "));
+  const shortRiskReason =
+    driverPhrases.length > 0
+      ? `Treiber: ${Array.from(new Set(driverPhrases)).slice(0, 3).join(", ")}`
+      : undefined;
+
+  const scoreBreakdown: ChangePotentialScoreBreakdown = {
+    version: SCORE_VERSION,
+    perItemMaxScore,
+    maxScore: n * perItemMaxScore,
+    totalScore,
+    normalizedIndex,
+    averageImpact: n > 0 ? sumImpact / n : 0,
+    averageConfidence: n > 0 ? sumConfidence / n : 0,
+    averageEnforceabilityFactor: n > 0 ? sumEnfFactor / n : 1,
+    averageSourceFactor: n > 0 ? sumSourceFactor / n : 1,
+    averageActionFactor: n > 0 ? sumActionFactor / n : 1,
+    baseScore,
+    topItemBoost,
+    concentrationBoost,
+    top3Average,
+    top5Average,
+  };
+
+  const topItemsForDisplay = rankItemsForDisplay(merged).slice(0, 8);
 
   return {
     overallIndex: Math.min(100, overallIndex),
+    riskClass,
+    riskClassLabel,
+    riskClassTone,
+    shortRiskReason,
     totalItems: merged.length,
     highImpactCount,
     veryHighImpactCount,
@@ -781,6 +1032,9 @@ export function runChangePotentialEngine(input: ChangePotentialEngineInput): Cha
     items: merged,
     topFields,
     topMechanisms,
+    topItemsForDisplay,
+    scoreBreakdown,
+    scoreVersion: SCORE_VERSION,
   };
 }
 

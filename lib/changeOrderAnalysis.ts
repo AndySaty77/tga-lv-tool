@@ -470,6 +470,14 @@ export type ChangeOrderResult = {
     /** Gesamtdauer aller LLM-Aufrufe in ms (innerhalb der Veredelung). */
     totalLlmDurationMs?: number;
   };
+  /** Transparente Aufschlüsselung der Score-Berechnung (Nachtragspotenzial-Index). */
+  scoreBreakdown?: import("./changePotentialModel").ChangePotentialScoreBreakdown;
+  /** Wichtigste Items für Anzeige/Management-Sicht (5–8 Items, stabil sortiert). */
+  topItemsForDisplay?: ChangePotentialItem[];
+  /** Deterministische Sofortmaßnahmen aus ChangePotential (Fallback, wenn LLM leer ist). */
+  deterministicImmediateActions?: string[];
+  /** Version der Scoring-Logik (z. B. "cp_score_v2"). */
+  scoreVersion?: string;
   /** Neue Engine-Struktur (additiv); für API/Frontend. Fehlt bei reinem LLM-Pfad. */
   changePotentialSummary?: ChangePotentialSummary;
   /** Aus ChangePotentialItems abgeleitete Maßnahmen (Rückfragen, Klarstellungen, Kalkulation, Monitoring). */
@@ -636,6 +644,42 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
 
   const commercialActionsFromChangePotential = deriveCommercialActionsFromChangePotential(summary);
 
+  function buildDeterministicImmediateActions(): string[] {
+    const actions = commercialActionsFromChangePotential;
+    const candidates: Array<{ text: string; score: number }> = [];
+
+    const severityRank: Record<"low" | "medium" | "high", number> = {
+      low: 1,
+      medium: 2,
+      high: 3,
+    };
+
+    for (const q of actions.questions) {
+      const sev = severityRank[q.severity] ?? 2;
+      const score = sev * 2.2; // Rückfragen sind starke Sofortmaßnahmen
+      candidates.push({ text: `Rückfrage: ${q.question}`, score });
+    }
+    for (const c of actions.clarifications) {
+      const sev = severityRank[c.severity] ?? 2;
+      const score = sev * 2.0;
+      candidates.push({ text: `Klarstellung: ${c.clarification}`, score });
+    }
+    for (const p of actions.pricingHints) {
+      const score = 2.5; // Kalkulationshinweise sind wichtig, aber meist weniger dringend als Rückfragen
+      candidates.push({ text: `Kalkulation: ${p.hint}`, score });
+    }
+    for (const m of actions.monitoringHints) {
+      const score = 1.8;
+      candidates.push({ text: `Monitoring: ${m.hint}`, score });
+    }
+
+    const sorted = candidates
+      .filter((c) => c.text.trim().length > 0)
+      .sort((a, b) => b.score - a.score);
+
+    return sorted.slice(0, 3).map((c) => c.text);
+  }
+
   let offerStrategySummary: import("./changePotentialModel").OfferStrategySummary | undefined;
   try {
     const oss = await buildOfferStrategySummary(summary, commercialActionsFromChangePotential);
@@ -687,6 +731,10 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
     },
     changePotentialSummary: summary,
     commercialActionsFromChangePotential,
+    scoreBreakdown: summary.scoreBreakdown,
+    topItemsForDisplay: summary.topItemsForDisplay,
+    deterministicImmediateActions: buildDeterministicImmediateActions(),
+    scoreVersion: summary.scoreVersion,
     ...(offerStrategySummary && { offerStrategySummary }),
     ...(systemLogicResult != null && { systemLogic: systemLogicResult }),
   };

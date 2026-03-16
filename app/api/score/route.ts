@@ -6,6 +6,11 @@ import { checkRateLimit } from "@/lib/rateLimit";
 import { analyzeLvText, DbTrigger, TriggerEvaluation } from "../../../lib/analyzeLvText";
 import { computeScore } from "../../../lib/scoring";
 import { analyzeLvTextWithLLM } from "../../../lib/llmRelevanceFilter";
+import {
+  buildValidationInput,
+  validateTriggerFindingsWithLlm,
+  type TriggerFindingValidationInput,
+} from "../../../lib/triggerValidationLlm";
 import { FALLBACK_SCORING_CONFIG } from "../../../lib/scoringConfig";
 import { buildDetectedTrades, emptyDetectedTrades } from "../../../lib/detectedTrades";
 
@@ -199,7 +204,20 @@ function detectDisciplines(lvText: string): DisciplineDetect {
     .filter((k) => scores[k] >= MIN_HITS)
     .sort((a, b) => scores[b] - scores[a]);
 
-  const primary = ordered.length ? (ordered[0] as DisciplineKey) : null;
+  let primary = ordered.length ? (ordered[0] as DisciplineKey) : null;
+
+  // Dominanzregel: Wenn starke Elektro-/Notstrom-Signale vorhanden sind, soll Elektro nicht von wenigen Sanitärtreffern verdrängt werden.
+  const elektroHits = scores.elektro;
+  const sanitaerHits = scores.sanitaer;
+  const hasStrongNotstromSignals = /\b(notstrom|usv|netzersatz|dieselaggregat|notstromaggregat)\b/i.test(lvText);
+  if (
+    hasStrongNotstromSignals &&
+    elektroHits >= MIN_HITS &&
+    elektroHits >= sanitaerHits &&
+    primary !== "elektro"
+  ) {
+    primary = "elektro";
+  }
 
   const secondary =
     primary
@@ -277,8 +295,29 @@ export async function POST(req: Request) {
     console.error("Supabase Trigger Fehler:", error?.message ?? "Unbekannt");
   }
 
-  // 1) Gewerke erkennen (primary + secondary) – auf dem Text, den wir wirklich analysieren
-  const det = detectDisciplines(textForAnalysis);
+  // 1) Gewerke erkennen (primary + secondary) – mit Schwerpunkt auf Datei/Titel/Positionen, Logistikbegriffe entschärfen
+  const fileNameForDisciplines = typeof (body as any)?.fileName === "string" ? String((body as any).fileName) : "";
+  const projectNameForDisciplines = typeof (body as any)?.projectName === "string" ? String((body as any).projectName) : "";
+  const disciplineBaseParts = [
+    projectNameForDisciplines,
+    fileNameForDisciplines,
+    positions,
+    vortext,
+  ].filter((s) => String(s).trim().length > 0);
+  let disciplineText = disciplineBaseParts.join("\n\n");
+  if (!disciplineText.trim()) {
+    disciplineText = textForAnalysis;
+  }
+  // Baustellen-/Logistikkontext für Sanitär/Abwasser aus der Gewerkeerkennung herausfiltern
+  disciplineText = disciplineText
+    .replace(/bauwasser/gi, " ")
+    .replace(/abwasser\s+aus\s+baugrube/gi, " ")
+    .replace(/baustellenentwässerung/gi, " ")
+    .replace(/sanitärcontainer/gi, " ")
+    .replace(/wc-?container/gi, " ")
+    .replace(/baustellenversorgung/gi, " ");
+
+  const det = detectDisciplines(disciplineText);
   const allowDisciplines = det.all; // nur primary + secondary
 
   // 2) Trigger filtern: NUR primary+secondary + global
@@ -304,10 +343,11 @@ export async function POST(req: Request) {
   let findingsAfterLlm = 0;
 
   let triggerEvaluations: TriggerEvaluation[] = [];
+  const runTriggerValidation = !(body as any)?.useLlmRelevance && !!process.env.OPENAI_API_KEY;
   const analyzeOpts = {
     vortext: hasSplit ? vortext : undefined,
     allowDisciplines: allowDisciplines,
-    ...(debug ? { collectTriggerEvaluations: triggerEvaluations } : {}),
+    ...(debug || runTriggerValidation ? { collectTriggerEvaluations: triggerEvaluations } : {}),
   };
 
   if (useLlmRelevance) {
@@ -322,6 +362,63 @@ export async function POST(req: Request) {
     findings = analyzeLvText(textForAnalysis, dbTriggers, analyzeOpts);
     findingsBeforeLlm = findings.length;
     findingsAfterLlm = findings.length;
+  }
+
+  // 3b) LLM-Validierung V1: nur DB_*, penalty >= 8, max. 8, nur mit raw_excerpt (kein Fallback auf detail)
+  let triggerValidationSummary: {
+    total: number;
+    validated: number;
+    confirm: number;
+    uncertain: number;
+    reject: number;
+  } | null = null;
+  if (runTriggerValidation && (findings ?? []).length > 0) {
+    const dbOnly = (findings as any[]).filter((f: any) => f.id && String(f.id).startsWith("DB_"));
+    const withPenalty = dbOnly.filter((f: any) => Number(f.penalty) >= 8);
+    const withExcerpt = withPenalty.filter((f: any) => typeof f.raw_excerpt === "string" && f.raw_excerpt.trim().length > 0);
+    const sorted = [...withExcerpt].sort((a: any, b: any) => Number(b.penalty) - Number(a.penalty));
+    const toValidate = sorted.slice(0, 8);
+    const evalByTriggerId = new Map(triggerEvaluations.map((e) => [e.triggerId, e]));
+    const inputs: TriggerFindingValidationInput[] = [];
+    for (const f of toValidate) {
+      const triggerId = String(f.id).replace(/^DB_/, "");
+      const trigger = dbTriggers.find((t: DbTrigger) => t.id === triggerId);
+      const eval_ = evalByTriggerId.get(triggerId);
+      const input = buildValidationInput(f, {
+        matched_keyword: eval_?.matchedKeyword,
+        matched_context: eval_?.matchedContext,
+        discipline: Array.isArray(trigger?.disciplines) ? (trigger as any).disciplines[0] : undefined,
+      });
+      if (input) inputs.push(input);
+    }
+    if (inputs.length > 0) {
+      const validations = await validateTriggerFindingsWithLlm(inputs);
+      triggerValidationSummary = {
+        total: toValidate.length,
+        validated: inputs.length,
+        confirm: 0,
+        uncertain: 0,
+        reject: 0,
+      };
+      for (const v of validations) {
+        if (v.validation_status === "confirm") triggerValidationSummary.confirm++;
+        else if (v.validation_status === "uncertain") triggerValidationSummary.uncertain++;
+        else triggerValidationSummary.reject++;
+      }
+      const validationByFindingId = new Map(validations.map((v) => [v.finding_id, v]));
+      for (const f of findings as any[]) {
+        const v = validationByFindingId.get(f.id);
+        if (!v) continue;
+        f.validation_status = v.validation_status;
+        f.validation_confidence = v.confidence;
+        f.validation_reason = v.reason;
+        f.score_excluded = v.validation_status === "reject";
+        if (debug) {
+          f.validation_suggested_category = v.suggested_category;
+          f.validation_penalty_assessment = v.penalty_assessment;
+        }
+      }
+    }
   }
 
   // 4) Kategorien mappen: DB-Trigger mit 5er-Kategorie in Supabase behalten, sonst 6er→5er-Mapping
@@ -341,10 +438,11 @@ export async function POST(req: Request) {
     return { ...f, category: category5 };
   });
 
-  // 5) computeScore behalten (Detailausgaben)
-  const result = computeScore({ findings: findingsMapped });
+  // 5) computeScore: nur scorewirksame Findings (reject-Findings sind score_excluded)
+  const scoreRelevantFindings = (findingsMapped as any[]).filter((f: any) => !f.score_excluded);
+  const result = computeScore({ findings: scoreRelevantFindings });
 
-  // 6) Risiko-Last pro Kategorie (ABS)
+  // 6) Risiko-Last pro Kategorie (ABS): nur scorewirksame
   const perCategorySum: Record<CategoryKey, number> = {
     vertrags_lv_risiken: 0,
     mengen_massenermittlung: 0,
@@ -353,7 +451,7 @@ export async function POST(req: Request) {
     kalkulationsunsicherheit: 0,
   };
 
-  for (const f of findingsMapped as any[]) {
+  for (const f of scoreRelevantFindings) {
     const k = mapCategoryTo5(f.category, f.title, f.detail);
     const pen = Math.abs(Number(f.penalty ?? 0));
     if (!Number.isFinite(pen)) continue;
@@ -420,13 +518,29 @@ export async function POST(req: Request) {
             sizeF,
             scoringConfigVersion: cfg.version,
             easing: cfg.easing.type,
-            /** Gefeuerte Findings: ID, 5er-Kategorie, Penalty, Titel (Nachvollziehbarkeit Score). */
-            firedFindings: (findingsMapped as any[]).map((f: any) => ({
-              triggerId: f.id,
-              category: mapCategoryTo5(f.category, f.title, f.detail),
-              penalty: f.penalty,
-              title: f.title,
-            })),
+            /** Gefeuerte Findings: ID, Kategorie, Penalty, Titel, Validierung, für Transparenz-Tab ggf. raw_excerpt, matched_keyword, matched_context. */
+            firedFindings: (findingsMapped as any[]).map((f: any) => {
+              const triggerIdRaw = f.id && String(f.id).startsWith("DB_") ? String(f.id).replace(/^DB_/, "") : f.id;
+              const eval_ = triggerEvaluations.find((e: TriggerEvaluation) => e.triggerId === triggerIdRaw);
+              return {
+                triggerId: f.id,
+                category: mapCategoryTo5(f.category, f.title, f.detail),
+                penalty: f.penalty,
+                title: f.title,
+                ...(f.raw_excerpt != null && f.raw_excerpt !== "" && { raw_excerpt: f.raw_excerpt }),
+                ...(eval_?.matchedKeyword != null && { matched_keyword: eval_.matchedKeyword }),
+                ...(eval_?.matchedContext != null && { matched_context: eval_.matchedContext }),
+                ...(f.score_excluded != null && { score_excluded: f.score_excluded }),
+                ...(f.validation_status != null && { validation_status: f.validation_status }),
+                ...(f.validation_confidence != null && { validation_confidence: f.validation_confidence }),
+                ...(f.validation_reason != null && { validation_reason: f.validation_reason }),
+                ...(debug && f.validation_suggested_category != null && { validation_suggested_category: f.validation_suggested_category }),
+                ...(debug && f.validation_penalty_assessment != null && { validation_penalty_assessment: f.validation_penalty_assessment }),
+              };
+            }),
+            ...(triggerValidationSummary && {
+              triggerValidation: triggerValidationSummary,
+            }),
             /** Pro Trigger: ob gefeuert/verhindert, getroffenes Keyword, Kontext, exclude_keyword, Begründung. */
             triggerEvaluations: triggerEvaluations.map((e) => ({
               triggerId: e.triggerId,

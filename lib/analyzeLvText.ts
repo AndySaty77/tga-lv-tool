@@ -238,6 +238,9 @@ export type TriggerEvalResult = {
   matchedContext?: string;
   excludedBy?: string;
   reason: string;
+  /** Erster gültiger Treffer: Position im Text (für raw_excerpt). */
+  firstMatchIndex?: number;
+  firstMatchLength?: number;
 };
 
 /**
@@ -261,7 +264,7 @@ function evaluateTrigger(text: string, trigger: DbTrigger): TriggerEvalResult {
   );
 
   let validHits = 0;
-  let firstValid: { keyword: string; context?: string } | null = null;
+  let firstValid: { keyword: string; context?: string; index: number; length: number } | null = null;
   let lastExcludedBy: string | undefined;
   let lastMissingContext = false;
 
@@ -283,19 +286,21 @@ function evaluateTrigger(text: string, trigger: DbTrigger): TriggerEvalResult {
         continue;
       }
       validHits++;
-      if (!firstValid) firstValid = { keyword: pos.matchedKeyword, context: ctx.matched };
+      if (!firstValid) firstValid = { keyword: pos.matchedKeyword, context: ctx.matched, index: pos.index, length: pos.length };
     } else {
       validHits++;
-      if (!firstValid) firstValid = { keyword: pos.matchedKeyword };
+      if (!firstValid) firstValid = { keyword: pos.matchedKeyword, index: pos.index, length: pos.length };
     }
   }
 
-  if (validHits > 0) {
+  if (validHits > 0 && firstValid) {
     return {
       fire: true,
       hits: validHits,
-      matchedKeyword: firstValid?.keyword,
-      matchedContext: firstValid?.context,
+      matchedKeyword: firstValid.keyword,
+      matchedContext: firstValid.context,
+      firstMatchIndex: firstValid.index,
+      firstMatchLength: firstValid.length,
       reason: contextRequired.length
         ? "Keyword + mind. ein context_required im Fenster, kein exclude_keyword"
         : "Keyword getroffen, keine Kontext-/Ausschlussbedingung",
@@ -410,6 +415,14 @@ function applyDbTriggers(
     if (t.claim_level) detailParts.push(`Claim-Level: ${t.claim_level}`);
     if (t.norms && t.norms.length) detailParts.push(`Normen: ${t.norms.join(", ")}`);
 
+    const raw_excerpt =
+      evalResult.firstMatchIndex != null &&
+      evalResult.firstMatchLength != null &&
+      Number.isFinite(evalResult.firstMatchIndex) &&
+      Number.isFinite(evalResult.firstMatchLength)
+        ? getTextWindow(textToUse, evalResult.firstMatchIndex, evalResult.firstMatchLength)
+        : undefined;
+
     findings.push({
       id,
       category: mapSupabaseCategoryToScore(t.category),
@@ -417,6 +430,7 @@ function applyDbTriggers(
       severity: severityFromWeight(finalPenalty),
       penalty: finalPenalty,
       detail: detailParts.join(" | "),
+      ...(raw_excerpt != null && raw_excerpt.length > 0 ? { raw_excerpt } : {}),
     });
   }
 
@@ -469,7 +483,6 @@ function mergeSimilarFindings(findings: Finding[]): Finding[] {
   for (const [key, group] of groups) {
     if (group.length === 0) continue;
     const first = group[0];
-    const totalPenalty = group.reduce((s, g) => s + g.penalty, 0);
     const maxPenalty = Math.max(...group.map((g) => g.penalty));
     const penalty = clamp(maxPenalty + Math.floor((group.length - 1) * 2), 0, 20);
     const ids = group.map((g) => g.id.replace(/^DB_/, "")).slice(0, 5);
@@ -486,6 +499,7 @@ function mergeSimilarFindings(findings: Finding[]): Finding[] {
       ]
         .filter(Boolean)
         .join(" | "),
+      ...(first.raw_excerpt != null && { raw_excerpt: first.raw_excerpt }),
     });
   }
 

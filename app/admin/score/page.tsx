@@ -413,6 +413,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
   const [gaebPreview, setGaebPreview] = useState<any>(null);
   const [gaebTab, setGaebTab] = useState<GaebTab>("basis_vortext");
 
+  /** Transparenz-Tab: Index des aufklappbaren Finding-Details (null = keins). */
+  const [transparenzExpandedIndex, setTransparenzExpandedIndex] = useState<number | null>(null);
+
   // ===== SPLIT (LLM) STATE =====
   const [splitLoading, setSplitLoading] = useState(false);
   const [splitError, setSplitError] = useState<string | null>(null);
@@ -3197,33 +3200,139 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
               {DEFAULT_TEXTS_CONFIG.explanation.scoreCalculation}
             </p>
           </div>
-          {/* Einklappbare Debug-Sektion: gefeuerte Findings (nur bei vorhandenen debug-Daten) */}
+          {/* Einklappbare Debug-Sektion: gefeuerte Findings + KI-Validierung (nur bei vorhandenen debug-Daten) */}
           {(result as any)?.debug?.firedFindings != null && Array.isArray((result as any).debug.firedFindings) && (
             <details style={{ border: "1px solid #e2e8f0", borderRadius: 12, background: "#f8fafc", overflow: "hidden", color: "#000" }}>
               <summary style={{ padding: "12px 16px", cursor: "pointer", fontWeight: 700, fontSize: 13, color: "#000" }}>
                 Score-Debug: {((result as any).debug.firedFindings as any[]).length} gefeuerte Findings
               </summary>
-              <div style={{ padding: "12px 16px", borderTop: "1px solid #e2e8f0", overflowX: "auto", color: "#000" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, color: "#000" }}>
-                  <thead>
-                    <tr style={{ borderBottom: "2px solid #e2e8f0" }}>
-                      <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 700, color: "#000" }}>Trigger-ID</th>
-                      <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 700, color: "#000" }}>Kategorie</th>
-                      <th style={{ textAlign: "right", padding: "6px 8px", fontWeight: 700, color: "#000" }}>Penalty</th>
-                      <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 700, color: "#000" }}>Titel</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {((result as any).debug.firedFindings as any[]).map((row: any, i: number) => (
-                      <tr key={i} style={{ borderBottom: "1px solid #e2e8f0" }}>
-                        <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11, color: "#000" }}>{row.triggerId ?? "—"}</td>
-                        <td style={{ padding: "6px 8px", color: "#000" }}>{row.category ?? "—"}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", color: "#000" }}>{row.penalty ?? "—"}</td>
-                        <td style={{ padding: "6px 8px", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#000" }} title={row.title}>{row.title ?? "—"}</td>
+              <div style={{ padding: "12px 16px", borderTop: "1px solid #e2e8f0", color: "#000" }}>
+                {/* Validierungs-Zusammenfassung (nur wenn triggerValidation vorhanden) */}
+                {(result as any)?.debug?.triggerValidation != null && (() => {
+                  const tv = (result as any).debug.triggerValidation as { total?: number; validated?: number; confirm?: number; uncertain?: number; reject?: number };
+                  return (
+                    <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 10, background: "#e2e8f0", fontSize: 13, display: "flex", flexWrap: "wrap", gap: "12px 20px", alignItems: "center" }}>
+                      <span style={{ fontWeight: 700, color: "#334155" }}>KI-Validierung:</span>
+                      <span>validierte Findings: <strong>{Number(tv.validated ?? tv.total ?? 0)}</strong></span>
+                      <span>bestätigt: <strong style={{ color: "#0a7a2f" }}>{Number(tv.confirm ?? 0)}</strong></span>
+                      <span>unsicher: <strong style={{ color: "#a36b00" }}>{Number(tv.uncertain ?? 0)}</strong></span>
+                      <span>verworfen: <strong style={{ color: "#b00020" }}>{Number(tv.reject ?? 0)}</strong></span>
+                    </div>
+                  );
+                })()}
+                {((result as any)?.debug?.firedFindings != null && (result as any).debug.triggerValidation == null) && (
+                  <p style={{ margin: "0 0 12px", fontSize: 12, color: "#64748b" }}>Keine KI-Validierung aktiv (nur Trigger-Modus mit API-Key führt Validierung aus).</p>
+                )}
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse", fontSize: 12, color: "#000" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid #e2e8f0" }}>
+                        <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: "#000" }}>Trigger-ID</th>
+                        <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: "#000" }}>Kategorie</th>
+                        <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 700, color: "#000" }}>Penalty</th>
+                        <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: "#000" }}>Titel</th>
+                        <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: "#000" }}>Validierungsstatus</th>
+                        <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: "#000" }}>Score-wirksam</th>
+                        <th style={{ width: 44, padding: "8px 4px" }} />
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {((result as any).debug.firedFindings as any[]).map((row: any, i: number) => {
+                        const statusLabel = row.validation_status === "confirm" ? "Bestätigt" : row.validation_status === "uncertain" ? "Unsicher" : row.validation_status === "reject" ? "Verworfen" : "—";
+                        const statusColor = row.validation_status === "confirm" ? "#0a7a2f" : row.validation_status === "uncertain" ? "#a36b00" : row.validation_status === "reject" ? "#b00020" : "#64748b";
+                        const scoreWirksam = row.score_excluded === true ? "Nein (aus Score entfernt)" : "Ja";
+                        const isExpanded = transparenzExpandedIndex === i;
+                        return (
+                          <React.Fragment key={i}>
+                            <tr style={{ borderBottom: "1px solid #e2e8f0", background: isExpanded ? "#f1f5f9" : undefined }}>
+                              <td style={{ padding: "8px 10px", fontFamily: "ui-monospace, monospace", fontSize: 11, color: "#000" }}>{row.triggerId ?? "—"}</td>
+                              <td style={{ padding: "8px 10px", color: "#000" }}>{row.category ?? "—"}</td>
+                              <td style={{ padding: "8px 10px", textAlign: "right", color: "#000" }}>{row.penalty ?? "—"}</td>
+                              <td style={{ padding: "8px 10px", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#000" }} title={row.title}>{row.title ?? "—"}</td>
+                              <td style={{ padding: "8px 10px" }}>
+                                {row.validation_status != null ? (
+                                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: `${statusColor}18`, color: statusColor }}>{statusLabel}</span>
+                                ) : (
+                                  <span style={{ color: "#94a3b8" }}>—</span>
+                                )}
+                              </td>
+                              <td style={{ padding: "8px 10px" }}>
+                                {row.score_excluded === true ? (
+                                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: "#fef2f2", color: "#b00020" }}>nicht scorewirksam</span>
+                                ) : row.validation_status != null ? (
+                                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: "#f0fdf4", color: "#0a7a2f" }}>scorewirksam</span>
+                                ) : (
+                                  <span style={{ color: "#94a3b8" }}>—</span>
+                                )}
+                              </td>
+                              <td style={{ padding: "8px 4px" }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setTransparenzExpandedIndex(isExpanded ? null : i)}
+                                  style={{ padding: "4px 8px", fontSize: 11, fontWeight: 600, border: "1px solid #cbd5e1", borderRadius: 6, background: "#fff", cursor: "pointer", color: "#475569" }}
+                                >
+                                  {isExpanded ? "Schließen" : "Details"}
+                                </button>
+                              </td>
+                            </tr>
+                            {isExpanded && (
+                              <tr style={{ borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                                <td colSpan={7} style={{ padding: "12px 14px", fontSize: 12, lineHeight: 1.55, color: "#334155", verticalAlign: "top" }}>
+                                  <div style={{ display: "grid", gap: 10 }}>
+                                    {row.validation_reason != null && (
+                                      <div>
+                                        <div style={{ fontWeight: 700, marginBottom: 4, color: "#475569" }}>Begründung (KI)</div>
+                                        <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{row.validation_reason}</div>
+                                      </div>
+                                    )}
+                                    {row.validation_confidence != null && (
+                                      <div>
+                                        <span style={{ fontWeight: 700, color: "#475569" }}>Confidence: </span>
+                                        <span>{Number(row.validation_confidence).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                      </div>
+                                    )}
+                                    {row.validation_suggested_category != null && row.validation_suggested_category !== "" && (
+                                      <div>
+                                        <span style={{ fontWeight: 700, color: "#475569" }}>Vorgeschlagene Kategorie: </span>
+                                        <span>{row.validation_suggested_category}</span>
+                                      </div>
+                                    )}
+                                    {row.validation_penalty_assessment != null && (
+                                      <div>
+                                        <span style={{ fontWeight: 700, color: "#475569" }}>Penalty-Einschätzung: </span>
+                                        <span>{row.validation_penalty_assessment === "lower" ? "Niedriger" : "Beibehalten"}</span>
+                                      </div>
+                                    )}
+                                    {row.matched_keyword != null && row.matched_keyword !== "" && (
+                                      <div>
+                                        <span style={{ fontWeight: 700, color: "#475569" }}>Matched Keyword: </span>
+                                        <span style={{ fontFamily: "ui-monospace, monospace" }}>{row.matched_keyword}</span>
+                                      </div>
+                                    )}
+                                    {row.matched_context != null && row.matched_context !== "" && (
+                                      <div>
+                                        <span style={{ fontWeight: 700, color: "#475569" }}>Matched Context: </span>
+                                        <span>{row.matched_context}</span>
+                                      </div>
+                                    )}
+                                    {row.raw_excerpt != null && row.raw_excerpt !== "" && (
+                                      <div>
+                                        <div style={{ fontWeight: 700, marginBottom: 6, color: "#475569" }}>Raw-Excerpt (LV-Text um Treffer)</div>
+                                        <pre style={{ margin: 0, padding: 12, background: "#e2e8f0", borderRadius: 8, fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", overflow: "auto", maxHeight: 280, fontFamily: "ui-monospace, monospace", color: "#334155", border: "1px solid #cbd5e1" }}>
+                                          {row.raw_excerpt}
+                                        </pre>
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </details>
           )}

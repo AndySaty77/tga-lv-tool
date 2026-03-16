@@ -448,9 +448,26 @@ function NegotiationClusterCard({
   actionTone: (v: ChangePotentialRecommendedAction) => string;
   sanitize: (s: string) => string;
 }) {
+  const primaryFieldType =
+    cluster.dominantFieldTypes && cluster.dominantFieldTypes.length > 0
+      ? labelForFieldType(cluster.dominantFieldTypes[0])
+      : null;
+  const primaryMechanism =
+    cluster.dominantMechanisms && cluster.dominantMechanisms.length > 0
+      ? labelForMechanism(cluster.dominantMechanisms[0])
+      : null;
+
   return (
     <div style={{ border: "1px solid #e0e7ef", borderRadius: 12, padding: 14, background: "#f8fafc" }}>
-      <div style={{ fontWeight: 800, color: "#111", fontSize: 14, marginBottom: 8 }}>{sanitize(cluster.title)}</div>
+      <div style={{ fontWeight: 800, color: "#111", fontSize: 14, marginBottom: 4 }}>
+        {sanitize(cluster.title)}
+      </div>
+      {(primaryFieldType || primaryMechanism) && (
+        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>
+          Nachtragshebel:{" "}
+          {[primaryFieldType, primaryMechanism].filter(Boolean).join(" · ")}
+        </div>
+      )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12, marginBottom: 8 }}>
         <span style={{ color: impactTone(cluster.commercialWeight), fontWeight: 700 }}>Hebel: {labelForImpact(cluster.commercialWeight)}</span>
         <span style={{ color: "#555" }}>Durchsetzbarkeit: {labelForEnforceability(cluster.enforceabilityAssessment)}</span>
@@ -458,6 +475,19 @@ function NegotiationClusterCard({
           Empfohlen: {labelForClusterAction(cluster.recommendedNegotiationAction)}
         </span>
       </div>
+      {!isExpertMode && (cluster.dominantFieldTypes.length > 0 || cluster.dominantMechanisms.length > 0) && (
+        <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
+          {cluster.dominantFieldTypes.length > 0 && (
+            <span>Feldtypen: {cluster.dominantFieldTypes.map(labelForFieldType).join(", ")}</span>
+          )}
+          {cluster.dominantMechanisms.length > 0 && (
+            <span>
+              {cluster.dominantFieldTypes.length > 0 ? " · " : ""}
+              Mechanismen: {cluster.dominantMechanisms.map(labelForMechanism).join(", ")}
+            </span>
+          )}
+        </div>
+      )}
       <div style={{ fontSize: 13, color: "#333", lineHeight: 1.5 }}>{sanitize(cluster.whyThisMatters)}</div>
       {(cluster.suggestedQuestion ?? cluster.suggestedClarification) && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #eee", fontSize: 12, color: "#444" }}>
@@ -754,8 +784,15 @@ function NachtragExecutivePanel({
     (a, b) => (RELEVANCE_ORDER[b?.commercialWeight ?? ""] ?? 0) - (RELEVANCE_ORDER[a?.commercialWeight ?? ""] ?? 0)
   );
   const topClusters = sortedClusters.slice(0, 3);
-  const immediateActions = offerSummary?.immediateActions ?? (analysis as { summary?: { immediateActions?: string[] } })?.summary?.immediateActions ?? [];
-  const topActions = Array.isArray(immediateActions) ? immediateActions.slice(0, 3) : [];
+
+  const deterministicImmediate =
+    (analysis as { deterministicImmediateActions?: string[] })?.deterministicImmediateActions ?? [];
+  const primaryImmediate = offerSummary?.immediateActions ?? [];
+  const effectiveImmediate =
+    Array.isArray(primaryImmediate) && primaryImmediate.length > 0
+      ? primaryImmediate
+      : deterministicImmediate;
+  const topActions = Array.isArray(effectiveImmediate) ? effectiveImmediate.slice(0, 3) : [];
 
   const cardStyle = {
     border: "1px solid #e2e8f0",
@@ -771,8 +808,17 @@ function NachtragExecutivePanel({
       {/* Karte 1: Nachtragspotenzial Index */}
       <div style={{ ...cardStyle, height: "100%" }}>
         <div style={titleStyle}>Nachtragspotenzial</div>
-        <div style={{ fontSize: 32, fontWeight: 700, color: "#334155", marginBottom: 4 }}>{index}</div>
-        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>von 100 Punkten</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+          Risikoklasse: {summary?.riskClassLabel ?? "—"}
+        </div>
+        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+          {index} von 100 Punkten
+        </div>
+        {summary?.shortRiskReason && (
+          <div style={{ fontSize: 12, color: "#475569", marginBottom: 8 }}>
+            {sanitize(summary.shortRiskReason)}
+          </div>
+        )}
         <div style={{ fontSize: 12, color: "#475569", display: "flex", flexDirection: "column", gap: 4 }}>
           <span>Anzahl Nachtragsfelder: {fieldCount}</span>
           <span>Hohe Hebel: {highLeverage}</span>
@@ -782,7 +828,24 @@ function NachtragExecutivePanel({
       {/* Karte 2: Wichtigste Hebel */}
       <div style={{ ...cardStyle, height: "100%" }}>
         <div style={titleStyle}>Wichtigste Hebel</div>
-        {topClusters.length > 0 ? (
+        {summary?.topItemsForDisplay && summary.topItemsForDisplay.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {summary.topItemsForDisplay.slice(0, 3).map((item) => (
+              <div key={item.id}>
+                <div style={{ fontSize: 13, color: "#334155", marginBottom: 4 }}>
+                  {sanitize(item.title)}
+                </div>
+                <div style={{ fontSize: 12, color: "#64748b" }}>
+                  {[
+                    `Feldtyp: ${labelFor(FIELD_TYPE_LABELS, item.fieldType)}`,
+                    `Mechanismus: ${labelFor(MECHANISM_LABELS, item.changeMechanism)}`,
+                    `Hebel: ${labelFor(IMPACT_LABELS, item.impactLevel)}`,
+                  ].join(" · ")}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : topClusters.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {topClusters.map((c) => (
               <div key={c?.id ?? c?.title}>
