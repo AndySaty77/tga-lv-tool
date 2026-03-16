@@ -473,7 +473,7 @@ export type ChangeOrderResult = {
   /** Transparente Aufschlüsselung der Score-Berechnung (Nachtragspotenzial-Index). */
   scoreBreakdown?: import("./changePotentialModel").ChangePotentialScoreBreakdown;
   /** Wichtigste Items für Anzeige/Management-Sicht (5–8 Items, stabil sortiert). */
-  topItemsForDisplay?: ChangePotentialItem[];
+  topItemsForDisplay?: import("./changePotentialModel").ChangePotentialItem[];
   /** Deterministische Sofortmaßnahmen aus ChangePotential (Fallback, wenn LLM leer ist). */
   deterministicImmediateActions?: string[];
   /** Version der Scoring-Logik (z. B. "cp_score_v2"). */
