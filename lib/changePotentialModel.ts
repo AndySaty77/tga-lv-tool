@@ -227,6 +227,15 @@ export type ChangePotentialSummary = {
   };
   /** Optionale Top-Verhandlungspunkte: Bündelung verwandter Items (regelbasiert vorgeclustert, KI verdichtet). */
   negotiationClusters?: NegotiationCluster[];
+  /**
+   * Interner V2-Debug-Strang für Kalibrierung (nur Admin/Debug).
+   * Wird im change-order-analysis Response mitgeführt, beeinflusst weder Legacy noch User-UI.
+   */
+  v2Debug?: import("./nachtrag-v2/types").NachtragResultV2 & {
+    familiesHistogram?: import("./nachtrag-v2/validation").FamiliesHistogram;
+    qualifierHistogram?: import("./nachtrag-v2/validation").QualifierHistogram;
+    validationReport?: import("./nachtrag-v2/validation").ValidationReport;
+  };
 };
 
 /** Empfohlener Gesamtansatz für die Angebotsstrategie. */

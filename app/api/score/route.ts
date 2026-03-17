@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getUser } from "@/lib/auth/get-user";
 import { checkRateLimit } from "@/lib/rateLimit";
+import { isAdmin } from "@/lib/auth/is-admin";
 import { analyzeLvText, DbTrigger, TriggerEvaluation } from "../../../lib/analyzeLvText";
 import { computeScore } from "../../../lib/scoring";
 import { analyzeLvTextWithLLM } from "../../../lib/llmRelevanceFilter";
@@ -12,6 +13,7 @@ import {
   type TriggerFindingValidationInput,
 } from "../../../lib/triggerValidationLlm";
 import { FALLBACK_SCORING_CONFIG } from "../../../lib/scoringConfig";
+import { computeNachtragV2FromLegacy, type NachtragResultV2 } from "../../../lib/nachtrag-v2";
 import { buildDetectedTrades, emptyDetectedTrades } from "../../../lib/detectedTrades";
 
 type CategoryKey =
@@ -253,7 +255,9 @@ export async function POST(req: Request) {
   }
 
   const url = new URL(req.url);
-  const debug = url.searchParams.get("debug") === "1";
+  const debugParam = url.searchParams.get("debug") === "1";
+  const isAdminUser = isAdmin(user);
+  const debug = debugParam && isAdminUser;
 
   const body = await req.json().catch(() => ({} as any));
 
@@ -495,12 +499,35 @@ export async function POST(req: Request) {
     ? buildDetectedTrades(det)
     : emptyDetectedTrades();
 
+  let nachtragV2: NachtragResultV2 | null = null;
+  if (debug) {
+    try {
+      nachtragV2 = computeNachtragV2FromLegacy(findingsMapped as any, dbTriggers, {
+        primaryDiscipline: det.primary,
+        secondaryDisciplines: det.secondary,
+      });
+    } catch (e) {
+      console.warn("[/api/score] Nachtrag-V2 Engine Fehler (defensiv ignoriert):", e);
+      nachtragV2 = null;
+    }
+  }
+
   const json: Record<string, unknown> = {
     ...result,
     total: totalNormalized,
     perCategory,
     findingsSorted: findingsMapped,
     detectedTrades,
+    // TODO(security): internalScores/nachtragspotenzialV2 ist nur für Admins gedacht.
+    // Der aktuelle Guard basiert auf ADMIN_EMAILS + ?debug=1 und ersetzt keine echte, fein granulare Rollen-/Rechteverwaltung.
+    ...(nachtragV2
+      ? {
+          internalScores: {
+            ...(result as any)?.internalScores,
+            nachtragspotenzialV2: nachtragV2,
+          },
+        }
+      : {}),
     ...(debug
       ? {
           debug: {

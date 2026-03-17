@@ -18,6 +18,9 @@ import { buildNegotiationClusters } from "./changePotentialNegotiationClusters";
 import { deriveCommercialActionsFromChangePotential } from "./changePotentialCommercialActions";
 import { buildOfferStrategySummary } from "./offerStrategySummary";
 import { runSystemLogicEngine } from "./system-logic";
+import { runNachtragV2Engine } from "./nachtrag-v2/engine";
+import { mapChangePotentialSummaryToNachtragEvidences } from "./nachtrag-v2/adapterFromChangePotential";
+import { buildFamiliesHistogram, buildQualifierHistogramFromSignals, buildValidationReport } from "./nachtrag-v2/validation";
 export type { ChangePotentialSummary } from "./changePotentialModel";
 export type { OfferStrategySummary } from "./changePotentialModel";
 export type { CommercialActionsFromChangePotential } from "./changePotentialCommercialActions";
@@ -698,6 +701,26 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
     systemLogicResult = runSystemLogicEngine({ vortext, positionsText, combinedText });
   } catch (_e) {
     // fail-safe: bei Fehler keine systemLogic setzen
+  }
+
+  // ===== Interner Nachtrag-V2-Debug-Strang (additiv, nur für Admin/Debug über changePotentialSummary.v2Debug) =====
+  try {
+    const v2Evidences = mapChangePotentialSummaryToNachtragEvidences(summary);
+    const v2 = runNachtragV2Engine(v2Evidences, { primaryDiscipline: null, secondaryDisciplines: [] });
+    const familiesHistogram = buildFamiliesHistogram(v2Evidences);
+    const qualifierHistogram = buildQualifierHistogramFromSignals(v2);
+    const validationReport = buildValidationReport(v2, v2Evidences);
+    summary = {
+      ...summary,
+      v2Debug: {
+        ...v2,
+        familiesHistogram,
+        qualifierHistogram,
+        validationReport,
+      },
+    };
+  } catch {
+    // fail-safe: V2 Debug niemals die produktive Pipeline brechen lassen
   }
 
   return {

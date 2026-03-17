@@ -178,6 +178,36 @@ type ScoreResult = {
   llmMode?: boolean;
   findingsBeforeLlm?: number;
   findingsAfterLlm?: number;
+  internalScores?: {
+    nachtragspotenzialV2?: {
+      exposureScore: number;
+      enforceabilityScore: number;
+      potentialScore: number;
+      subscores: {
+        vertrags_abgrenzung: number;
+        ausfuehrung_mengen: number;
+        doku_ibn: number;
+        durchsetzbarkeit: number;
+      };
+      commodityCaps: {
+        family: string;
+        raw: number;
+        capped: number;
+        cap: number;
+      }[];
+      anchors: {
+        id: string;
+        label: string;
+        fired: boolean;
+        impactExposure?: number;
+        impactEnforceability?: number;
+        reason?: string;
+      }[];
+      drivers: string[];
+      blockers: string[];
+      notes?: string[];
+    };
+  };
 };
 
 function levelMeta(level?: string) {
@@ -463,6 +493,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
     overwrittenByLegacy?: Record<string, boolean>;
     previousValueBeforeLegacyMerge?: Record<string, string>;
   } | null>(null);
+
+  // Nur Admin/Debug: expliziter Toggle für V2-Anzeige im Nachtrag-Tab.
+  const [showNachtragV2Debug, setShowNachtragV2Debug] = useState(false);
 
   // ===== RÜCKFRAGEN (CLARIFICATION QUESTIONS) =====
   const [clarificationQuestions, setClarificationQuestions] = useState<{
@@ -2755,6 +2788,21 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
                 <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.nachtragspotenzial}
               </p>
             </SectionCard>
+            <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                <div style={{ fontSize: D.fontSizeBody, color: D.textSecondary, fontWeight: 600 }}>
+                  Interne V2-Berechnung (Nachtragspotenzial) ist nur zu Analysezwecken vorgesehen.
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: D.fontSizeBody, color: D.textSecondary }}>
+                  <input
+                    type="checkbox"
+                    checked={showNachtragV2Debug}
+                    onChange={(e) => setShowNachtragV2Debug(e.target.checked)}
+                  />
+                  <span>V2 Debug anzeigen</span>
+                </label>
+              </div>
+            </SectionCard>
             <NachtragspotenzialBlock
               analysis={changeOrderAnalysis}
               loading={changeOrderLoading}
@@ -2767,6 +2815,151 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
               designTokens={D}
               proFeatureLocked={!canUseChangeOrder}
             />
+            {showNachtragV2Debug && changeOrderAnalysis?.changePotentialSummary?.v2Debug && (
+              <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                  <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection }}>
+                    Nachtragspotenzial V2 (intern)
+                  </div>
+                  <div style={{ fontSize: D.fontSizeCaption, color: D.textMuted }}>
+                    Nur Admin/Debug – Legacy bleibt produktiv.
+                  </div>
+                </div>
+                <div style={{ display: "grid", gap: 8, fontSize: D.fontSizeBody, color: D.textPrimary }}>
+                  <div>
+                    <strong>Exposure-Score:</strong> {changeOrderAnalysis.changePotentialSummary.v2Debug.exposureScore} / 100
+                  </div>
+                  <div>
+                    <strong>Durchsetzbarkeit:</strong> {changeOrderAnalysis.changePotentialSummary.v2Debug.enforceabilityScore} / 100
+                  </div>
+                  <div>
+                    <strong>Gesamtpotenzial V2:</strong> {changeOrderAnalysis.changePotentialSummary.v2Debug.potentialScore} / 100
+                  </div>
+                </div>
+                <div style={{ marginTop: 10, display: "grid", gap: 6, fontSize: D.fontSizeCaption, color: D.textSecondary }}>
+                  <div>
+                    <strong>Subscores:</strong>{" "}
+                    VA {changeOrderAnalysis.changePotentialSummary.v2Debug.subscores.vertrags_abgrenzung} ·{" "}
+                    AM {changeOrderAnalysis.changePotentialSummary.v2Debug.subscores.ausfuehrung_mengen} ·{" "}
+                    DI {changeOrderAnalysis.changePotentialSummary.v2Debug.subscores.doku_ibn}
+                  </div>
+                  {changeOrderAnalysis.changePotentialSummary.v2Debug.anchors.length > 0 && (
+                    <div>
+                      <strong>Anchor-Events:</strong>{" "}
+                      {changeOrderAnalysis.changePotentialSummary.v2Debug.anchors
+                        .filter((a) => a.fired)
+                        .map((a) => a.label)
+                        .join(" · ") || "keine aktiv (defensive Neutralstellung)"}
+                    </div>
+                  )}
+                  {changeOrderAnalysis.changePotentialSummary.v2Debug.commodityCaps.length > 0 && (
+                    <div>
+                      <strong>Commodity-Caps:</strong>{" "}
+                      {changeOrderAnalysis.changePotentialSummary.v2Debug.commodityCaps
+                        .map((c) => `${c.family}: ${c.capped.toFixed(1)}/${c.cap.toFixed(1)}`)
+                        .join(" · ")}
+                    </div>
+                  )}
+                  {changeOrderAnalysis.changePotentialSummary.v2Debug.drivers.length > 0 && (
+                    <div>
+                      <strong>Treiber:</strong>{" "}
+                      {changeOrderAnalysis.changePotentialSummary.v2Debug.drivers.join(" | ")}
+                    </div>
+                  )}
+                  {changeOrderAnalysis.changePotentialSummary.v2Debug.blockers.length > 0 && (
+                    <div>
+                      <strong>Blocker:</strong>{" "}
+                      {changeOrderAnalysis.changePotentialSummary.v2Debug.blockers.join(" | ")}
+                    </div>
+                  )}
+                  {changeOrderAnalysis.changePotentialSummary.v2Debug.notes &&
+                    changeOrderAnalysis.changePotentialSummary.v2Debug.notes.length > 0 && (
+                      <div>
+                        <strong>Notizen:</strong>{" "}
+                        {changeOrderAnalysis.changePotentialSummary.v2Debug.notes.join(" | ")}
+                      </div>
+                    )}
+                </div>
+              </SectionCard>
+            )}
+
+            {showNachtragV2Debug &&
+              changeOrderAnalysis?.changePotentialSummary?.v2Debug?.validationReport && (
+                <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+                  <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection, marginBottom: 8 }}>
+                    V2-Kalibrierungsreport
+                  </div>
+
+                  <div style={{ display: "grid", gap: 8, fontSize: D.fontSizeCaption, color: D.textSecondary }}>
+                    <div>
+                      <strong>Family-Verteilung:</strong>{" "}
+                      {Object.entries(
+                        changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.familiesHistogram ?? {}
+                      )
+                        .sort((a, b) => (b[1]?.totalWeight ?? 0) - (a[1]?.totalWeight ?? 0))
+                        .slice(0, 10)
+                        .map(([fam, v]) => `${fam} (${v.count})`)
+                        .join(" · ") || "-"}
+                    </div>
+
+                    <div>
+                      <strong>Qualifier-Verteilung:</strong>{" "}
+                      {(() => {
+                        const q = changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.qualifierHistogram;
+                        const pos = Object.entries(q?.positive ?? {})
+                          .sort((a, b) => b[1] - a[1])
+                          .slice(0, 6)
+                          .map(([k, v]) => `${k} (${v})`)
+                          .join(", ");
+                        const neg = Object.entries(q?.negative ?? {})
+                          .sort((a, b) => b[1] - a[1])
+                          .slice(0, 6)
+                          .map(([k, v]) => `${k} (${v})`)
+                          .join(", ");
+                        return `${pos ? `Positiv: ${pos}` : "Positiv: -"} · ${neg ? `Negativ: ${neg}` : "Negativ: -"}`;
+                      })()}
+                    </div>
+
+                    <div>
+                      <strong>Warnflags:</strong>{" "}
+                      {changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.warnings.length > 0
+                        ? changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.warnings.join(" · ")
+                        : "keine"}
+                    </div>
+
+                    <div>
+                      <strong>Top Exposure-Treiber:</strong>{" "}
+                      {changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.topExposureDrivers.join(" | ") || "-"}
+                    </div>
+                    <div>
+                      <strong>Top Enforceability-Treiber:</strong>{" "}
+                      {changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.topEnforceabilityDrivers.join(" | ") || "-"}
+                    </div>
+                    <div>
+                      <strong>Top Enforceability-Blocker:</strong>{" "}
+                      {changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.topEnforceabilityBlockers.join(" | ") || "-"}
+                    </div>
+
+                    <div>
+                      <strong>Fired Anchors:</strong>{" "}
+                      {changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.firedAnchors.length > 0
+                        ? changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.firedAnchors
+                            .map((a) => a.label)
+                            .join(" · ")
+                        : "keine"}
+                    </div>
+                    <div>
+                      <strong>Non-fired Anchors:</strong>{" "}
+                      {changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.nonFiredAnchors.length > 0
+                        ? changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.nonFiredAnchors
+                            .slice(0, 6)
+                            .map((a) => `${a.label}${a.reason ? ` (${a.reason})` : ""}`)
+                            .join(" · ")
+                        : "keine"}
+                    </div>
+                  </div>
+                </SectionCard>
+              )}
           </div>
           )}
 
