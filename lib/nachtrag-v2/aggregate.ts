@@ -22,10 +22,10 @@ function combineExposureAndEnforceability(exposure: number, enforceability: numb
   // Konservativ: geometrisches Mittel, mit leichter Zusatzdämpfung bei schwacher Durchsetzbarkeit.
   let base = Math.sqrt(e * d);
   if (d < 30) {
-    base *= 0.7;
+    base *= 0.8;
   }
   if (d < 15) {
-    base *= 0.5;
+    base *= 0.65;
   }
 
   return Math.max(0, Math.min(100, Math.round(base)));
@@ -46,6 +46,15 @@ export function buildAggregateScores(
       ausfuehrung_mengen: number;
       doku_ibn: number;
     };
+    enforceabilityDebug: {
+      enforceabilityBase: number;
+      anchorEnforceabilityBoost: number;
+      scoreBeforeRoundClamp: number;
+      roundedFrom: number;
+      clampApplied: boolean;
+      clampRange: [number, number];
+      finalEnforceabilityScore: number;
+    };
   };
 } {
   const anchorExposureBoost = anchors.reduce(
@@ -64,10 +73,11 @@ export function buildAggregateScores(
     0,
     Math.min(100, Math.round(exposureBase + anchorExposureBoost))
   );
-  const enforceabilityScore = Math.max(
-    0,
-    Math.min(100, Math.round(enforceabilityBase + anchorEnforceabilityBoost))
-  );
+  const scoreBeforeRoundClamp = enforceabilityBase + anchorEnforceabilityBoost;
+  const roundedFrom = Math.round(scoreBeforeRoundClamp);
+  const clampRange: [number, number] = [0, 100];
+  const clampApplied = roundedFrom < clampRange[0] || roundedFrom > clampRange[1];
+  const enforceabilityScore = Math.max(clampRange[0], Math.min(clampRange[1], roundedFrom));
 
   const potentialScore = combineExposureAndEnforceability(exposureScore, enforceabilityScore);
 
@@ -80,6 +90,15 @@ export function buildAggregateScores(
         vertrags_abgrenzung: subscores.vertrags_abgrenzung,
         ausfuehrung_mengen: subscores.ausfuehrung_mengen,
         doku_ibn: subscores.doku_ibn,
+      },
+      enforceabilityDebug: {
+        enforceabilityBase,
+        anchorEnforceabilityBoost,
+        scoreBeforeRoundClamp,
+        roundedFrom,
+        clampApplied,
+        clampRange,
+        finalEnforceabilityScore: enforceabilityScore,
       },
     },
   };

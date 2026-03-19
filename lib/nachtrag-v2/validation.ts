@@ -26,6 +26,23 @@ export type ValidationReport = {
   };
   keyFamilies: string[];
   familiesHistogram: FamiliesHistogram;
+  familyExcludedCount?: number;
+  claimGapTypeHistogram?: Record<string, number>;
+  originHistogram?: Record<string, number>;
+  rawEvidenceCount?: number;
+  syntheticEvidenceCount?: number;
+  rawEvidenceShare?: number;
+  evidenceQualityFactor?: number;
+  analysisConfidence?: number;
+  unknownDebugSamples?: Array<{
+    snippet: string;
+    claimGapType: string;
+    family: string;
+    familyScores: Record<string, number>;
+    source: string;
+    evidenceOrigin?: string;
+    unknownReason?: string;
+  }>;
   qualifierHistogram: QualifierHistogram;
   firedAnchors: Array<{ id: string; label: string; reason?: string }>;
   nonFiredAnchors: Array<{ id: string; label: string; reason?: string }>;
@@ -105,13 +122,9 @@ export function buildValidationWarnings(
   const firedAnchorCount = (v2.anchors ?? []).filter((a) => a.fired).length;
 
   const genericFamilies = new Set([
-    "generic_text_noise",
-    "schnittstelle_allgemein",
-    "leistungsabgrenzung_allgemein",
-    "nebenleistung_allgemein",
-    "mengen_unbestimmt",
-    "dokumentation_allgemein",
-    "inbetriebnahme_allgemein",
+    "unknown",
+    "schnittstelle",
+    "schnittstelle_bau",
   ]);
 
   const genericCount = Object.entries(familiesHist)
@@ -218,6 +231,11 @@ export function buildValidationReport(
   }).slice(0, 3);
 
   const evidenceCount = Number((v2.debug as any)?.evidenceCount ?? evidences.length ?? 0);
+  const rawEvidenceCount = Number((v2.debug as any)?.rawEvidenceCount ?? 0);
+  const syntheticEvidenceCount = Number((v2.debug as any)?.syntheticEvidenceCount ?? 0);
+  const rawEvidenceShare = Number((v2.debug as any)?.rawEvidenceShare ?? 0);
+  const evidenceQualityFactor = Number((v2.debug as any)?.evidenceQualityFactor ?? 0);
+  const analysisConfidence = Number((v2.debug as any)?.analysisConfidence ?? evidenceQualityFactor ?? 0);
   const distinctFamilyCount = Object.keys(familiesHistogram).length;
   const positiveEnforceabilityCount = positiveSignals.length;
   const negativeEnforceabilityCount = negativeSignals.length;
@@ -229,6 +247,11 @@ export function buildValidationReport(
 
   const warnings = buildValidationWarnings(v2, familiesHistogram, qualifierHistogram);
 
+  const claimGapTypeHistogram = (v2.debug as any)?.claimGapTypeHistogram as Record<string, number> | undefined;
+  const originHistogram = (v2.debug as any)?.originHistogram as Record<string, number> | undefined;
+  const familyExcludedCount = Number((v2.debug as any)?.familyExcludedCount ?? 0);
+  const unknownDebugSamples = (v2.debug as any)?.unknownDebugSamples as ValidationReport["unknownDebugSamples"];
+
   return {
     summary: {
       exposureScore: v2.exposureScore,
@@ -237,6 +260,15 @@ export function buildValidationReport(
     },
     keyFamilies: topFamilies(familiesHistogram, 6),
     familiesHistogram,
+    familyExcludedCount,
+    claimGapTypeHistogram,
+    originHistogram,
+    rawEvidenceCount,
+    syntheticEvidenceCount,
+    rawEvidenceShare,
+    evidenceQualityFactor,
+    analysisConfidence,
+    unknownDebugSamples,
     qualifierHistogram,
     firedAnchors,
     nonFiredAnchors,

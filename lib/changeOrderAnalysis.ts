@@ -707,9 +707,12 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
   try {
     const v2Evidences = mapChangePotentialSummaryToNachtragEvidences(summary);
     const v2 = runNachtragV2Engine(v2Evidences, { primaryDiscipline: null, secondaryDisciplines: [] });
-    const familiesHistogram = buildFamiliesHistogram(v2Evidences);
+    const processedEvidences = (v2.debug as any)?.processedEvidences as import("./nachtrag-v2/types").NachtragEvidenceV2[] | undefined;
+    const evidencesForFamilyHistogram = (v2.debug as any)?.evidencesForFamilyHistogram as import("./nachtrag-v2/types").NachtragEvidenceV2[] | undefined;
+    const evidencesForHistogram = evidencesForFamilyHistogram ?? processedEvidences ?? v2Evidences;
+    const familiesHistogram = buildFamiliesHistogram(evidencesForHistogram);
     const qualifierHistogram = buildQualifierHistogramFromSignals(v2);
-    const validationReport = buildValidationReport(v2, v2Evidences);
+    const validationReport = buildValidationReport(v2, evidencesForHistogram);
     summary = {
       ...summary,
       v2Debug: {

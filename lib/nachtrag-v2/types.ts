@@ -36,6 +36,15 @@ export type AnchorEventResult = {
   impactExposure?: number;
   impactEnforceability?: number;
   reason?: string;
+  // Debug-/Qualitätsfelder (Admin-Debug)
+  anchorWeightedMass?: number;
+  anchorRawWeightedMass?: number;
+  anchorSyntheticClaimWeightedMass?: number;
+  anchorSyntheticRiskWeightedMass?: number;
+  anchorConfidence?: number;
+  anchorSupportMode?: "raw" | "synthetic_claim_wrapper" | "synthetic_risk_summary" | "mixed" | "none";
+  whyFired?: string;
+  whySuppressed?: string;
 };
 
 export type NachtragSubscoresV2 = {

@@ -4,22 +4,18 @@ import type { EnforceabilityAnalysis } from "./enforceability";
 
 function claimQualityLabelForFamily(fam: string): string {
   switch (fam) {
-    case "bauseits_allgemein":
-      return "klare Zuweisung (bauseits/AG/Fremdgewerk)";
-    case "leistungsabgrenzung_allgemein":
-      return "klare Leistungsgrenze / Verantwortungsgrenze";
-    case "schnittstelle_allgemein":
-      return "klarer Schnittstellen-/Übergabepunkt";
-    case "mengen_unbestimmt":
-      return "abrechenbare Mengen-/Aufmaßmechanik (EP/Aufmaß/Mehrmenge)";
-    case "pruef_mess_nachweis_allgemein":
-      return "Prüf-/Nachweis-/Messbezug (dokumentierbar)";
-    case "inbetriebnahme_allgemein":
-      return "Abnahme-/Inbetriebnahmebezug (Übergabe/Freigabe)";
-    case "vollstaendigkeitspauschale":
-      return "Vollständigkeits-/Komplettverantwortung (Blocker)";
-    case "nebenleistung_allgemein":
-      return "All-inclusive/Nebenleistungen inklusive (Blocker)";
+    case "schnittstelle":
+      return "klarer Schnittstellen-/Übergabepunkt (mehrere Gewerke)";
+    case "schnittstelle_bau":
+      return "klare Zuweisung Bau/technisch (bauseits/Schnittstelle)";
+    case "heizung":
+    case "lueftung":
+    case "sanitaer":
+    case "elektro":
+    case "msr":
+      return `technische Familie ${fam}`;
+    case "bau":
+      return "Bauleistung / bauseitige Zuordnung";
     default:
       return "Claim-Thema (Qualität unklar)";
   }

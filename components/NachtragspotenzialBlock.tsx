@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { sanitizeForDisplay } from "@/lib/displayText";
 import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
+import { buildNachtragCustomerView } from "@/lib/nachtrag-v2/customerView";
 import type {
   ChangePotentialSummary,
   ChangePotentialItem,
@@ -769,109 +770,114 @@ function NachtragExecutivePanel({
   analysis: NachtragspotenzialAnalysisResult;
   sanitize: (s: string) => string;
 }) {
-  const summary = analysis?.changePotentialSummary;
-  const offerSummary = analysis?.offerStrategySummary;
-  const index = summary?.overallIndex ?? (analysis as { summaryIndex?: number; totalIndex?: number })?.summaryIndex ?? (analysis as { summaryIndex?: number; totalIndex?: number })?.totalIndex ?? 0;
-  const fieldCount = summary?.items?.length ?? (analysis as { fields?: unknown[] })?.fields?.length ?? 0;
-  const highLeverage =
-    (summary?.highImpactCount ?? 0) + (summary?.veryHighImpactCount ?? 0) ||
-    (analysis as { highLeverageCount?: number })?.highLeverageCount ||
-    0;
-  const goodFeasibility =
-    (summary?.strongEnforceabilityCount ?? (analysis as { goodFeasibilityCount?: number })?.goodFeasibilityCount) ?? 0;
-  const clusters = analysis?.changePotentialSummary?.negotiationClusters ?? [];
-  const sortedClusters = [...clusters].sort(
-    (a, b) => (RELEVANCE_ORDER[b?.commercialWeight ?? ""] ?? 0) - (RELEVANCE_ORDER[a?.commercialWeight ?? ""] ?? 0)
-  );
-  const topClusters = sortedClusters.slice(0, 3);
+  const v2 = (analysis as any)?.changePotentialSummary?.v2Debug;
+  const hasV2 = !!v2 && typeof v2.potentialScore === "number" && typeof v2.enforceabilityScore === "number";
 
-  const deterministicImmediate =
-    (analysis as { deterministicImmediateActions?: string[] })?.deterministicImmediateActions ?? [];
-  const primaryImmediate = offerSummary?.immediateActions ?? [];
-  const effectiveImmediate =
-    Array.isArray(primaryImmediate) && primaryImmediate.length > 0
-      ? primaryImmediate
-      : deterministicImmediate;
-  const topActions = Array.isArray(effectiveImmediate) ? effectiveImmediate.slice(0, 3) : [];
+  if (!hasV2) {
+    const summary = analysis?.changePotentialSummary;
+    const index =
+      summary?.overallIndex ??
+      (analysis as { summaryIndex?: number; totalIndex?: number })?.summaryIndex ??
+      (analysis as { summaryIndex?: number; totalIndex?: number })?.totalIndex ??
+      0;
+    return (
+      <div style={{ marginBottom: 24, border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, background: "#fff" }}>
+        <div style={{ fontWeight: 700, color: "#334155", marginBottom: 6 }}>Nachtragspotenzial</div>
+        <div style={{ fontSize: 13, color: "#475569" }}>
+          Für diese Analyse liegt aktuell noch keine belastbare V2-Kundensicht vor. Der vorläufige Index liegt bei {Math.round(Number(index) || 0)}/100.
+        </div>
+      </div>
+    );
+  }
 
-  const cardStyle = {
+  const view = buildNachtragCustomerView({ v2 });
+  const cardBase: React.CSSProperties = {
     border: "1px solid #e2e8f0",
     borderRadius: 12,
-    padding: 16,
+    padding: 12,
     background: "#ffffff",
   };
-  const titleStyle = { fontSize: 14, fontWeight: 600, marginBottom: 8, color: "#334155" };
-  const badgeStyle = { padding: "2px 8px", borderRadius: 999, fontSize: 12, background: "#eef2ff", color: "#3730a3" };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 48, alignItems: "stretch" }}>
-      {/* Karte 1: Nachtragspotenzial Index */}
-      <div style={{ ...cardStyle, height: "100%" }}>
-        <div style={titleStyle}>Nachtragspotenzial</div>
-        <div style={{ fontSize: 18, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
-          Risikoklasse: {summary?.riskClassLabel ?? "—"}
-        </div>
-        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>
-          {index} von 100 Punkten
-        </div>
-        {summary?.shortRiskReason && (
-          <div style={{ fontSize: 12, color: "#475569", marginBottom: 8 }}>
-            {sanitize(summary.shortRiskReason)}
+    <div style={{ display: "grid", gap: 12, marginBottom: 28 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: "#334155" }}>Nachtragspotenzial</div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+        <div style={cardBase}>
+          <div style={{ fontSize: 12, color: "#64748b" }}>Nachtragspotenzial</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#334155" }}>
+            {view.potentialLabel} ({Math.round(view.potentialScore)}/100)
           </div>
-        )}
-        <div style={{ fontSize: 12, color: "#475569", display: "flex", flexDirection: "column", gap: 4 }}>
-          <span>Anzahl Nachtragsfelder: {fieldCount}</span>
-          <span>Hohe Hebel: {highLeverage}</span>
-          <span>Gut durchsetzbar: {goodFeasibility}</span>
+        </div>
+        <div style={cardBase}>
+          <div style={{ fontSize: 12, color: "#64748b" }}>Durchsetzbarkeit</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#334155" }}>
+            {view.enforceabilityLabel} ({Math.round(view.enforceabilityScore)}/100)
+          </div>
+        </div>
+        <div style={cardBase}>
+          <div style={{ fontSize: 12, color: "#64748b" }}>Belastbarkeit / Konfidenz</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 2 }}>{view.confidenceLabel}</div>
+          <div style={{ fontSize: 12, color: "#64748b" }}>{sanitize(view.confidenceReason)}</div>
         </div>
       </div>
-      {/* Karte 2: Wichtigste Hebel */}
-      <div style={{ ...cardStyle, height: "100%" }}>
-        <div style={titleStyle}>Wichtigste Hebel</div>
-        {summary?.topItemsForDisplay && summary.topItemsForDisplay.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {summary.topItemsForDisplay.slice(0, 3).map((item) => (
-              <div key={item.id}>
-                <div style={{ fontSize: 13, color: "#334155", marginBottom: 4 }}>
-                  {sanitize(item.title)}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+        <div style={cardBase}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 6 }}>Wichtigste Treiber</div>
+          {view.topDrivers.length > 0 ? (
+            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 13, color: "#475569" }}>
+              {view.topDrivers.slice(0, 3).map((d, i) => (
+                <li key={i}>{sanitize(d)}</li>
+              ))}
+            </ul>
+          ) : (
+            <div style={{ fontSize: 12, color: "#94a3b8" }}>Keine Treiber verfügbar</div>
+          )}
+        </div>
+
+        <div style={cardBase}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 6 }}>Top Hebel</div>
+          {view.topLevers.length > 0 ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              {view.topLevers.slice(0, 3).map((l, i) => (
+                <div key={i} style={{ borderTop: i ? "1px solid #f1f5f9" : "none", paddingTop: i ? 8 : 0 }}>
+                  <div style={{ fontWeight: 600, color: "#334155" }}>{sanitize(l.title)}</div>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    {sanitize(l.fieldType)} · {sanitize(l.mechanism)} · {sanitize(l.leverageLabel)}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>{sanitize(l.explanation)}</div>
                 </div>
-                <div style={{ fontSize: 12, color: "#64748b" }}>
-                  {[
-                    `Feldtyp: ${labelFor(FIELD_TYPE_LABELS, item.fieldType)}`,
-                    `Mechanismus: ${labelFor(MECHANISM_LABELS, item.changeMechanism)}`,
-                    `Hebel: ${labelFor(IMPACT_LABELS, item.impactLevel)}`,
-                  ].join(" · ")}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : topClusters.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {topClusters.map((c) => (
-              <div key={c?.id ?? c?.title}>
-                <div style={{ fontSize: 13, color: "#334155", marginBottom: 4 }}>{sanitize(c?.title ?? "")}</div>
-                <span style={badgeStyle}>
-                  {c?.commercialWeight === "sehr_hoch" || c?.commercialWeight === "hoch" ? "Hoch" : "Mittel"}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <span style={{ fontSize: 12, color: "#94a3b8" }}>Keine Hebel erkannt</span>
-        )}
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: "#94a3b8" }}>Keine Hebel verfügbar</div>
+          )}
+        </div>
+
+        <div style={cardBase}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 6 }}>Sofortmaßnahmen</div>
+          {view.immediateActions.length > 0 ? (
+            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 13, color: "#475569" }}>
+              {view.immediateActions.slice(0, 3).map((a, i) => (
+                <li key={i}>{sanitize(String(a))}</li>
+              ))}
+            </ul>
+          ) : (
+            <div style={{ fontSize: 12, color: "#94a3b8" }}>Keine Maßnahmen verfügbar</div>
+          )}
+        </div>
       </div>
-      {/* Karte 3: Sofortmaßnahmen */}
-      <div style={{ ...cardStyle, height: "100%" }}>
-        <div style={titleStyle}>Sofortmaßnahmen</div>
-        {topActions.length > 0 ? (
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#475569", lineHeight: 1.5 }}>
-            {topActions.map((a, i) => (
-              <li key={i} style={{ marginBottom: 4 }}>{sanitize(String(a))}</li>
-            ))}
-          </ul>
-        ) : (
-          <span style={{ fontSize: 12, color: "#94a3b8" }}>Keine Maßnahmen erkannt</span>
-        )}
+
+      <div style={{ ...cardBase, padding: 14 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 6 }}>Management Summary</div>
+        <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.55 }}>{sanitize(view.managementSummary)}</div>
+      </div>
+
+      <div style={{ ...cardBase, padding: 14 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 6 }}>Empfohlene Strategie</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#1e3a5f", marginBottom: 4 }}>{sanitize(view.recommendedStrategy.title)}</div>
+        <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.5 }}>{sanitize(view.recommendedStrategy.rationale)}</div>
       </div>
     </div>
   );

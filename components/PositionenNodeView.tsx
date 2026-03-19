@@ -24,6 +24,36 @@ export function PositionenNodeView({ nodes, maxHeight = "420px", searchQuery, th
   const textSecondary = theme?.textSecondary ?? "#475569";
   const cardBorder = theme?.cardBorder ?? "#e2e8f0";
 
+  // Nur echte Positionsinhalte anzeigen:
+  // - Gruppenüberschriften nur, wenn danach mindestens ein Item folgt
+  // - Remark-Knoten vollständig aus der Positionssicht entfernen (gehören zu Vorbemerkungen/Kontext).
+  const filteredNodes = (() => {
+    const result: GaebPreviewDisplayNode[] = [];
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      if (node.type === "group") {
+        let hasItemAfter = false;
+        for (let j = i + 1; j < nodes.length; j++) {
+          const n = nodes[j];
+          if (n.type === "group") break;
+          if (n.type === "item") {
+            hasItemAfter = true;
+            break;
+          }
+        }
+        if (hasItemAfter) result.push(node);
+        continue;
+      }
+      if (node.type === "remark") {
+        // Remark-Only-Inhalte nicht im Tab „Positionen“ anzeigen.
+        continue;
+      }
+      // Items immer übernehmen.
+      result.push(node);
+    }
+    return result;
+  })();
+
   let itemIndex = 0;
   return (
     <div
@@ -35,7 +65,7 @@ export function PositionenNodeView({ nodes, maxHeight = "420px", searchQuery, th
         background: "#fff",
       }}
     >
-      {nodes.map((node, i) => {
+      {filteredNodes.map((node, i) => {
         if (node.type === "group") {
           return (
             <div

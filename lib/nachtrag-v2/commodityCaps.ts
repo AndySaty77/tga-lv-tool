@@ -6,14 +6,16 @@ type CommodityCapRule = {
   cap: number;
 };
 
-// Defensive Defaults: Caps auf breit streuende Familien.
+// Defensive Defaults: Caps auf technische Familien und Schnittstellen.
 const DEFAULT_COMMODITY_CAPS: CommodityCapRule[] = [
-  { family: "schnittstelle_allgemein", cap: 8 },
-  { family: "nebenleistung_allgemein", cap: 8 },
-  { family: "leistungsabgrenzung_allgemein", cap: 8 },
-  { family: "dokumentation_allgemein", cap: 6 },
-  { family: "inbetriebnahme_allgemein", cap: 6 },
-  { family: "mengen_unbestimmt", cap: 10 },
+  { family: "schnittstelle", cap: 8 },
+  { family: "schnittstelle_bau", cap: 8 },
+  { family: "heizung", cap: 6 },
+  { family: "lueftung", cap: 6 },
+  { family: "sanitaer", cap: 6 },
+  { family: "elektro", cap: 6 },
+  { family: "msr", cap: 6 },
+  { family: "bau", cap: 8 },
 ];
 
 export type ApplyCommodityCapsOptions = {

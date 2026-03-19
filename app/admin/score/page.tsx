@@ -1338,11 +1338,35 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
     return normalizeViewerVorbemerkungenText(raw);
   }, [structuredVortextForView, split?.vortext, gaebPreview?.vortextGuessClean, structureVortext]);
 
-  /** Bereinigt und ohne technische Metadaten – nur für Anzeige im Vorbemerkungen-Tab. */
-  const vortextForDocumentViewDisplay = useMemo(
-    () => stripTechnicalNoiseForDisplay(sanitizeForDisplay(vortextForDocumentView)),
-    [vortextForDocumentView]
-  );
+  /** Bereinigt und ohne technische Metadaten – nur für Anzeige im Vorbemerkungen-Tab. Inkl. gruppenbezogene remark-only Kategorien aus normalized.remarks (via displayNodes). */
+  const vortextForDocumentViewDisplay = useMemo(() => {
+    let base = vortextForDocumentView;
+    const nodes = gaebPreview?.normalized?.displayNodes;
+    if (Array.isArray(nodes) && nodes.length > 0) {
+      const groupBlocks: string[] = [];
+      let currentLabel = "";
+      const currentTexts: string[] = [];
+      const flush = () => {
+        if (currentLabel.length > 0 && currentTexts.length > 0) {
+          groupBlocks.push(currentLabel + "\n\n" + currentTexts.join("\n\n"));
+        }
+        currentTexts.length = 0;
+      };
+      for (const n of nodes) {
+        if (n.type === "group") {
+          flush();
+          currentLabel = (n.label ?? "").trim();
+        } else if (n.type === "remark" && (n.scope === "group" || n.scope === "itemlist-note")) {
+          const t = (n.text ?? "").trim();
+          if (t.length > 0) currentTexts.push(t);
+        }
+      }
+      flush();
+      const groupPart = [...new Set(groupBlocks)].filter(Boolean).join("\n\n\n");
+      if (groupPart.length > 0) base = base.length > 0 ? base + "\n\n\n" + groupPart : groupPart;
+    }
+    return stripTechnicalNoiseForDisplay(sanitizeForDisplay(base));
+  }, [vortextForDocumentView, gaebPreview?.normalized?.displayNodes]);
 
   /** Bei GAEB-XML: Tab Positionen ausschließlich aus displayNodes (group + remark scope group/itemlist + item). Kein Legacy-Pfad. */
   const isGaebXml = useMemo(
@@ -2633,8 +2657,31 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
                   )}
                 </div>
               )}
+              <div style={{ fontSize: 12, marginBottom: 12, whiteSpace: "pre-wrap" }}>
+                <strong>DEBUG VORBEMERKUNGEN</strong>
+                <div>displayNodes count: {gaebPreview?.normalized?.displayNodes?.length ?? 0}</div>
+                <div>
+                  remark nodes:{" "}
+                  {Array.isArray(gaebPreview?.normalized?.displayNodes)
+                    ? gaebPreview.normalized.displayNodes.filter(
+                        (n: any) => n?.type === "remark"
+                      ).length
+                    : 0}
+                </div>
+                <div>
+                  group-scope remarks:{" "}
+                  {Array.isArray(gaebPreview?.normalized?.displayNodes)
+                    ? gaebPreview.normalized.displayNodes.filter(
+                        (n: any) =>
+                          n?.type === "remark" &&
+                          (n?.scope === "group" || n?.scope === "itemlist-note")
+                      ).length
+                    : 0}
+                </div>
+                <div>vortext length: {vortextForDocumentViewDisplay?.length ?? 0}</div>
+              </div>
               <VorbemerkungenDocumentView
-                content={vortextForDocumentView}
+                content={vortextForDocumentViewDisplay}
                 maxHeight="420px"
                 searchQuery={vorbemerkungenSearchQuery.trim() || undefined}
                 theme={{ textPrimary: D.textPrimary, textSecondary: D.textSecondary, cardBorder: D.cardBorder }}
@@ -2832,6 +2879,122 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
                   <div>
                     <strong>Durchsetzbarkeit:</strong> {changeOrderAnalysis.changePotentialSummary.v2Debug.enforceabilityScore} / 100
                   </div>
+                  {(() => {
+                    const v: any = changeOrderAnalysis.changePotentialSummary.v2Debug;
+                    const d: any = v?.debug ?? {};
+                    const rawPositive = Number(d.enforceabilityRawPositiveScore ?? d.positiveContributionSum ?? 0);
+                    const rawNegative = Number(d.enforceabilityRawNegativeScore ?? d.negativeContributionSum ?? 0);
+                    const rawBaseScore = Number(d.enforceabilityRawBaseScore ?? d.enforceabilityRawBeforeNormalize ?? d.rawEnforceabilityBeforeClamp ?? 0);
+                    const floorApplied = Boolean(d.enforceabilityFloorApplied ?? false);
+                    const floorValue = Number(d.enforceabilityFloorValue ?? 0);
+
+                    const scoreBeforeNormalize = Number(d.enforceabilityScoreBeforeNormalize ?? rawBaseScore ?? 0);
+                    const scoreAfterNormalize = Number(d.enforceabilityScoreAfterNormalize ?? d.enforceabilityRawAfterNormalize ?? d.normalizedEnforceability ?? 0);
+                    const normalizeRoundedFrom = Number(d.normalizeRoundedFrom ?? 0);
+                    const normalizeClampApplied = Boolean(d.normalizeClampApplied ?? false);
+
+                    const anchorBoost = Number(d.anchorEnforceabilityBoost ?? 0);
+                    const beforeRoundClamp = Number(d.enforceabilityScoreBeforeRoundClamp ?? (scoreAfterNormalize + anchorBoost));
+                    const roundedFrom = Number(d.enforceabilityRoundedFrom ?? 0);
+                    const clampApplied = Boolean(d.enforceabilityClampApplied ?? false);
+                    const finalEnforceabilityScore = Number(d.enforceabilityFinalEnforceabilityScore ?? NaN);
+                    const mc = d.enforceabilityMarkerContributions ?? {};
+                    const pd = d.positiveEnforceabilityDebug ?? {};
+                    const sp = d.strongestPositiveDriver;
+                    const sn = d.strongestNegativeBlocker;
+                    const tokens = [
+                      `unresolvedClaimTopic: -${Number(mc.unresolvedClaimTopic ?? 0).toFixed(2)}`,
+                      `allInclusiveLanguage: -${Number(mc.allInclusiveLanguage ?? 0).toFixed(2)}`,
+                      `vagueBoundary: -${Number(mc.vagueBoundary ?? 0).toFixed(2)}`,
+                      `explicitAssignment: +${Number(mc.explicitAssignment ?? 0).toFixed(2)}`,
+                      `raw-backed anchor support: +${Number(mc.rawBackedAnchorSupport ?? 0).toFixed(2)}`,
+                      `family confidence / evidence quality: ${Number(mc.familyConfidenceEvidenceQuality ?? 0) >= 0 ? "+" : ""}${Number(mc.familyConfidenceEvidenceQuality ?? 0).toFixed(2)}`,
+                    ];
+                    const strongPos = sp
+                      ? `${sp.family} (${sp.evidenceId}) w:${Number(sp.weight ?? 0).toFixed(2)}`
+                      : "-";
+                    const strongNeg = sn
+                      ? `${sn.family} (${sn.evidenceId}) w:${Number(sn.weight ?? 0).toFixed(2)}`
+                      : "-";
+
+                    const formatQualMap = (m: any) => {
+                      try {
+                        const entries = Object.entries(m ?? {});
+                        if (!entries.length) return "-";
+                        return entries
+                          .sort((a: any, b: any) => Number(b[1] ?? 0) - Number(a[1] ?? 0))
+                          .slice(0, 6)
+                          .map(([k, v]: any) => `${k}:${Number(v ?? 0).toFixed(0)}`)
+                          .join(", ");
+                      } catch {
+                        return "-";
+                      }
+                    };
+
+                    const formatRejected = (rej: any) => {
+                      try {
+                        const out: string[] = [];
+                        const keys = Object.keys(rej ?? {});
+                        for (const k of keys.slice(0, 6)) {
+                          const reasons = rej[k] ?? {};
+                          const rEntries = Object.entries(reasons).sort((a: any, b: any) => Number(b[1] ?? 0) - Number(a[1] ?? 0));
+                          const top = rEntries.slice(0, 2).map(([rk, rv]: any) => `${rk}:${Number(rv ?? 0).toFixed(0)}`);
+                          out.push(`${k}[${top.join("|")}]`);
+                        }
+                        return out.length ? out.join(" · ") : "-";
+                      } catch {
+                        return "-";
+                      }
+                    };
+
+                    return (
+                      <>
+                        <div>
+                          <strong>Enforceability Debug (Final Source-of-Truth):</strong> final = `lib/nachtrag-v2/aggregate.ts` → `buildAggregateScores().enforceabilityScore`
+                          <br />
+                          Pos {rawPositive.toFixed(2)} - Neg {rawNegative.toFixed(2)} = RawBase {rawBaseScore.toFixed(2)}
+                          {floorApplied ? ` (floorApplied:true; floor:${floorValue})` : " (floorApplied:false)"} · ScoreBeforeNorm {scoreBeforeNormalize.toFixed(2)} → AfterNorm {scoreAfterNormalize.toFixed(2)}
+                          {normalizeClampApplied ? ` (normalizeClampApplied:true; roundedFrom:${normalizeRoundedFrom})` : ""}
+                          <br />
+                          +AnchorBoost {anchorBoost.toFixed(2)} ⇒ scoreBeforeRoundClamp {beforeRoundClamp.toFixed(2)}
+                          <br />
+                          Rounded {roundedFrom} → ClampRange [0..100] ⇒ final ={" "}
+                          {Number.isFinite(finalEnforceabilityScore) ? `${finalEnforceabilityScore.toFixed(0)} / 100` : `debugMissing (fallback final=${Number(v?.enforceabilityScore ?? 0).toFixed(0)} / 100)`}
+                          <br />
+                          ClampApplied: {clampApplied ? "true" : "false"} (what happens after Rounded: clamp to [0..100])
+                          <br />
+                          Strongest: Pos {sp ? `${sp.family} (${sp.evidenceId})` : "-"} · Neg {sn ? `${sn.family} (${sn.evidenceId})` : "-"}
+                        </div>
+                        <div>
+                          <strong>Marker Beiträge:</strong> {tokens.join(" · ")}
+                        </div>
+                        <div>
+                          <strong>Strong Driver/Blocker:</strong> Pos {strongPos} · Neg {strongNeg}
+                          {!sp && !sn && anchorBoost > 0 ? " (Final kommt nur von Anchor-Boost)" : ""}
+                        </div>
+                        <div>
+                          <strong>Pos-Qualifier Debug:</strong>{" "}
+                          detectedPos: {formatQualMap(pd.detectedPositiveQualifiers)} · detectedNeg: {formatQualMap(pd.detectedNegativeQualifiers)}
+                          <br />
+                          requiredPos: {(pd.requiredPositiveQualifiers ?? []).length ? (pd.requiredPositiveQualifiers ?? []).join(", ") : "-"} · allowPositive:{" "}
+                          {pd.allowPositive?.allowPositiveTrue ?? 0}/{pd.allowPositive?.allowPositiveFalse ?? 0}
+                          <br />
+                          candidates: +{pd.countPositiveCandidates ?? 0} / -{pd.countNegativeCandidates ?? 0}
+                          <br />
+                          acceptedPos: {formatQualMap(pd.acceptedPositiveQualifiers)} · partiallyAcceptedPos: {formatQualMap(pd.partiallyAcceptedPositiveQualifiers)}
+                          <br />
+                          rejectedPos: {formatRejected(pd.rejectedPositiveQualifiers)}
+                          <br />
+                          familyAgnosticQualityGate:{" "}
+                          {pd.lastFamilyAgnosticQualityGatePass ? "pass" : "fail"} (
+                          {pd.lastFamilyAgnosticQualityGateReason ?? "fail"})
+                          <br />
+                          hasRawSupport: {pd.hasRawSupport ? "true" : "false"} · rawLvCount: {pd.rawLvCount ?? 0} · rawEvidenceShare:{" "}
+                          {(pd.rawEvidenceShare ?? 0).toFixed(2)}
+                        </div>
+                      </>
+                    );
+                  })()}
                   <div>
                     <strong>Gesamtpotenzial V2:</strong> {changeOrderAnalysis.changePotentialSummary.v2Debug.potentialScore} / 100
                   </div>
@@ -2847,9 +3010,24 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
                     <div>
                       <strong>Anchor-Events:</strong>{" "}
                       {changeOrderAnalysis.changePotentialSummary.v2Debug.anchors
-                        .filter((a) => a.fired)
-                        .map((a) => a.label)
-                        .join(" · ") || "keine aktiv (defensive Neutralstellung)"}
+                        .map((a) => {
+                          const mass = typeof a.anchorWeightedMass === "number" ? a.anchorWeightedMass : 0;
+                          const rawMass = typeof a.anchorRawWeightedMass === "number" ? a.anchorRawWeightedMass : 0;
+                          const synMass =
+                            (typeof a.anchorSyntheticClaimWeightedMass === "number" ? a.anchorSyntheticClaimWeightedMass : 0) +
+                            (typeof a.anchorSyntheticRiskWeightedMass === "number" ? a.anchorSyntheticRiskWeightedMass : 0);
+                          const conf = typeof a.anchorConfidence === "number" ? a.anchorConfidence : 0;
+                          const mode = a.anchorSupportMode ?? "none";
+                          const why = a.fired ? a.whyFired : a.whySuppressed;
+                          const whyShort = typeof why === "string" ? why.slice(0, 70) : "";
+                          const syntheticOnly =
+                            a.fired &&
+                            (mode === "synthetic_claim_wrapper" || mode === "synthetic_risk_summary") &&
+                            conf < 0.45;
+                          const status = a.fired ? (syntheticOnly ? " (synthetic-only, defensiv aktiv)" : " (aktiv)") : " (suppr.)";
+                          return `${a.label}${status} [m:${mass.toFixed(2)}; raw:${rawMass.toFixed(2)}; syn:${synMass.toFixed(2)}; conf:${conf.toFixed(2)}; ${mode}]${whyShort ? ` · ${whyShort}` : ""}`;
+                        })
+                        .join(" || ") || "keine Anchor-Events"}
                     </div>
                   )}
                   {changeOrderAnalysis.changePotentialSummary.v2Debug.commodityCaps.length > 0 && (
@@ -2892,7 +3070,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
 
                   <div style={{ display: "grid", gap: 8, fontSize: D.fontSizeCaption, color: D.textSecondary }}>
                     <div>
-                      <strong>Family-Verteilung:</strong>{" "}
+                      <strong>Family-Verteilung (nur family-eligible evidences):</strong>{" "}
                       {Object.entries(
                         changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.familiesHistogram ?? {}
                       )
@@ -2900,7 +3078,46 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
                         .slice(0, 10)
                         .map(([fam, v]) => `${fam} (${v.count})`)
                         .join(" · ") || "-"}
+                      {(changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.familyExcludedCount ?? 0) > 0 && (
+                        <span style={{ marginLeft: 8, color: D.textSecondary }}>
+                          · Ausgeschlossen: {changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.familyExcludedCount} synthetic evidences
+                        </span>
+                      )}
                     </div>
+                    <div>
+                      <strong>Evidence-Confidence:</strong>{" "}
+                      {(() => {
+                        const vr = changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport;
+                        const raw = Number(vr.rawEvidenceCount ?? 0);
+                        const syn = Number(vr.syntheticEvidenceCount ?? 0);
+                        const share = Number(vr.rawEvidenceShare ?? 0);
+                        const q = Number(vr.evidenceQualityFactor ?? 0);
+                        const sharePct = Math.round(share * 100);
+                        return `Raw ${raw} · Synthetic ${syn} · Raw-Share: ${sharePct}% · Qualität: ${q.toFixed(2)}`;
+                      })()}
+                    </div>
+                    {Object.keys(changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.claimGapTypeHistogram ?? {}).length > 0 && (
+                      <div>
+                        <strong>Claim-/Gap-Typen:</strong>{" "}
+                        {Object.entries(
+                          changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.claimGapTypeHistogram ?? {}
+                        )
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([t, c]) => `${t} (${c})`)
+                          .join(" · ")}
+                      </div>
+                    )}
+                    {Object.keys(changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.originHistogram ?? {}).length > 0 && (
+                      <div>
+                        <strong>Evidence-Origin:</strong>{" "}
+                        {Object.entries(
+                          changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.originHistogram ?? {}
+                        )
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([o, c]) => `${o} (${c})`)
+                          .join(" · ")}
+                      </div>
+                    )}
 
                     <div>
                       <strong>Qualifier-Verteilung:</strong>{" "}
@@ -2957,6 +3174,38 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
                             .join(" · ")
                         : "keine"}
                     </div>
+
+                    {(changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.unknownDebugSamples?.length ?? 0) > 0 && (
+                      <details style={{ marginTop: 12 }}>
+                        <summary style={{ cursor: "pointer", fontWeight: 700 }}>
+                          Unknown-Debug (erste {changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.unknownDebugSamples?.length ?? 0} Fälle)
+                        </summary>
+                        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 12 }}>
+                          {(changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.unknownDebugSamples ?? []).map((u: any, i: number) => (
+                            <div
+                              key={i}
+                              style={{
+                                padding: 10,
+                                background: "#f8fafc",
+                                borderRadius: 8,
+                                border: "1px solid #e2e8f0",
+                                fontSize: 12,
+                                whiteSpace: "pre-wrap",
+                              }}
+                            >
+                              <div>Snippet: {u.snippet}</div>
+                              <div>Quelle: {u.source} · Origin: {u.evidenceOrigin ?? "-"} · Typ: {u.claimGapType} · Family: {u.family}</div>
+                              <div>Grund: {u.unknownReason ?? "-"}</div>
+                              <div>Family-Scores: {Object.entries(u.familyScores ?? {})
+                                .filter(([, v]) => Number(v) > 0)
+                                .map(([k, v]) => `${k}: ${v}`)
+                                .join(", ") || "alle 0"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </div>
                 </SectionCard>
               )}

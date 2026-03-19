@@ -39,13 +39,9 @@ export function applyGates(
     }
 
     const isBroadGenericFamily =
-      ev.family === "schnittstelle_allgemein" ||
-      ev.family === "nebenleistung_allgemein" ||
-      ev.family === "leistungsabgrenzung_allgemein" ||
-      ev.family === "dokumentation_allgemein" ||
-      ev.family === "inbetriebnahme_allgemein" ||
-      ev.family === "mengen_unbestimmt" ||
-      ev.family === "bestandsunsicherheit";
+      ev.family === "schnittstelle" ||
+      ev.family === "schnittstelle_bau" ||
+      ev.family === "unknown";
 
     if (isBroadGenericFamily && hasTags && !isGlobal && !matchesAnyDiscipline && allowedDisciplines.size > 0) {
       factor *= 0.7;

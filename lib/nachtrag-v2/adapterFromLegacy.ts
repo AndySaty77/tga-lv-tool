@@ -1,6 +1,6 @@
 import type { DbTrigger } from "../analyzeLvText";
 import type { NachtragEvidenceV2, NachtragRiskDirection, NachtragSubscoreKey } from "./types";
-import { resolveFamilyFromTrigger, type NachtragFamilyId } from "./families";
+import { resolveFamilyFromText, type NachtragFamilyId } from "./families";
 
 export type LegacyFinding = {
   id: string;
@@ -50,15 +50,11 @@ export function mapLegacyToNachtragEvidence(
 
   for (const f of findings) {
     const isDb = f.id && String(f.id).startsWith("DB_");
-    let family: NachtragFamilyId = "generic_text_noise";
-
-    if (isDb) {
-      const triggerId = String(f.id).replace(/^DB_/, "");
-      const trigger = byId.get(triggerId);
-      family = resolveFamilyFromTrigger(trigger?.name, trigger?.category);
-    } else if (f.category) {
-      family = resolveFamilyFromTrigger(undefined, f.category);
-    }
+    const trigger = isDb ? byId.get(String(f.id).replace(/^DB_/, "")) : undefined;
+    const text = [f.title ?? "", f.detail ?? "", f.raw_excerpt ?? "", trigger?.name ?? "", trigger?.category ?? "", f.category ?? ""]
+      .filter(Boolean)
+      .join(" ");
+    const family: NachtragFamilyId = resolveFamilyFromText(text);
 
     const subscoreTargets = mapCategoryToSubscores(f.category);
     const riskDirection = inferRiskDirection(f);
@@ -71,15 +67,18 @@ export function mapLegacyToNachtragEvidence(
       signalType: "commodity",
       riskDirection,
       subscoreTargets,
-      disciplineTags: isDb && byId.get(String(f.id).replace(/^DB_/, ""))?.disciplines
-        ? (byId.get(String(f.id).replace(/^DB_/, ""))!.disciplines as string[])
-        : [],
+      disciplineTags: (trigger?.disciplines as string[] | undefined) ?? [],
       sourceContext: "unknown",
       confidence: 0.5,
       rawWeight: baseWeight,
       meta: {
         legacyCategory: f.category,
         legacyPenalty: f.penalty,
+        title: f.title,
+        detail: f.detail,
+        raw_excerpt: f.raw_excerpt,
+        triggerName: trigger?.name,
+        triggerCategory: trigger?.category,
       },
     };
 

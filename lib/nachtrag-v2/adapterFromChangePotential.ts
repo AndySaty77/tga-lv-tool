@@ -1,55 +1,10 @@
 import type { ChangePotentialSummary, ChangePotentialItem } from "../changePotentialModel";
 import type { NachtragEvidenceV2 } from "./types";
+import { resolveFamilyFromText } from "./families";
 
-function familyFromFieldType(item: ChangePotentialItem): string {
-  const t = `${item.title ?? ""} ${item.reasoning ?? ""} ${item.sourceQuote ?? ""}`.toLowerCase();
-
-  // Blocker / Pauschal / Vollständigkeit
-  if (/\b(vollst(ä|ae)ndig|vollumf(ä|ae)nglich|komplett|pauschal|abgegolten|mit\s+dem\s+preis\s+abgegolten|inkl\.?|inklusive|nebenleistungen)\b/i.test(t)) {
-    if (/\b(vollst(ä|ae)ndig|vollumf(ä|ae)nglich|komplett|funktionsverantwortung|systemverantwortung)\b/i.test(t)) {
-      return "vollstaendigkeitspauschale";
-    }
-    return "nebenleistung_allgemein";
-  }
-
-  // Dokumentation / Prüf / Abnahme / IBN
-  if (/\b(dokumentation|revision|revisionsunterlage|protokoll|nachweis|mess|pr(ü|ue)f|abnahme|inbetriebnahme|ibn)\b/i.test(t)) {
-    if (/\b(abnahme|inbetriebnahme|ibn)\b/i.test(t)) return "inbetriebnahme_allgemein";
-    if (/\b(pr(ü|ue)f|nachweis|mess|protokoll)\b/i.test(t)) return "pruef_mess_nachweis_allgemein";
-    return "dokumentation_allgemein";
-  }
-
-  // Mengen / Aufmaß / EP / Mehrmengen
-  if (/\b(menge|massen|masse|aufma(ß|ss)|einheitspreis|\bep\b|mehrmenge|mindermenge)\b/i.test(t)) {
-    return "mengen_unbestimmt";
-  }
-
-  // Bauseits / Vorleistung / AG
-  if (/\b(bauseits|bauherrseitig|ag-?seitig|vorleistung|durch\s+ag|auftraggeber)\b/i.test(t)) {
-    return "bauseits_allgemein";
-  }
-
-  // Schnittstelle / Übergabe
-  if (/\b(schnittstelle|übergabe|uebergabe|anschlussgrenze|liefergrenze|abgrenzung)\b/i.test(t)) {
-    if (/\b(abgrenzung|leistungsgrenze)\b/i.test(t)) return "leistungsabgrenzung_allgemein";
-    return "schnittstelle_allgemein";
-  }
-
-  switch (item.fieldType) {
-    case "schnittstelle":
-      return "schnittstelle_allgemein";
-    case "nebenleistung":
-      return "nebenleistung_allgemein";
-    case "leistungsabgrenzung":
-      return "leistungsabgrenzung_allgemein";
-    case "mengenrisiko":
-      return "mengen_unbestimmt";
-    case "dokumentation_inbetriebnahme":
-      // bewusst als allgemeine Doku-Familie; IBN wird über Mechanik/Reasoning im Text erkannt.
-      return "dokumentation_allgemein";
-    default:
-      return "generic_text_noise";
-  }
+function familyFromItem(item: ChangePotentialItem): string {
+  const text = `${item.title ?? ""} ${item.reasoning ?? ""} ${item.sourceQuote ?? ""}`.trim();
+  return resolveFamilyFromText(text);
 }
 
 function subscoresFromFieldType(item: ChangePotentialItem): NachtragEvidenceV2["subscoreTargets"] {
@@ -86,7 +41,7 @@ export function mapChangePotentialSummaryToNachtragEvidences(summary: ChangePote
     return {
       id: String(it.id),
       title: title,
-      family: familyFromFieldType(it),
+      family: familyFromItem(it),
       signalType: "commodity",
       riskDirection: "both",
       subscoreTargets: subscoresFromFieldType(it),
