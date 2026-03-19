@@ -5,6 +5,8 @@ import {
   type NegativeQualifierKey,
 } from "./enforceabilityQualifiers";
 
+type FamilyAgnosticGateReason = "raw_present" | "raw_share" | "quality" | "fail";
+
 export type EnforceabilitySignal = {
   evidenceId: string;
   family: string;
@@ -60,7 +62,7 @@ export type EnforceabilityAnalysis = {
       quality: number;
       fail: number;
     };
-    lastFamilyAgnosticQualityGateReason: "raw_present" | "raw_share" | "quality" | "fail";
+    lastFamilyAgnosticQualityGateReason: FamilyAgnosticGateReason;
     lastFamilyAgnosticQualityGatePass: boolean;
     hasRawSupport: boolean;
     rawLvCount: number;
@@ -157,7 +159,7 @@ export function analyzeEnforceability(evidences: NachtragEvidenceV2[]): Enforcea
     quality: 0,
     fail: 0,
   };
-  let lastFamilyAgnosticQualityGateReason: "raw_present" | "raw_share" | "quality" | "fail" = "fail";
+  let lastFamilyAgnosticQualityGateReason: FamilyAgnosticGateReason = "fail";
   let lastFamilyAgnosticQualityGatePass = false;
 
   function bumpRejected(qual: PositiveQualifierKey, reason: string, count = 1) {
@@ -204,12 +206,12 @@ export function analyzeEnforceability(evidences: NachtragEvidenceV2[]): Enforcea
     const anyAgnosticPresent = posQ.some((k) => FAMILY_AGNOSTIC_POS_KEYS.has(k));
     const hasRawSupport = hasAnyRawLvEvidence || rawEvidenceShare > 0;
     // Strict rule für synthetic-only: ohne echtes Raw-Support darf kein agnostic Positivcredit entstehen.
-    let qualityGateReason: "raw_present" | "raw_share" | "quality" | "fail" = "fail";
+    let qualityGateReason: FamilyAgnosticGateReason = "fail";
     if (hasRawSupport) {
       qualityGateReason = hasAnyRawLvEvidence ? "raw_present" : "raw_share";
     }
     const qualityOkForAgnostic = hasRawSupport && evidenceQuality >= EVIDENCE_QUALITY_MIN_FOR_AGNOSTIC;
-    const finalQualityGateReason: typeof qualityGateReason | "fail" = qualityOkForAgnostic ? "quality" : qualityGateReason;
+    const finalQualityGateReason: FamilyAgnosticGateReason = qualityOkForAgnostic ? "quality" : qualityGateReason;
     const familyAgnosticAccept = anyAgnosticPresent && qualityOkForAgnostic;
     familyAgnosticQualityGateCounts[finalQualityGateReason] += 1;
 
