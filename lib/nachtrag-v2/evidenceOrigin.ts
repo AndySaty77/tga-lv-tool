@@ -2,6 +2,7 @@
  * Evidence-Origin-Typisierung für Nachtragspotenzial V2.
  * Trennt Roh-Evidences von synthetischen/generischen Claim- oder Risiko-Wrappern.
  */
+import type { TechnicalFamilyId } from "./families";
 
 export type EvidenceOriginType =
   | "raw_lv_evidence"
@@ -96,9 +97,11 @@ export function detectEvidenceOrigin(
 /**
  * Family aus fieldType für synthetische Wrapper ableiten (Erbe vom Quellkontext).
  */
-export function familyFromFieldTypeForSynthetic(fieldType?: string): string | null {
-  if (!fieldType) return null;
+export function familyFromFieldTypeForSynthetic(
+  fieldType?: string
+): Exclude<TechnicalFamilyId, "unknown"> | undefined {
+  if (!fieldType) return undefined;
   const f = String(fieldType).toLowerCase();
   if (f === "schnittstelle" || f === "leistungsabgrenzung" || f === "nebenleistung") return "schnittstelle";
-  return null;
+  return undefined;
 }
