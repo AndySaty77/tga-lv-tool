@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, FileSearch, FolderSearch, Settings, CreditCard } from "lucide-react";
+import { BarChart3, FileSearch, FolderSearch, MessageSquare, Settings, CreditCard } from "lucide-react";
 import { appTheme as T } from "./appTheme";
 
 const APP_LOGO_SRC = "/brand/lv-scope-logo-neu-tr.png";
@@ -12,6 +12,7 @@ const navItems = [
   { href: "/app", label: "Dashboard", icon: BarChart3 },
   { href: "/app/analyse", label: "Analyse", icon: FileSearch },
   { href: "/app/analysen", label: "Analysen", icon: FolderSearch },
+  { href: "/app/feedback", label: "Feedback", icon: MessageSquare },
   { href: "/app/settings", label: "Settings", icon: Settings },
   { href: "/app/billing", label: "Billing", icon: CreditCard },
 ] as const;

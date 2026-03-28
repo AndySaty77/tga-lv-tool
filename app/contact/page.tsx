@@ -5,8 +5,9 @@ import { Container } from "@/components/shared/Container";
 import { ContactForm } from "./ContactForm";
 
 export const metadata = {
-  title: "Team / Individuelle Anfrage – TGA LV Tool",
-  description: "Kontaktieren Sie uns für Team-Zugang, individuelle Angebote oder eine Demo.",
+  title: "Kontakt – TGA LV Tool",
+  description:
+    "Kontaktieren Sie uns zu Produkt, Demo, Feedback oder allgemeinen Fragen – wir melden uns zeitnah.",
 };
 
 export default function ContactPage() {
@@ -14,8 +15,8 @@ export default function ContactPage() {
     <MarketingPageShell active="/contact">
       <MarketingSection
         eyebrow="Kontakt"
-        title="Team / Individuelle Anfrage"
-        lead="Senden Sie uns Ihre Anfrage – wir melden uns zeitnah bei Ihnen. Für Team-Zugang, individuelle Konditionen oder eine Demo."
+        title="Wir freuen uns auf Ihre Nachricht"
+        lead="Schreiben Sie uns zu Produktfragen, einer Demo, Feedback oder Wünschen – wir antworten persönlich und zeitnah."
       >
         <Container>
           <div

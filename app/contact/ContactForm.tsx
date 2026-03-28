@@ -1,15 +1,45 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { marketingTheme as T } from "@/components/marketing/MarketingTheme";
+import type { ContactCategory } from "@/lib/contactCategory";
 
-const INTEREST_OPTIONS = [
-  { value: "", label: "Bitte wählen (optional)" },
-  { value: "team", label: "Team-Zugang" },
-  { value: "angebot", label: "Individuelles Angebot" },
-  { value: "demo", label: "Demo" },
-  { value: "sonstiges", label: "Sonstiges" },
-] as const;
+const CATEGORY_OPTIONS: {
+  value: ContactCategory;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    value: "general",
+    label: "Allgemeine Anfrage",
+    hint: "Fragen zu LV Scope, zur Zusammenarbeit oder zu Konditionen.",
+  },
+  {
+    value: "product",
+    label: "Produktfrage",
+    hint: "Funktionen, Einsatz im Alltag oder fachliche Details zum Produkt.",
+  },
+  {
+    value: "demo",
+    label: "Demo / Kontakt",
+    hint: "Wenn Sie eine kurze Vorstellung oder einen Rückruf wünschen.",
+  },
+  {
+    value: "bug",
+    label: "Bug",
+    hint: "Bitte kurz beschreiben, was passiert ist und was Sie erwartet hätten.",
+  },
+  {
+    value: "feature",
+    label: "Wunsch / Feature",
+    hint: "Ideen und Verbesserungen – wir lesen jeden Hinweis.",
+  },
+  {
+    value: "feedback_other",
+    label: "Sonstiges Feedback",
+    hint: "Alles andere, was nicht in die anderen Punkte passt.",
+  },
+];
 
 function emailPlausible(email: string): boolean {
   const trimmed = email.trim();
@@ -27,10 +57,15 @@ export function ContactForm() {
   const [message, setMessage] = useState("");
   const [phone, setPhone] = useState("");
   const [teamSize, setTeamSize] = useState("");
-  const [interest, setInterest] = useState("");
+  const [category, setCategory] = useState<ContactCategory>("general");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+
+  const categoryHint = useMemo(
+    () => CATEGORY_OPTIONS.find((o) => o.value === category)?.hint ?? "",
+    [category]
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,12 +91,12 @@ export function ContactForm() {
           message: message.trim(),
           phone: phone.trim() || undefined,
           teamSize: teamSize.trim() || undefined,
-          interest: interest || undefined,
+          category,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setErrors({ form: (data.error as string) || "Anfrage konnte nicht gesendet werden." });
+        setErrors({ form: (data.error as string) || "Nachricht konnte nicht gesendet werden." });
         return;
       }
       setSuccess(true);
@@ -71,7 +106,7 @@ export function ContactForm() {
       setMessage("");
       setPhone("");
       setTeamSize("");
-      setInterest("");
+      setCategory("general");
     } catch {
       setErrors({ form: "Netzwerkfehler. Bitte später erneut versuchen." });
     } finally {
@@ -83,10 +118,11 @@ export function ContactForm() {
     return (
       <div style={{ padding: "20px 0", textAlign: "center" }}>
         <div style={{ fontSize: 18, fontWeight: 700, color: T.text, marginBottom: 8 }}>
-          Anfrage gesendet
+          Vielen Dank
         </div>
         <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.6 }}>
-          Sie erhalten in Kürze eine Bestätigung per E-Mail.
+          Ihre Nachricht ist eingegangen. Sie erhalten in Kürze eine kurze Bestätigung an die angegebene
+          E-Mail-Adresse.
         </p>
       </div>
     );
@@ -127,6 +163,37 @@ export function ContactForm() {
           {errors.form}
         </div>
       )}
+
+      <div style={{ marginBottom: 16 }}>
+        <label htmlFor="contact-category" style={labelStyle}>
+          Thema *
+        </label>
+        <select
+          id="contact-category"
+          value={category}
+          onChange={(e) => setCategory(e.target.value as ContactCategory)}
+          style={inputStyle}
+          disabled={submitting}
+        >
+          {CATEGORY_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        {categoryHint ? (
+          <p
+            style={{
+              margin: "8px 0 0",
+              fontSize: 12,
+              color: T.muted,
+              lineHeight: 1.5,
+            }}
+          >
+            {categoryHint}
+          </p>
+        ) : null}
+      </div>
 
       <div style={{ marginBottom: 16 }}>
         <label htmlFor="contact-name" style={labelStyle}>
@@ -212,25 +279,6 @@ export function ContactForm() {
         />
       </div>
 
-      <div style={{ marginBottom: 16 }}>
-        <label htmlFor="contact-interest" style={labelStyle}>
-          Interesse an (optional)
-        </label>
-        <select
-          id="contact-interest"
-          value={interest}
-          onChange={(e) => setInterest(e.target.value)}
-          style={inputStyle}
-          disabled={submitting}
-        >
-          {INTEREST_OPTIONS.map((o) => (
-            <option key={o.value || "empty"} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
       <div style={{ marginBottom: 20 }}>
         <label htmlFor="contact-message" style={labelStyle}>
           Nachricht *
@@ -245,7 +293,7 @@ export function ContactForm() {
             resize: "vertical",
             borderColor: errors.message ? T.danger : undefined,
           }}
-          placeholder="Ihre Anfrage oder Nachricht"
+          placeholder="Ihre Nachricht"
           disabled={submitting}
           rows={4}
         />
@@ -270,7 +318,7 @@ export function ContactForm() {
           opacity: submitting ? 0.8 : 1,
         }}
       >
-        {submitting ? "Wird gesendet…" : "Anfrage senden"}
+        {submitting ? "Wird gesendet…" : "Nachricht senden"}
       </button>
     </form>
   );

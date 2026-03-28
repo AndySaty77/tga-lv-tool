@@ -19,31 +19,67 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
+import {
+  CATEGORY_LABELS,
+  INTEREST_TO_CATEGORY,
+  type ContactCategory,
+  isContactCategory,
+} from "@/lib/contactCategory";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const INTEREST_LABELS: Record<string, string> = {
-  team: "Team-Zugang",
-  angebot: "Individuelles Angebot",
-  demo: "Demo",
-  sonstiges: "Sonstiges",
-};
+function resolveCategory(
+  rawCategory: string | undefined,
+  interest: string | undefined
+): { category: ContactCategory; invalidCategory: boolean } {
+  const trimmed = typeof rawCategory === "string" ? rawCategory.trim() : "";
+  if (trimmed) {
+    if (!isContactCategory(trimmed)) {
+      return { category: "general", invalidCategory: true };
+    }
+    return { category: trimmed, invalidCategory: false };
+  }
+  if (interest && INTEREST_TO_CATEGORY[interest]) {
+    return { category: INTEREST_TO_CATEGORY[interest], invalidCategory: false };
+  }
+  if (interest) {
+    return { category: "general", invalidCategory: false };
+  }
+  return { category: "general", invalidCategory: false };
+}
+
+function sanitizeAppPath(s: string): string {
+  return s.replace(/[\r\n\x00-\x1f]/g, " ").trim().slice(0, 240);
+}
 
 function buildEmailBody(p: {
   name: string;
   company: string;
   email: string;
   message: string;
+  categoryLabel: string;
   phone?: string;
   teamSize?: string;
-  interest?: string;
+  /** Nur für Abwärtskompatibilität in der internen Mail sichtbar, wenn mitgesendet. */
+  legacyInterestLabel?: string;
+  /** Optional: eingeloggte App (Herkunft in interner Mail). */
+  source?: "app" | "website";
+  appPath?: string;
   timestamp: string;
 }): string {
   const lines: string[] = [
-    "Neue Team-/Individuelle Anfrage",
+    "Neue Kontaktanfrage",
     "",
     "---",
     "",
+    `Kategorie:  ${p.categoryLabel}`,
+    "",
+  ];
+  if (p.source === "app") {
+    lines.push("Herkunft:   LV Scope App (eingeloggt)", "");
+    if (p.appPath) lines.push(`App-Seite:  ${p.appPath}`, "");
+  }
+  lines.push(
     `Name:       ${p.name}`,
     `Unternehmen: ${p.company}`,
     `E-Mail:    ${p.email}`,
@@ -52,10 +88,12 @@ function buildEmailBody(p: {
     p.message,
     "",
     "---",
-  ];
+  );
   if (p.phone) lines.push(`Telefon:   ${p.phone}`, "");
   if (p.teamSize) lines.push(`Teamgröße: ${p.teamSize}`, "");
-  if (p.interest) lines.push(`Interesse: ${INTEREST_LABELS[p.interest] ?? p.interest}`, "");
+  if (p.legacyInterestLabel) {
+    lines.push(`(Legacy Interesse: ${p.legacyInterestLabel})`, "");
+  }
   lines.push("---", "", `Eingegangen: ${p.timestamp}`);
   return lines.join("\n");
 }
@@ -64,19 +102,18 @@ function buildEmailBody(p: {
 function buildConfirmationBody(p: {
   name: string;
   company: string;
-  interest?: string;
+  categoryLabel: string;
   message: string;
 }): string {
-  const interestLabel = p.interest ? INTEREST_LABELS[p.interest] ?? p.interest : null;
   const lines: string[] = [
     `Hallo ${p.name},`,
     "",
-    "vielen Dank für Ihre Anfrage. Wir haben sie erhalten und melden uns zeitnah bei Ihnen.",
+    "vielen Dank für Ihre Nachricht. Wir haben sie erhalten und melden uns zeitnah bei Ihnen.",
     "",
     "Ihre Angaben:",
     `  Name:         ${p.name}`,
     `  Unternehmen:  ${p.company}`,
-    ...(interestLabel ? [`  Interesse:   ${interestLabel}`] : []),
+    `  Thema:        ${p.categoryLabel}`,
     "",
     "Ihre Nachricht:",
     p.message.slice(0, 800) + (p.message.length > 800 ? "…" : ""),
@@ -119,7 +156,32 @@ export async function POST(req: Request) {
   const message = typeof o.message === "string" ? o.message.trim() : "";
   const phone = typeof o.phone === "string" ? o.phone.trim() : undefined;
   const teamSize = typeof o.teamSize === "string" ? o.teamSize.trim() : undefined;
-  const interest = typeof o.interest === "string" && o.interest.trim() ? o.interest.trim() : undefined;
+  const rawCategory = typeof o.category === "string" ? o.category : undefined;
+  const interest =
+    typeof o.interest === "string" && o.interest.trim() ? o.interest.trim() : undefined;
+
+  const { category, invalidCategory } = resolveCategory(rawCategory, interest);
+  if (invalidCategory) {
+    return NextResponse.json(
+      { error: "Ungültige Kategorie. Bitte eine gültige Auswahl treffen." },
+      { status: 400 }
+    );
+  }
+
+  const categoryLabel = CATEGORY_LABELS[category];
+  const hadExplicitCategory =
+    typeof rawCategory === "string" &&
+    rawCategory.trim() !== "" &&
+    isContactCategory(rawCategory.trim());
+  /** Unbekanntes altes `interest`-Feld, wenn keine explizite Kategorie mitgesendet wurde. */
+  const legacyInterestLabel =
+    interest && !INTEREST_TO_CATEGORY[interest] && !hadExplicitCategory ? interest : undefined;
+
+  const rawSource = typeof o.source === "string" ? o.source.trim() : "";
+  const source: "app" | "website" = rawSource === "app" ? "app" : "website";
+  const appPathSanitized =
+    typeof o.appPath === "string" && o.appPath.trim() ? sanitizeAppPath(o.appPath) : "";
+  const appPath = source === "app" && appPathSanitized ? appPathSanitized : undefined;
 
   if (!name) {
     return NextResponse.json({ error: "Name ist erforderlich" }, { status: 400 });
@@ -155,15 +217,18 @@ export async function POST(req: Request) {
   });
 
   const resend = new Resend(apiKey);
-  const subjectInternal = `Neue Team-/Individuelle Anfrage – ${company}`;
+  const subjectInternal = `Kontakt: ${categoryLabel} – ${company}`;
   const textBodyInternal = buildEmailBody({
     name,
     company,
     email,
     message,
+    categoryLabel,
     phone,
     teamSize,
-    interest,
+    legacyInterestLabel,
+    source,
+    appPath,
     timestamp,
   });
 
@@ -192,8 +257,8 @@ export async function POST(req: Request) {
     from: fromEmail,
     to: [email],
     ...(replyToSupport ? { replyTo: replyToSupport } : {}),
-    subject: "Ihre Anfrage bei LV Scope ist eingegangen",
-    text: buildConfirmationBody({ name, company, interest, message }),
+    subject: "Ihre Nachricht an LV Scope ist eingegangen",
+    text: buildConfirmationBody({ name, company, categoryLabel, message }),
   });
 
   if (autoReplyError) {
@@ -203,5 +268,5 @@ export async function POST(req: Request) {
     console.error("[contact] auto-reply ok");
   }
 
-  return NextResponse.json({ ok: true, id: data?.id });
+  return NextResponse.json({ ok: true, id: data?.id, category });
 }
