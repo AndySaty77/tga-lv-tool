@@ -412,8 +412,8 @@ type SplitResult = {
   meta?: any;
 };
 
-export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}) {
-  const { customerRoute = false, plan } = props;
+export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdminUser?: boolean } = {}) {
+  const { customerRoute = false, plan, isAdminUser = false } = props;
   /** In der Kundenroute: Pro-Features nur bei plan === "pro". Admin-Route: immer erlaubt. */
   const canUseChangeOrder = !customerRoute || plan !== "free";
   const canUseAdvancedFeatures = !customerRoute || plan !== "free";
@@ -2835,21 +2835,23 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
                 <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.nachtragspotenzial}
               </p>
             </SectionCard>
-            <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                <div style={{ fontSize: D.fontSizeBody, color: D.textSecondary, fontWeight: 600 }}>
-                  Interne V2-Berechnung (Nachtragspotenzial) ist nur zu Analysezwecken vorgesehen.
+            {isAdminUser && (
+              <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                  <div style={{ fontSize: D.fontSizeBody, color: D.textSecondary, fontWeight: 600 }}>
+                    Interne V2-Berechnung (Nachtragspotenzial) ist nur zu Analysezwecken vorgesehen.
+                  </div>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: D.fontSizeBody, color: D.textSecondary }}>
+                    <input
+                      type="checkbox"
+                      checked={showNachtragV2Debug}
+                      onChange={(e) => setShowNachtragV2Debug(e.target.checked)}
+                    />
+                    <span>V2 Debug anzeigen</span>
+                  </label>
                 </div>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: D.fontSizeBody, color: D.textSecondary }}>
-                  <input
-                    type="checkbox"
-                    checked={showNachtragV2Debug}
-                    onChange={(e) => setShowNachtragV2Debug(e.target.checked)}
-                  />
-                  <span>V2 Debug anzeigen</span>
-                </label>
-              </div>
-            </SectionCard>
+              </SectionCard>
+            )}
             <NachtragspotenzialBlock
               analysis={changeOrderAnalysis}
               loading={changeOrderLoading}
@@ -2862,7 +2864,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
               designTokens={D}
               proFeatureLocked={!canUseChangeOrder}
             />
-            {showNachtragV2Debug && changeOrderAnalysis?.changePotentialSummary?.v2Debug && (
+            {isAdminUser && showNachtragV2Debug && changeOrderAnalysis?.changePotentialSummary?.v2Debug && (
               <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
                   <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection }}>
@@ -3061,7 +3063,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId } = {}
               </SectionCard>
             )}
 
-            {showNachtragV2Debug &&
+            {isAdminUser &&
+              showNachtragV2Debug &&
               changeOrderAnalysis?.changePotentialSummary?.v2Debug?.validationReport && (
                 <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
                   <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection, marginBottom: 8 }}>
@@ -3899,5 +3902,5 @@ function GaebNormalizedPreview(props: {
 
 /** Admin-Route /admin/score: volle Analyse-UI inkl. Expertenmodus und Debug-Ansicht (customerRoute=false). */
 export default function AdminScorePage() {
-  return <ScorePage customerRoute={false} />;
+  return <ScorePage customerRoute={false} isAdminUser />;
 }

@@ -35,6 +35,7 @@ export function MarketingFooter() {
             <nav style={linkBlock} aria-label="Produkt">
               <Link href="/features" style={{ color: T.muted, textDecoration: "none", fontSize: 13 }}>Features</Link>
               <Link href="/how-it-works" style={{ color: T.muted, textDecoration: "none", fontSize: 13 }}>Ablauf</Link>
+              <Link href="/docs" style={{ color: T.muted, textDecoration: "none", fontSize: 13 }}>So funktioniert's</Link>
               <Link href="/pricing" style={{ color: T.muted, textDecoration: "none", fontSize: 13 }}>Preise</Link>
               <Link href="/faq" style={{ color: T.muted, textDecoration: "none", fontSize: 13 }}>FAQ</Link>
             </nav>

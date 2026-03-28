@@ -9,6 +9,7 @@ const pathToTitle: Record<string, string> = {
   "/app": "Dashboard",
   "/app/analyse": "Analyse",
   "/app/analysen": "Analysen",
+  "/app/help": "Hilfe & Dokumentation",
   "/app/feedback": "Feedback",
   "/app/settings": "Settings",
   "/app/billing": "Billing",
@@ -17,7 +18,7 @@ const pathToTitle: Record<string, string> = {
 const publicLinks = [
   { href: "/", label: "Zur Website" },
   { href: "/pricing", label: "Preise" },
-  { href: "/docs", label: "Docs" },
+  { href: "/docs", label: "So funktioniert's" },
   { href: "/features", label: "Features" },
   { href: "/faq", label: "FAQ" },
   { href: "/contact", label: "Kontakt" },
@@ -155,9 +156,23 @@ export function AppHeader() {
                 textDecoration: "none",
               }}
             >
-              Docs
+              So funktioniert's
             </Link>
             <div style={{ height: 1, background: T.border, margin: "4px 6px" }} />
+            <Link
+              href="/app/help"
+              onClick={closeMenu}
+              style={{
+                display: "block",
+                padding: "6px 10px",
+                borderRadius: T.radiusSm,
+                fontSize: 13,
+                color: T.text,
+                textDecoration: "none",
+              }}
+            >
+              Hilfe & Dokumentation
+            </Link>
             <Link
               href="/app/feedback"
               onClick={closeMenu}

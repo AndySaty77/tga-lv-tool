@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ScorePage } from "@/app/admin/score/page";
 import { appTheme as T } from "@/components/app/appTheme";
 import { getUser } from "@/lib/auth/get-user";
+import { isAdmin } from "@/lib/auth/is-admin";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { getTotalUsageForPlan } from "@/lib/billing/usage";
 
@@ -99,5 +100,5 @@ export default async function AppAnalysePage() {
     // Bei Fehlern in der Limitprüfung Analyse nicht blockieren
   }
 
-  return <ScorePage customerRoute plan={plan} />;
+  return <ScorePage customerRoute plan={plan} isAdminUser={isAdmin(user)} />;
 }

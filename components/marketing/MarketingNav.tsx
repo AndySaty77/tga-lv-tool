@@ -98,6 +98,7 @@ export function MarketingNav({ active }: { active?: string }) {
           <nav aria-label="Produktseiten" style={{ display: "flex", alignItems: "center", gap: 4 }}>
             {item("/features", "Features")}
             {item("/how-it-works", "Ablauf")}
+            {item("/docs", "So funktioniert's")}
             {item("/pricing", "Preise")}
             {item("/faq", "FAQ")}
             {item("/contact", "Kontakt")}
@@ -246,6 +247,7 @@ export function MarketingNav({ active }: { active?: string }) {
               >
                 {item("/features", "Features")}
                 {item("/how-it-works", "Ablauf")}
+                {item("/docs", "So funktioniert's")}
                 {item("/pricing", "Preise")}
                 {item("/faq", "FAQ")}
                 {item("/contact", "Kontakt")}
