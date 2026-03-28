@@ -16,10 +16,6 @@ import type {
   ChangePotentialSourceType,
   CommercialStrategyPrimaryAction,
   CommercialStrategyRiskLevel,
-  NegotiationCluster,
-  NegotiationClusterAction,
-  OfferStrategySummary,
-  OfferStrategyApproach,
 } from "@/lib/changePotentialModel";
 
 /** Einzelne Opportunity aus der Nachtragsanalyse (Strang B) – Legacy. */
@@ -129,6 +125,16 @@ export type NachtragspotenzialAnalysisResult = {
 /** Debug-Infos (systemLogic, Regeln, KI-Veredelung Diagnose) im normalen UI ausblenden. */
 const SHOW_DEBUG_UI = false;
 
+/** Einheitliches visuelles System — Nachtragspotenzial-Modul (nur UI). */
+const NP = {
+  r: { sm: 8, md: 10, lg: 12 },
+  border: { hairline: "1px solid #e2e8f0", card: "1px solid #e2e8f0", accent: "1px solid #cbd5e1" },
+  bg: { canvas: "#f8fafc", card: "#ffffff", elevated: "#f1f5f9", action: "#eff6ff", next: "#f8fafc" },
+  text: { title: "#0f172a", body: "#334155", muted: "#64748b", hint: "#94a3b8" },
+  shadow: { kpi: "0 1px 3px rgba(15,23,42,0.07), 0 1px 2px rgba(15,23,42,0.04)", card: "0 1px 2px rgba(15,23,42,0.05)" },
+  accent: { primary: "#2563eb", ink: "#1e293b" },
+};
+
 const CLUSTER_LABELS: Record<string, string> = {
   leistungsaenderung: "Leistungsänderung",
   leistungsmehrung: "Leistungsmehrung",
@@ -177,14 +183,6 @@ const ENFORCEABILITY_LABELS: Record<ChangePotentialEnforceability, string> = {
   sehr_gut: "Sehr gut",
 };
 
-const RECOMMENDED_ACTION_LABELS: Record<ChangePotentialRecommendedAction, string> = {
-  rueckfrage: "Rückfrage",
-  angebotsklarstellung: "Angebotsklarstellung",
-  kalkulatorisch_absichern: "Kalkulatorisch absichern",
-  claim_feld_beobachten: "Claim-Feld beobachten",
-  nicht_verfolgen: "Nicht verfolgen",
-};
-
 const COMMERCIAL_STRATEGY_ACTION_LABELS: Record<CommercialStrategyPrimaryAction, string> = {
   rueckfrage: "Rückfrage",
   angebotsklarstellung: "Angebotsklarstellung",
@@ -199,19 +197,6 @@ const RISK_LEVEL_LABELS: Record<CommercialStrategyRiskLevel, string> = {
   hoch: "Hoch",
 };
 
-const NEGOTIATION_CLUSTER_ACTION_LABELS: Record<NegotiationClusterAction, string> = {
-  rueckfrage: "Rückfrage",
-  angebotsklarstellung: "Angebotsklarstellung",
-  kalkulatorisch_absichern: "Kalkulatorisch absichern",
-  claim_feld_beobachten: "Claim-Feld beobachten",
-};
-
-const OFFER_STRATEGY_APPROACH_LABELS: Record<OfferStrategyApproach, string> = {
-  defensiv: "Defensiv",
-  ausgewogen: "Ausgewogen",
-  offensiv: "Offensiv",
-};
-
 const SOURCE_TYPE_LABELS: Record<ChangePotentialSourceType, string> = {
   vortext: "Vortext",
   position: "Position",
@@ -221,184 +206,370 @@ const SOURCE_TYPE_LABELS: Record<ChangePotentialSourceType, string> = {
   unknown: "Unbekannt",
 };
 
+/** Kurzbezug für Arbeitskarten (verständlicher als Rohpfad). */
+const SOURCE_CONTEXT_SHORT: Record<ChangePotentialSourceType, string> = {
+  vortext: "Vorwort LV",
+  position: "Position",
+  remark: "Vorbemerkungen",
+  addtext: "Zusatztext",
+  global: "Gesamtbild",
+  unknown: "—",
+};
+
+function humanPathFragment(path: string): string {
+  const p = String(path ?? "").trim().toLowerCase();
+  if (!p) return "";
+  if (p === "vortext" || p.endsWith("/vortext")) return "Vorwort LV";
+  if (p.includes("vorbemerk")) return "Vorbemerkungen";
+  if (p.includes("position")) return "Positionstext";
+  return path.trim();
+}
+
 function labelFor<T extends string>(map: Record<string, string>, value: T): string {
   return map[value] ?? String(value);
 }
 
-function impactTone(impact: ChangePotentialImpactLevel): string {
-  if (impact === "sehr_hoch") return "#b00020";
-  if (impact === "hoch") return "#c62828";
-  if (impact === "mittel") return "#a36b00";
-  return "#666";
+/** Klarsprache für Begründungs-Akkordeon (ohne Engine-Änderung, nur UI-Formulierung). */
+function humanizeConfidenceNotes(s: string): string {
+  return String(s ?? "")
+    .replace(/\braw-basierte Evidenzen\b/gi, "LV-nahe Textstellen")
+    .replace(/\bRaw-Anteil\b/gi, "Anteil LV-naher Textstellen")
+    .replace(/\bRaw\b/g, "LV-nahe Textstellen");
 }
 
-function actionTone(action: ChangePotentialRecommendedAction): string {
-  if (action === "rueckfrage" || action === "angebotsklarstellung") return "#1565c0";
-  if (action === "kalkulatorisch_absichern") return "#a36b00";
-  if (action === "claim_feld_beobachten") return "#2e7d32";
-  return "#666";
+function potentialWhySentence(
+  label: import("@/lib/nachtrag-v2/customerView").NachtragCustomerView["potentialLabel"]
+): string {
+  if (label === "Hoch") return "Das Potenzial für spätere Zusatzthemen und Nachverhandlungen ist hoch.";
+  if (label === "Erhöht") return "Offene oder widersprüchliche Stellen im Leistungsbild erhöhen das Nachtragspotenzial spürbar.";
+  if (label === "Mittel") return "Es gibt erkennbare Spannungen; das Gesamtbild bleibt aber noch beherrschbar.";
+  return "Das Potenzial für spätere Zusatzthemen wirkt derzeit eher gering.";
+}
+
+function enforceabilityWhySentence(
+  label: import("@/lib/nachtrag-v2/customerView").NachtragCustomerView["enforceabilityLabel"]
+): string {
+  if (label === "Stark") return "Ansprüche lassen sich mit den vorliegenden Hinweisen vorbereitend gut begründen.";
+  if (label === "Solide") return "Mit sauberen Nachweisen und Abgrenzungen ist eine tragfähige Argumentation möglich.";
+  if (label === "Begrenzt") return "Ohne Klarstellungen und Belege bleibt die Durchsetzbarkeit begrenzt.";
+  return "Die Grundlage für durchsetzbare Ansprüche ist dünn; zuerst Fakten schärfen.";
+}
+
+function driversMergedSentence(drivers: string[]): string | null {
+  const d = drivers.filter(Boolean).slice(0, 3);
+  if (d.length === 0) return null;
+  if (d.length === 1) return `Maßgeblich ist vor allem: ${d[0]}.`;
+  if (d.length === 2) return `Maßgeblich sind ${d[0]} und ${d[1]}.`;
+  return `Schwerpunkte: ${d[0]}, ${d[1]} und ${d[2]}.`;
+}
+
+function buildWhyAssessmentBullets(
+  summary: ChangePotentialSummary,
+  v2: unknown
+): { main: string[]; uncertainties: string[] } {
+  const hasV2 = !!v2 && typeof (v2 as { potentialScore?: unknown }).potentialScore === "number";
+  if (hasV2) {
+    const view = buildNachtragCustomerView({ v2: v2 as import("@/lib/nachtrag-v2/types").NachtragResultV2 });
+    const main: string[] = [potentialWhySentence(view.potentialLabel)];
+    const merged = driversMergedSentence(view.topDrivers);
+    if (merged) main.push(merged);
+    main.push(enforceabilityWhySentence(view.enforceabilityLabel));
+    const uncertainties: string[] = [];
+    const note = humanizeConfidenceNotes(view.confidenceReason).trim();
+    if ((view.confidenceLabel === "Niedrig" || view.confidenceLabel === "Mittel") && note) {
+      uncertainties.push(note);
+    }
+    if (uncertainties.length === 0 && view.confidenceLabel === "Niedrig") {
+      uncertainties.push("Einzelpositionen können von dieser Gesamteinschätzung abweichen.");
+    }
+    return { main: main.slice(0, 5), uncertainties: uncertainties.slice(0, 2) };
+  }
+  const main: string[] = [];
+  if (summary.shortRiskReason?.trim()) {
+    main.push(...summary.shortRiskReason.split(/(?<=[.!?])\s+/).filter(Boolean).slice(0, 2));
+  } else {
+    main.push(summary.riskClassLabel || "Die Einordnung folgt dem vorliegenden Leistungsbild.");
+  }
+  return { main: main.slice(0, 4), uncertainties: [] };
+}
+
+function buildWorkSnapshotBlocks(
+  summary: ChangePotentialSummary,
+  v2: unknown
+): { treiber: string[]; blocker: string[]; belastbarkeit: string[]; risiko: string[] } {
+  const hasV2 = !!v2 && typeof (v2 as { potentialScore?: unknown }).potentialScore === "number";
+  if (!hasV2) {
+    return {
+      treiber: [summary.riskClassLabel || "Orientierung über das vorliegende Potenzial."],
+      blocker: ["Feiner Einordnung fehlt die erweiterte Sicht."],
+      belastbarkeit: ["Arbeitsliste oder neue Analyse nutzen."],
+      risiko: ["Gesamtbild nur grob einschätzbar."],
+    };
+  }
+  const view = buildNachtragCustomerView({ v2: v2 as import("@/lib/nachtrag-v2/types").NachtragResultV2 });
+  const treiber = [...view.topDrivers.slice(0, 4)];
+  if (treiber.length < 2) {
+    treiber.push("Unklare Leistungsgrenzen und Schnittstellen.");
+  }
+
+  const blocker: string[] = [];
+  if (view.enforceabilityLabel === "Schwach" || view.enforceabilityLabel === "Begrenzt") {
+    blocker.push("Ohne Nachweise und Klarstellungen wenig durchsetzbar.");
+  }
+  if (view.confidenceLabel === "Niedrig") {
+    blocker.push("Viele Hinweise sind indirekt.");
+  }
+  if (blocker.length < 2) {
+    blocker.push("Offene Mengen und Dokus bremsen Einigung.");
+  }
+  if (blocker.length < 2) {
+    blocker.push("Mehrere Themen parallel verwässern Fokus.");
+  }
+
+  const belastbarkeit: string[] = [];
+  if (view.confidenceLabel === "Hoch") {
+    belastbarkeit.push("LV-Bezüge stützen die Einordnung.");
+    belastbarkeit.push("Konkrete Textstellen nutzbar.");
+  } else if (view.confidenceLabel === "Mittel") {
+    belastbarkeit.push("Teils belastbar; sauber dokumentieren.");
+    belastbarkeit.push("Nachweise erhöhen Tragfähigkeit.");
+  } else {
+    belastbarkeit.push("Wenig direkte Stützung im Text.");
+    belastbarkeit.push("Vor Aussagen intern prüfen.");
+  }
+
+  const risiko: string[] = [];
+  if (view.confidenceLabel === "Niedrig") {
+    risiko.push("Fehleinschätzung möglich (dünne Lage).");
+  } else {
+    risiko.push("Einzelthemen weichen ab.");
+  }
+  risiko.push("Ohne Priorisierung: Zeit- und Kalkulationsrisiko.");
+
+  return {
+    treiber: treiber.slice(0, 4),
+    blocker: blocker.slice(0, 4),
+    belastbarkeit: belastbarkeit.slice(0, 4),
+    risiko: risiko.slice(0, 4),
+  };
+}
+
+function mapRecommendedToHandlung(action: ChangePotentialRecommendedAction): string {
+  if (action === "rueckfrage") return "Rückfrage";
+  if (action === "angebotsklarstellung") return "Klarstellung";
+  if (action === "kalkulatorisch_absichern") return "Vorbehalt";
+  if (action === "claim_feld_beobachten") return "Nachweis";
+  if (action === "nicht_verfolgen") return "Nicht priorisieren";
+  return "Nachweis";
+}
+
+function priorityFromImpact(impact: ChangePotentialImpactLevel): "hoch" | "mittel" | "niedrig" {
+  if (impact === "sehr_hoch" || impact === "hoch") return "hoch";
+  if (impact === "mittel") return "mittel";
+  return "niedrig";
+}
+
+function buildNextStepParts(item: ChangePotentialItem): Array<{ label: string; text: string }> {
+  const out: Array<{ label: string; text: string }> = [];
+  if (item.questionDraft?.trim()) out.push({ label: "Rückfrage", text: item.questionDraft.trim() });
+  if (item.clarificationDraft?.trim()) out.push({ label: "Klarstellung", text: item.clarificationDraft.trim() });
+  if (item.pricingHint?.trim()) out.push({ label: "Kalkulation", text: item.pricingHint.trim() });
+  return out;
+}
+
+function formatBezugZeile(
+  item: ChangePotentialItem,
+  labelForSourceType: (v: ChangePotentialSourceType) => string
+): string {
+  const parts: string[] = [];
+  if (item.trade?.trim()) parts.push(item.trade.trim());
+  if (item.sourcePositionRef?.trim()) {
+    parts.push(`Pos. ${item.sourcePositionRef.trim()}`);
+  } else if (item.sourcePath?.trim()) {
+    const h = humanPathFragment(item.sourcePath);
+    parts.push(h);
+  } else if (item.sourceType != null) {
+    parts.push(SOURCE_CONTEXT_SHORT[item.sourceType] ?? labelForSourceType(item.sourceType));
+  }
+  return parts.join(" · ") || "";
+}
+
+function truncateOneLine(s: string, max: number): string {
+  const t = String(s ?? "").trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1).trimEnd() + "…";
 }
 
 // ================= Neue Engine – Darstellung (bevorzugt wenn changePotentialSummary vorhanden) =================
 
 type NewEngineViewProps = {
+  analysis: NachtragspotenzialAnalysisResult;
   summary: ChangePotentialSummary;
-  commercialActions?: import("@/lib/changePotentialCommercialActions").CommercialActionsFromChangePotential | null;
   isExpertMode: boolean;
-  customerRoute: boolean;
   labelForFieldType: (v: ChangePotentialFieldType) => string;
   labelForMechanism: (v: ChangePotentialMechanism) => string;
-  labelForImpact: (v: ChangePotentialImpactLevel) => string;
   labelForEnforceability: (v: ChangePotentialEnforceability) => string;
-  labelForAction: (v: ChangePotentialRecommendedAction) => string;
   labelForSourceType: (v: ChangePotentialSourceType) => string;
   sanitize: (s: string) => string;
 };
 
+function WorkSnapshotMiniGrid({
+  treiber,
+  blocker,
+  belastbarkeit,
+  risiko,
+}: {
+  treiber: string[];
+  blocker: string[];
+  belastbarkeit: string[];
+  risiko: string[];
+}) {
+  const cell = (title: string, lines: string[]) => (
+    <div
+      style={{
+        background: NP.bg.card,
+        padding: "8px 10px 10px",
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          fontWeight: 700,
+          fontSize: 11,
+          color: NP.text.muted,
+          marginBottom: 6,
+          paddingBottom: 6,
+          borderBottom: "1px solid #e2e8f0",
+          letterSpacing: "0.02em",
+        }}
+      >
+        {title}
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, color: NP.text.body, lineHeight: 1.38, display: "grid", gap: 2 }}>
+        {lines.map((line, i) => (
+          <li key={i} style={{ paddingLeft: 2 }}>
+            {line}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(152px, 1fr))",
+        gap: 1,
+        background: "#cbd5e1",
+        borderRadius: NP.r.md,
+        overflow: "hidden",
+        border: "1px solid #cbd5e1",
+        boxShadow: NP.shadow.card,
+      }}
+    >
+      {cell("Treiber", treiber)}
+      {cell("Blocker", blocker)}
+      {cell("Belastbarkeit", belastbarkeit)}
+      {cell("Risiko", risiko)}
+    </div>
+  );
+}
+
 function NewEngineView({
+  analysis,
   summary,
-  commercialActions,
   isExpertMode,
-  customerRoute,
   labelForFieldType,
   labelForMechanism,
-  labelForImpact,
   labelForEnforceability,
-  labelForAction,
   labelForSourceType,
   sanitize,
 }: NewEngineViewProps) {
   const [analysisOverviewOpen, setAnalysisOverviewOpen] = useState(false);
+  const [workOverviewOpen, setWorkOverviewOpen] = useState(false);
   const [fieldsOpen, setFieldsOpen] = useState(false);
-  const { overallIndex, totalItems, highImpactCount, veryHighImpactCount, strongEnforceabilityCount, items, topFields, topMechanisms, negotiationClusters } = summary;
-  const indexTone = overallIndex >= 70 ? "#b00020" : overallIndex >= 40 ? "#a36b00" : "#0a7a2f";
+  const { items } = summary;
+  const v2 = (analysis as { changePotentialSummary?: { v2Debug?: unknown } }).changePotentialSummary?.v2Debug;
+  const why = buildWhyAssessmentBullets(summary, v2);
+  const snapshot = buildWorkSnapshotBlocks(summary, v2);
+
+  const accBtn: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    padding: "10px 4px",
+    background: NP.bg.card,
+    border: NP.border.hairline,
+    borderRadius: NP.r.sm,
+    cursor: "pointer",
+    fontWeight: 700,
+    color: NP.text.title,
+    fontSize: 13,
+    textAlign: "left",
+    marginTop: 8,
+    boxShadow: NP.shadow.card,
+  };
 
   return (
     <>
-      {/* Analyseübersicht – einklappbar (Abgeleitete Maßnahmen, Gesamtindex, Top-Feldtypen, Top-Mechanismen, Top-Verhandlungspunkte) */}
-      <div style={{ marginTop: 24 }}>
-        <button
-          type="button"
-          onClick={() => setAnalysisOverviewOpen((v) => !v)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            width: "100%",
-            padding: "8px 0",
-            background: "none",
-            border: "none",
-            borderBottom: "1px solid #e2e8f0",
-            cursor: "pointer",
-            fontWeight: 600,
-            color: "#334155",
-            fontSize: 14,
-            textAlign: "left",
-          }}
-        >
-          <span>Analyseübersicht</span>
-          <span style={{ fontSize: 12, color: "#64748b" }}>{analysisOverviewOpen ? "▼" : "▶"}</span>
+      {/* 1. Warum diese Einschätzung? — Begründung, keine Statistik */}
+      <div style={{ marginTop: 0 }}>
+        <button type="button" onClick={() => setAnalysisOverviewOpen((v) => !v)} style={{ ...accBtn, marginTop: 0 }}>
+          <span style={{ letterSpacing: "-0.01em" }}>Warum diese Einschätzung?</span>
+          <span style={{ fontSize: 11, color: NP.text.muted, fontWeight: 700 }}>{analysisOverviewOpen ? "▼" : "▶"}</span>
         </button>
         {analysisOverviewOpen && (
-          <>
-            {/* Abgeleitete Maßnahmen (Rückfragen/Klarstellungen/Kalkulation/Monitoring) */}
-            {commercialActions && (commercialActions.questions.length > 0 || commercialActions.clarifications.length > 0 || commercialActions.pricingHints.length > 0 || commercialActions.monitoringHints.length > 0) && (
-              <div style={{ marginTop: 14, padding: 10, background: "#f0f7ff", borderRadius: 10, fontSize: 12, color: "#333" }}>
-                <strong>Abgeleitete Maßnahmen:</strong>{" "}
-                {commercialActions.questions.length > 0 && <span>{commercialActions.questions.length} Rückfragen</span>}
-                {commercialActions.questions.length > 0 && commercialActions.clarifications.length > 0 && " · "}
-                {commercialActions.clarifications.length > 0 && <span>{commercialActions.clarifications.length} Klarstellungen</span>}
-                {(commercialActions.questions.length > 0 || commercialActions.clarifications.length > 0) && (commercialActions.pricingHints.length > 0 || commercialActions.monitoringHints.length > 0) && " · "}
-                {commercialActions.pricingHints.length > 0 && <span>{commercialActions.pricingHints.length} Kalkulationshinweise</span>}
-                {commercialActions.pricingHints.length > 0 && commercialActions.monitoringHints.length > 0 && " · "}
-                {commercialActions.monitoringHints.length > 0 && <span>{commercialActions.monitoringHints.length} Claim-Monitoring</span>}
-                {" — werden beim Generieren der Tabs „Rückfragen“ und „Angebotsklarstellungen“ einbezogen (CP bevorzugt bei Duplikaten)."}
-              </div>
-            )}
-
-            {/* A) Überblick */}
-            <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
-              <div style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>
-                Gesamtindex: <span style={{ color: indexTone }}>{overallIndex}</span> / 100
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 16, fontSize: 13, color: "#444" }}>
-                <span><strong>{totalItems}</strong> Felder</span>
-                {(highImpactCount > 0 || veryHighImpactCount > 0) && (
-                  <span style={{ color: "#b00020" }}>
-                    <strong>{veryHighImpactCount + highImpactCount}</strong> hohe / sehr hohe Hebel
-                  </span>
-                )}
-                {strongEnforceabilityCount > 0 && (
-                  <span style={{ color: "#1565c0" }}>
-                    <strong>{strongEnforceabilityCount}</strong> gut durchsetzbar
-                  </span>
-                )}
-              </div>
-              {topFields.length > 0 && (
-                <div style={{ fontSize: 12, color: "#666" }}>
-                  Top-Feldtypen: {topFields.slice(0, 4).map((f) => `${labelForFieldType(f.fieldType)} (${f.count})`).join(" · ")}
-                </div>
-              )}
-              {topMechanisms.length > 0 && (
-                <div style={{ fontSize: 12, color: "#666" }}>
-                  Top-Mechanismen: {topMechanisms.slice(0, 3).map((m) => `${labelForMechanism(m.mechanism)} (${m.count})`).join(" · ")}
-                </div>
-              )}
+          <div style={{ marginTop: 12, paddingLeft: 2, paddingRight: 4 }}>
+            <div style={{ display: "grid", gap: 10 }}>
+              {why.main.map((line, i) => (
+                <p key={i} style={{ margin: 0, fontSize: 13, color: NP.text.body, lineHeight: 1.55 }}>
+                  {sanitize(line)}
+                </p>
+              ))}
             </div>
-
-            {/* Top-Verhandlungspunkte (gebündelte Cluster) */}
-            {negotiationClusters && negotiationClusters.length > 0 && (
-              <div style={{ marginTop: 16 }}>
-                <div style={{ fontWeight: 800, color: "#333", fontSize: 14, marginBottom: 10 }}>Top-Verhandlungspunkte</div>
-                <div style={{ display: "grid", gap: 12 }}>
-                  {negotiationClusters.map((cluster) => (
-                    <NegotiationClusterCard
-                      key={cluster.id}
-                      cluster={cluster}
-                      isExpertMode={isExpertMode}
-                      labelForFieldType={labelForFieldType}
-                      labelForMechanism={labelForMechanism}
-                      labelForImpact={labelForImpact}
-                      labelForEnforceability={labelForEnforceability}
-                      labelForClusterAction={(a) => labelFor(NEGOTIATION_CLUSTER_ACTION_LABELS, a)}
-                      impactTone={impactTone}
-                      actionTone={actionTone}
-                      sanitize={sanitize}
-                    />
+            {why.uncertainties.length > 0 && (
+              <div style={{ marginTop: 12, padding: "10px 12px", background: NP.bg.card, borderRadius: NP.r.sm, border: NP.border.hairline }}>
+                <div style={{ fontWeight: 700, fontSize: 12, color: NP.text.muted, marginBottom: 6 }}>Was unsicher bleibt</div>
+                <div style={{ display: "grid", gap: 6 }}>
+                  {why.uncertainties.map((line, i) => (
+                    <p key={i} style={{ margin: 0, fontSize: 12, color: "#475569", lineHeight: 1.45 }}>
+                      {sanitize(line)}
+                    </p>
                   ))}
                 </div>
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
 
-      {/* B) Pro Item – einklappbar */}
-      <div style={{ marginTop: 16 }}>
-        <button
-          type="button"
-          onClick={() => setFieldsOpen((v) => !v)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            width: "100%",
-            padding: "8px 0",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            fontWeight: 800,
-            color: "#333",
-            fontSize: 14,
-            textAlign: "left",
-          }}
-        >
-          <span>Erkannte Nachtragsfelder</span>
-          <span style={{ fontSize: 12, color: "#64748b" }}>{fieldsOpen ? "▼" : "▶"}</span>
+      {/* 2. Arbeitslage auf einen Blick — Verdichtung (keine System-Einzelkarten) */}
+      <div style={{ marginTop: 10 }}>
+        <button type="button" onClick={() => setWorkOverviewOpen((v) => !v)} style={accBtn}>
+          <span style={{ letterSpacing: "-0.01em" }}>Arbeitslage auf einen Blick</span>
+          <span style={{ fontSize: 11, color: NP.text.muted, fontWeight: 700 }}>{workOverviewOpen ? "▼" : "▶"}</span>
+        </button>
+        {workOverviewOpen && (
+          <WorkSnapshotMiniGrid
+            treiber={snapshot.treiber}
+            blocker={snapshot.blocker}
+            belastbarkeit={snapshot.belastbarkeit}
+            risiko={snapshot.risiko}
+          />
+        )}
+      </div>
+
+      {/* 3. Arbeitsliste Nachtragsfelder */}
+      <div style={{ marginTop: 10 }}>
+        <button type="button" onClick={() => setFieldsOpen((v) => !v)} style={accBtn}>
+          <span style={{ letterSpacing: "-0.01em" }}>Arbeitsliste Nachtragsfelder</span>
+          <span style={{ fontSize: 11, color: NP.text.muted, fontWeight: 700 }}>{fieldsOpen ? "▼" : "▶"}</span>
         </button>
         {fieldsOpen && (
           <>
-            <div style={{ marginTop: 10, display: "grid", gap: 14 }}>
+            <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
               {items.map((it) => (
                 <ItemCard
                   key={it.id}
@@ -406,18 +577,14 @@ function NewEngineView({
                   isExpertMode={isExpertMode}
                   labelForFieldType={labelForFieldType}
                   labelForMechanism={labelForMechanism}
-                  labelForImpact={labelForImpact}
                   labelForEnforceability={labelForEnforceability}
-                  labelForAction={labelForAction}
                   labelForSourceType={labelForSourceType}
-                  impactTone={impactTone}
-                  actionTone={actionTone}
                   sanitize={sanitize}
                 />
               ))}
             </div>
-            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #eee", color: "#666", fontSize: 13, lineHeight: 1.5 }}>
-              Darstellung basiert auf der neuen Nachtragspotenzial-Engine (Feldtypen, Mechanismus, Hebel, Durchsetzbarkeit, empfohlene Aktion).
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #e2e8f0", color: NP.text.hint, fontSize: 11, lineHeight: 1.45 }}>
+              Operative Liste — technische Rohdaten nur im Expertenmodus.
             </div>
           </>
         )}
@@ -426,239 +593,194 @@ function NewEngineView({
   );
 }
 
-function NegotiationClusterCard({
-  cluster,
-  isExpertMode,
-  labelForFieldType,
-  labelForMechanism,
-  labelForImpact,
-  labelForEnforceability,
-  labelForClusterAction,
-  impactTone,
-  actionTone,
-  sanitize,
-}: {
-  cluster: NegotiationCluster;
-  isExpertMode: boolean;
-  labelForFieldType: (v: ChangePotentialFieldType) => string;
-  labelForMechanism: (v: ChangePotentialMechanism) => string;
-  labelForImpact: (v: ChangePotentialImpactLevel) => string;
-  labelForEnforceability: (v: ChangePotentialEnforceability) => string;
-  labelForClusterAction: (v: NegotiationClusterAction) => string;
-  impactTone: (v: ChangePotentialImpactLevel) => string;
-  actionTone: (v: ChangePotentialRecommendedAction) => string;
-  sanitize: (s: string) => string;
-}) {
-  const primaryFieldType =
-    cluster.dominantFieldTypes && cluster.dominantFieldTypes.length > 0
-      ? labelForFieldType(cluster.dominantFieldTypes[0])
-      : null;
-  const primaryMechanism =
-    cluster.dominantMechanisms && cluster.dominantMechanisms.length > 0
-      ? labelForMechanism(cluster.dominantMechanisms[0])
-      : null;
-
-  return (
-    <div style={{ border: "1px solid #e0e7ef", borderRadius: 12, padding: 14, background: "#f8fafc" }}>
-      <div style={{ fontWeight: 800, color: "#111", fontSize: 14, marginBottom: 4 }}>
-        {sanitize(cluster.title)}
-      </div>
-      {(primaryFieldType || primaryMechanism) && (
-        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>
-          Nachtragshebel:{" "}
-          {[primaryFieldType, primaryMechanism].filter(Boolean).join(" · ")}
-        </div>
-      )}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12, marginBottom: 8 }}>
-        <span style={{ color: impactTone(cluster.commercialWeight), fontWeight: 700 }}>Hebel: {labelForImpact(cluster.commercialWeight)}</span>
-        <span style={{ color: "#555" }}>Durchsetzbarkeit: {labelForEnforceability(cluster.enforceabilityAssessment)}</span>
-        <span style={{ color: actionTone(cluster.recommendedNegotiationAction as ChangePotentialRecommendedAction), fontWeight: 700 }}>
-          Empfohlen: {labelForClusterAction(cluster.recommendedNegotiationAction)}
-        </span>
-      </div>
-      {!isExpertMode && (cluster.dominantFieldTypes.length > 0 || cluster.dominantMechanisms.length > 0) && (
-        <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
-          {cluster.dominantFieldTypes.length > 0 && (
-            <span>Feldtypen: {cluster.dominantFieldTypes.map(labelForFieldType).join(", ")}</span>
-          )}
-          {cluster.dominantMechanisms.length > 0 && (
-            <span>
-              {cluster.dominantFieldTypes.length > 0 ? " · " : ""}
-              Mechanismen: {cluster.dominantMechanisms.map(labelForMechanism).join(", ")}
-            </span>
-          )}
-        </div>
-      )}
-      <div style={{ fontSize: 13, color: "#333", lineHeight: 1.5 }}>{sanitize(cluster.whyThisMatters)}</div>
-      {(cluster.suggestedQuestion ?? cluster.suggestedClarification) && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #eee", fontSize: 12, color: "#444" }}>
-          {cluster.suggestedQuestion && (
-            <div style={{ marginBottom: 4 }}><strong>Rückfrage:</strong> {sanitize(cluster.suggestedQuestion)}</div>
-          )}
-          {cluster.suggestedClarification && (
-            <div><strong>Klarstellung:</strong> {sanitize(cluster.suggestedClarification)}</div>
-          )}
-        </div>
-      )}
-      {isExpertMode && (
-        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #eee", fontSize: 11, color: "#777" }}>
-          <div>Zugehörige Items: {cluster.relatedItemIds.join(", ")}</div>
-          {cluster.dominantFieldTypes.length > 0 && (
-            <div>Feldtypen: {cluster.dominantFieldTypes.map(labelForFieldType).join(", ")}</div>
-          )}
-          {cluster.dominantMechanisms.length > 0 && (
-            <div>Mechanismen: {cluster.dominantMechanisms.map(labelForMechanism).join(", ")}</div>
-          )}
-          {cluster.affectedTrades.length > 0 && (
-            <div>Gewerke: {cluster.affectedTrades.join(", ")}</div>
-          )}
-          {cluster.clusterReasoning && (
-            <div style={{ marginTop: 4 }}>Begründung: {sanitize(cluster.clusterReasoning)}</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function ItemCard({
   item,
   isExpertMode,
   labelForFieldType,
   labelForMechanism,
-  labelForImpact,
   labelForEnforceability,
-  labelForAction,
   labelForSourceType,
-  impactTone,
-  actionTone,
   sanitize,
 }: {
   item: ChangePotentialItem;
   isExpertMode: boolean;
   labelForFieldType: (v: ChangePotentialFieldType) => string;
   labelForMechanism: (v: ChangePotentialMechanism) => string;
-  labelForImpact: (v: ChangePotentialImpactLevel) => string;
   labelForEnforceability: (v: ChangePotentialEnforceability) => string;
-  labelForAction: (v: ChangePotentialRecommendedAction) => string;
   labelForSourceType: (v: ChangePotentialSourceType) => string;
-  impactTone: (v: ChangePotentialImpactLevel) => string;
-  actionTone: (v: ChangePotentialRecommendedAction) => string;
   sanitize: (s: string) => string;
 }) {
+  const handlung = mapRecommendedToHandlung(item.recommendedAction);
+  const prio = priorityFromImpact(item.impactLevel);
+  const nextParts = buildNextStepParts(item);
+  const bezug = formatBezugZeile(item, labelForSourceType);
+  const showMeta =
+    isExpertMode &&
+    !(item.fieldType === "sonstiges" && item.changeMechanism === "unklar");
+  const hasTech =
+    isExpertMode &&
+    (item.sourceType != null ||
+      item.sourcePath ||
+      item.sourceQuote ||
+      item.sourcePositionRef ||
+      (item.tags?.length ?? 0) > 0 ||
+      typeof item.confidence === "number" ||
+      (typeof item.llmConfidence === "number" && item.llmConfidence > 0) ||
+      item.llmValidated ||
+      item.llmAdjusted ||
+      (item.llmChangedFields?.length ?? 0) > 0 ||
+      item.llmNotes ||
+      item.candidate);
+
   return (
-    <div style={{ border: "1px solid #e5e5e5", borderRadius: 12, padding: 14, background: "#fafafa" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
-        <span style={{ fontWeight: 800, color: "#111", fontSize: 14 }}>{sanitize(item.title)}</span>
-        {item.trade && (
-          <span style={{ fontSize: 11, color: "#666", fontWeight: 700 }}>{sanitize(item.trade)}</span>
-        )}
-      </div>
-      <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12 }}>
-        <span style={{ color: "#555" }}>Feldtyp: {labelForFieldType(item.fieldType)}</span>
-        <span style={{ color: "#555" }}>Mechanismus: {labelForMechanism(item.changeMechanism)}</span>
-        <span style={{ color: impactTone(item.impactLevel), fontWeight: 700 }}>Hebel: {labelForImpact(item.impactLevel)}</span>
-        <span style={{ color: "#555" }}>Durchsetzbarkeit: {labelForEnforceability(item.enforceability)}</span>
-        <span style={{ color: actionTone(item.recommendedAction), fontWeight: 700 }}>
-          Empfohlen: {labelForAction(item.recommendedAction)}
+    <div
+      style={{
+        border: NP.border.card,
+        borderRadius: NP.r.md,
+        borderLeft: `3px solid ${NP.accent.primary}`,
+        padding: "12px 14px 12px 13px",
+        background: NP.bg.card,
+        boxShadow: NP.shadow.card,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid #f1f5f9" }}>
+        <div style={{ fontWeight: 700, color: NP.text.title, fontSize: 14, lineHeight: 1.35, flex: 1, letterSpacing: "-0.02em" }}>{sanitize(item.title)}</div>
+        <span
+          title="Priorität"
+          style={{
+            flexShrink: 0,
+            fontSize: 11,
+            fontWeight: 700,
+            padding: "5px 11px",
+            borderRadius: 6,
+            background: prio === "hoch" ? "#fff1f2" : prio === "mittel" ? "#fffbeb" : NP.bg.canvas,
+            color: prio === "hoch" ? "#be123c" : prio === "mittel" ? "#b45309" : "#64748b",
+            border: `1px solid ${prio === "hoch" ? "#fecdd3" : prio === "mittel" ? "#fde68a" : "#e2e8f0"}`,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {prio}
         </span>
       </div>
-      <div style={{ marginTop: 8, fontSize: 13, color: "#333", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-        {sanitize(item.reasoning)}
+
+      {bezug ? (
+        <div style={{ fontSize: 11, color: NP.text.hint, marginBottom: 10, lineHeight: 1.35 }}>{sanitize(bezug)}</div>
+      ) : null}
+
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: NP.text.muted, marginBottom: 5 }}>Inhalt</div>
+        <div style={{ fontSize: 13, color: NP.text.body, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{sanitize(item.reasoning)}</div>
       </div>
-      {item.commercialStrategy && (
-        <div style={{ marginTop: 10, padding: 10, background: "#f0f7ff", borderRadius: 8, borderLeft: "4px solid #1565c0", fontSize: 12, color: "#333" }}>
-          <div style={{ fontWeight: 700, color: "#1565c0", marginBottom: 6 }}>Kommerzielle Handlungsempfehlung</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
-            <span><strong>Primäre Strategie:</strong> {labelFor(COMMERCIAL_STRATEGY_ACTION_LABELS, item.commercialStrategy.primaryAction)}</span>
-            <span><strong>Risiko bei Nicht-Adressierung:</strong> {labelFor(RISK_LEVEL_LABELS, item.commercialStrategy.riskIfUnaddressed)}</span>
-            <span><strong>Risiko bei zu offensiver Adressierung:</strong> {labelFor(RISK_LEVEL_LABELS, item.commercialStrategy.riskIfAddressedTooEarly)}</span>
-          </div>
-          <div style={{ marginBottom: isExpertMode ? 6 : 0 }}>{sanitize(item.commercialStrategy.strategyReasoning)}</div>
-          {isExpertMode && (
-            <>
-              {item.commercialStrategy.secondaryAction && (
-                <div style={{ marginTop: 4, color: "#555" }}><strong>Alternative:</strong> {labelFor(COMMERCIAL_STRATEGY_ACTION_LABELS, item.commercialStrategy.secondaryAction)}</div>
-              )}
-              {item.commercialStrategy.handlingRecommendation && (
-                <div style={{ marginTop: 4, color: "#555" }}><strong>Umgang:</strong> {sanitize(item.commercialStrategy.handlingRecommendation)}</div>
-              )}
-              {item.commercialStrategy.internalNote && (
-                <div style={{ marginTop: 4, color: "#777", fontSize: 11 }}><strong>Intern:</strong> {sanitize(item.commercialStrategy.internalNote)}</div>
-              )}
-            </>
-          )}
+
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          gap: "10px 16px",
+          padding: "10px 0",
+          borderTop: "1px solid #e2e8f0",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: NP.text.muted, marginBottom: 4 }}>Aktion</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: NP.accent.primary, letterSpacing: "-0.02em" }}>{handlung}</div>
         </div>
-      )}
-      {(item.questionDraft ?? item.clarificationDraft ?? item.pricingHint) && (
-        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #eee", fontSize: 12, color: "#444" }}>
-          {item.questionDraft && (
-            <div style={{ marginBottom: 4 }}>
-              <strong>Rückfrage-Vorschlag:</strong> {sanitize(item.questionDraft)}
-            </div>
-          )}
-          {item.clarificationDraft && (
-            <div style={{ marginBottom: 4 }}>
-              <strong>Klarstellungs-Vorschlag:</strong> {sanitize(item.clarificationDraft)}
-            </div>
-          )}
-          {item.pricingHint && (
-            <div><strong>Kalkulationshinweis:</strong> {sanitize(item.pricingHint)}</div>
-          )}
+        <div style={{ fontSize: 11, color: NP.text.hint, textAlign: "right", maxWidth: 200 }}>
+          <span style={{ color: NP.text.hint }}>Tragfähigkeit </span>
+          <span style={{ fontWeight: 600, color: NP.text.muted }}>{labelForEnforceability(item.enforceability)}</span>
         </div>
-      )}
-      {/* Standardmodus: nur dezente KI-Kennzeichnung */}
-      {!isExpertMode && (item.llmValidated || item.llmAdjusted) && (
-        <div style={{ marginTop: 8, fontSize: 11, color: "#64748b" }}>
-          {item.llmAdjusted ? "KI angepasst" : "KI geprüft"}
-        </div>
-      )}
-      {isExpertMode &&
-        (item.sourceType != null ||
-          item.sourcePath ||
-          item.sourceQuote ||
-          item.sourcePositionRef ||
-          (item.tags?.length ?? 0) > 0 ||
-          typeof item.confidence === "number" ||
-          (typeof item.llmConfidence === "number" && item.llmConfidence > 0) ||
-          item.llmValidated ||
-          item.llmAdjusted ||
-          (item.llmChangedFields?.length ?? 0) > 0 ||
-          item.llmNotes ||
-          item.candidate) && (
-        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #eee", fontSize: 11, color: "#777" }}>
-          {item.sourceType != null && <div>Quelle: {labelForSourceType(item.sourceType)}</div>}
-          {item.sourcePath && <div>Pfad: {sanitize(item.sourcePath)}</div>}
-          {item.sourceQuote && (
-            <div style={{ fontFamily: "ui-monospace, monospace", marginTop: 4 }}>
-              &quot;{sanitize(String(item.sourceQuote).slice(0, 120))}{item.sourceQuote.length > 120 ? "…" : ""}&quot;
-            </div>
-          )}
-          {item.sourcePositionRef && <div>Position: {sanitize(item.sourcePositionRef)}</div>}
-          {item.confidence !== undefined && <div>Konfidenz: {Math.round(item.confidence * 100)}%</div>}
-          {item.tags && item.tags.length > 0 && <div>Tags: {item.tags.join(", ")}</div>}
-          {(item.llmValidated || item.llmAdjusted) && (
-            <>
-              <div>
-                KI-Confidence:{" "}
-                {typeof item.llmConfidence === "number" && item.llmConfidence > 0
-                  ? `${Math.round(item.llmConfidence * 100)} %`
-                  : "—"}
+      </div>
+
+      <div
+        style={{
+          marginTop: 10,
+          padding: "10px 0 0 12px",
+          borderLeft: `3px solid ${NP.accent.primary}`,
+          background: "linear-gradient(90deg, #eff6ff 0%, #ffffff 48%)",
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#1d4ed8", marginBottom: 6 }}>Als Nächstes</div>
+        {nextParts.length > 0 ? (
+          <div style={{ display: "grid", gap: 6 }}>
+            {nextParts.map((p, i) => (
+              <div key={i}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: NP.text.muted, marginBottom: 2 }}>{p.label}</div>
+                <div style={{ fontSize: 13, color: NP.text.title, lineHeight: 1.4 }}>{sanitize(p.text)}</div>
               </div>
-              <div>{item.llmAdjusted ? "KI angepasst" : "KI geprüft"}</div>
-            </>
-          )}
-          {(item.llmAdjusted || (item.llmChangedFields?.length ?? 0) > 0) && (
-            <div>
-              Geändert:{" "}
-              {item.llmChangedFields && item.llmChangedFields.length > 0
-                ? item.llmChangedFields.join(", ")
-                : "nicht spezifiziert"}
-            </div>
-          )}
-          {item.llmNotes && <div>LLM-Notiz: {sanitize(item.llmNotes)}</div>}
-          {item.candidate && <div>Kandidat (LLM-Vorschlag, nicht Kern-Item)</div>}
+            ))}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: NP.text.muted, lineHeight: 1.45 }}>Rückfrage oder Klarstellung vorbereiten und intern abstimmen.</div>
+        )}
+      </div>
+
+      {showMeta && (
+        <div style={{ marginTop: 8, fontSize: 10, color: "#cbd5e1", lineHeight: 1.35 }}>
+          {labelForFieldType(item.fieldType)} · {labelForMechanism(item.changeMechanism)}
         </div>
+      )}
+
+      {item.commercialStrategy && isExpertMode && (
+        <div style={{ marginTop: 8, padding: "8px 10px", background: NP.bg.action, borderRadius: NP.r.sm, fontSize: 11, color: NP.text.body, lineHeight: 1.4, border: "1px solid #bfdbfe" }}>
+          <span style={{ fontWeight: 700, color: "#1d4ed8" }}>Kommerziell </span>
+          {labelFor(COMMERCIAL_STRATEGY_ACTION_LABELS, item.commercialStrategy.primaryAction)} — {sanitize(truncateOneLine(item.commercialStrategy.strategyReasoning, 140))}
+        </div>
+      )}
+
+      {!isExpertMode && (item.llmValidated || item.llmAdjusted) && (
+        <div style={{ marginTop: 6, fontSize: 10, color: "#cbd5e1" }}>{item.llmAdjusted ? "KI überarbeitet" : "KI geprüft"}</div>
+      )}
+
+      {hasTech && (
+        <details style={{ marginTop: 10 }}>
+          <summary
+            style={{
+              cursor: "pointer",
+              fontSize: 11,
+              fontWeight: 600,
+              color: NP.text.hint,
+              listStyle: "none",
+              outline: "none",
+            }}
+          >
+            Technische Herkunft
+          </summary>
+          <div
+            style={{
+              marginTop: 8,
+              padding: "8px 10px",
+              background: NP.bg.canvas,
+              borderRadius: NP.r.sm,
+              fontSize: 10,
+              color: NP.text.muted,
+              lineHeight: 1.45,
+              border: NP.border.hairline,
+            }}
+          >
+            {item.sourceType != null && <div>Quelle: {labelForSourceType(item.sourceType)}</div>}
+            {item.sourcePath && <div>Pfad: {sanitize(item.sourcePath)}</div>}
+            {item.sourceQuote && (
+              <div style={{ fontFamily: "ui-monospace, monospace", marginTop: 4, wordBreak: "break-word", color: NP.text.hint }}>
+                „{sanitize(String(item.sourceQuote).slice(0, 100))}{item.sourceQuote.length > 100 ? "…" : ""}“
+              </div>
+            )}
+            {item.sourcePositionRef && <div>Position: {sanitize(item.sourcePositionRef)}</div>}
+            {item.confidence !== undefined && <div>Konfidenz: {Math.round(item.confidence * 100)}%</div>}
+            {item.tags && item.tags.length > 0 && <div>Tags: {item.tags.join(", ")}</div>}
+            {(item.llmValidated || item.llmAdjusted) && (
+              <div>
+                KI: {typeof item.llmConfidence === "number" && item.llmConfidence > 0 ? `${Math.round(item.llmConfidence * 100)} %` : "—"} · {item.llmAdjusted ? "angepasst" : "geprüft"}
+              </div>
+            )}
+            {(item.llmAdjusted || (item.llmChangedFields?.length ?? 0) > 0) && (
+              <div>Geändert: {item.llmChangedFields && item.llmChangedFields.length > 0 ? item.llmChangedFields.join(", ") : "—"}</div>
+            )}
+            {item.llmNotes && <div>Notiz: {sanitize(item.llmNotes)}</div>}
+            {item.candidate && <div>Vorschlags-Item</div>}
+          </div>
+        </details>
       )}
     </div>
   );
@@ -761,8 +883,6 @@ function LegacyView({ analysis, deduplicatedOpportunities, isExpertMode, sanitiz
 
 // ================= Executive Panel (kompakte Managementübersicht) =================
 
-const RELEVANCE_ORDER: Record<string, number> = { sehr_hoch: 4, hoch: 3, mittel: 2, niedrig: 1 };
-
 function NachtragExecutivePanel({
   analysis,
   sanitize,
@@ -781,218 +901,150 @@ function NachtragExecutivePanel({
       (analysis as { summaryIndex?: number; totalIndex?: number })?.totalIndex ??
       0;
     return (
-      <div style={{ marginBottom: 24, border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, background: "#fff" }}>
-        <div style={{ fontWeight: 700, color: "#334155", marginBottom: 6 }}>Nachtragspotenzial</div>
-        <div style={{ fontSize: 13, color: "#475569" }}>
-          Für diese Analyse liegt aktuell noch keine belastbare V2-Kundensicht vor. Der vorläufige Index liegt bei {Math.round(Number(index) || 0)}/100.
+      <div
+        style={{
+          marginBottom: 16,
+          border: NP.border.card,
+          borderRadius: NP.r.md,
+          padding: "12px 14px",
+          background: NP.bg.card,
+          boxShadow: NP.shadow.card,
+        }}
+      >
+        <div style={{ fontWeight: 700, color: NP.text.title, marginBottom: 4, fontSize: 13, letterSpacing: "-0.02em" }}>Nachtragspotenzial</div>
+        <div style={{ fontSize: 12, color: NP.text.muted, lineHeight: 1.45 }}>
+          Einordnung folgt. Orientierung: <span style={{ fontWeight: 700, color: NP.text.body, fontVariantNumeric: "tabular-nums" }}>{Math.round(Number(index) || 0)}</span>
+          <span style={{ color: NP.text.hint }}>/100</span>
         </div>
       </div>
     );
   }
 
   const view = buildNachtragCustomerView({ v2 });
-  const cardBase: React.CSSProperties = {
-    border: "1px solid #e2e8f0",
-    borderRadius: 12,
-    padding: 12,
-    background: "#ffffff",
+
+  const kpiCard: React.CSSProperties = {
+    border: NP.border.card,
+    borderRadius: NP.r.md,
+    padding: "12px 14px",
+    background: NP.bg.card,
+    boxShadow: NP.shadow.kpi,
+    minHeight: 92,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "space-between",
+  };
+
+  const insightCard: React.CSSProperties = {
+    border: NP.border.card,
+    borderRadius: NP.r.md,
+    padding: "12px 14px",
+    background: NP.bg.card,
+    boxShadow: NP.shadow.card,
+    minHeight: 120,
   };
 
   return (
-    <div style={{ display: "grid", gap: 12, marginBottom: 28 }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "#334155" }}>Nachtragspotenzial</div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-        <div style={cardBase}>
-          <div style={{ fontSize: 12, color: "#64748b" }}>Nachtragspotenzial</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#334155" }}>
-            {view.potentialLabel} ({Math.round(view.potentialScore)}/100)
+    <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+        <div style={kpiCard}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: NP.text.muted }}>Potenzial</div>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginTop: 4 }}>
+            <span style={{ fontSize: 22, fontWeight: 800, color: NP.text.title, letterSpacing: "-0.03em", lineHeight: 1.1 }}>{view.potentialLabel}</span>
+            <span style={{ fontSize: 20, fontWeight: 800, color: NP.accent.primary, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>{Math.round(view.potentialScore)}</span>
           </div>
+          <div style={{ fontSize: 11, color: NP.text.hint, fontWeight: 500 }}>Skala 0–100</div>
         </div>
-        <div style={cardBase}>
-          <div style={{ fontSize: 12, color: "#64748b" }}>Durchsetzbarkeit</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#334155" }}>
-            {view.enforceabilityLabel} ({Math.round(view.enforceabilityScore)}/100)
+        <div style={kpiCard}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: NP.text.muted }}>Durchsetzung</div>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginTop: 4 }}>
+            <span style={{ fontSize: 22, fontWeight: 800, color: NP.text.title, letterSpacing: "-0.03em", lineHeight: 1.1 }}>{view.enforceabilityLabel}</span>
+            <span style={{ fontSize: 20, fontWeight: 800, color: NP.accent.primary, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>{Math.round(view.enforceabilityScore)}</span>
           </div>
+          <div style={{ fontSize: 11, color: NP.text.hint, fontWeight: 500 }}>Skala 0–100</div>
         </div>
-        <div style={cardBase}>
-          <div style={{ fontSize: 12, color: "#64748b" }}>Belastbarkeit / Konfidenz</div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 2 }}>{view.confidenceLabel}</div>
-          <div style={{ fontSize: 12, color: "#64748b" }}>{sanitize(view.confidenceReason)}</div>
+        <div style={kpiCard}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: NP.text.muted }}>Belastbarkeit</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: NP.text.title, letterSpacing: "-0.03em", marginTop: 4, lineHeight: 1.15 }}>{view.confidenceLabel}</div>
+          <div style={{ fontSize: 11, color: NP.text.muted, lineHeight: 1.35, marginTop: 4 }}>{sanitize(humanizeConfidenceNotes(view.confidenceReason))}</div>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
-        <div style={cardBase}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 6 }}>Wichtigste Treiber</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+        <div style={insightCard}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: NP.text.body, marginBottom: 8 }}>Treiber</div>
           {view.topDrivers.length > 0 ? (
-            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 13, color: "#475569" }}>
+            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 12, color: NP.text.body, lineHeight: 1.45 }}>
               {view.topDrivers.slice(0, 3).map((d, i) => (
                 <li key={i}>{sanitize(d)}</li>
               ))}
             </ul>
           ) : (
-            <div style={{ fontSize: 12, color: "#94a3b8" }}>Keine Treiber verfügbar</div>
+            <div style={{ fontSize: 12, color: NP.text.hint }}>—</div>
           )}
         </div>
 
-        <div style={cardBase}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 6 }}>Top Hebel</div>
+        <div style={insightCard}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: NP.text.body, marginBottom: 8 }}>Schwerpunkte</div>
           {view.topLevers.length > 0 ? (
             <div style={{ display: "grid", gap: 8 }}>
               {view.topLevers.slice(0, 3).map((l, i) => (
-                <div key={i} style={{ borderTop: i ? "1px solid #f1f5f9" : "none", paddingTop: i ? 8 : 0 }}>
-                  <div style={{ fontWeight: 600, color: "#334155" }}>{sanitize(l.title)}</div>
-                  <div style={{ fontSize: 12, color: "#64748b" }}>
-                    {sanitize(l.fieldType)} · {sanitize(l.mechanism)} · {sanitize(l.leverageLabel)}
-                  </div>
-                  <div style={{ fontSize: 12, color: "#64748b" }}>{sanitize(l.explanation)}</div>
+                <div key={i} style={{ borderTop: i ? "1px solid #e2e8f0" : "none", paddingTop: i ? 8 : 0 }}>
+                  <div style={{ fontWeight: 600, color: NP.text.title, fontSize: 12 }}>{sanitize(l.title)}</div>
+                  <div style={{ fontSize: 11, color: NP.text.muted, marginTop: 3, lineHeight: 1.4 }}>{sanitize(truncateOneLine(l.explanation, 100))}</div>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ fontSize: 12, color: "#94a3b8" }}>Keine Hebel verfügbar</div>
+            <div style={{ fontSize: 12, color: NP.text.hint }}>—</div>
           )}
         </div>
 
-        <div style={cardBase}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 6 }}>Sofortmaßnahmen</div>
+        <div
+          style={{
+            ...insightCard,
+            borderLeft: `3px solid ${NP.accent.primary}`,
+            background: NP.bg.action,
+            borderColor: "#bfdbfe",
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#1e40af", marginBottom: 8 }}>Nächste Schritte</div>
           {view.immediateActions.length > 0 ? (
-            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 13, color: "#475569" }}>
+            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 5, fontSize: 12, color: "#1e3a8a", lineHeight: 1.45, fontWeight: 500 }}>
               {view.immediateActions.slice(0, 3).map((a, i) => (
                 <li key={i}>{sanitize(String(a))}</li>
               ))}
             </ul>
           ) : (
-            <div style={{ fontSize: 12, color: "#94a3b8" }}>Keine Maßnahmen verfügbar</div>
+            <div style={{ fontSize: 12, color: "#93c5fd" }}>—</div>
           )}
         </div>
       </div>
 
-      <div style={{ ...cardBase, padding: 14 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 6 }}>Management Summary</div>
-        <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.55 }}>{sanitize(view.managementSummary)}</div>
+      <div
+        style={{
+          border: NP.border.hairline,
+          borderRadius: NP.r.md,
+          padding: "12px 14px",
+          background: NP.bg.canvas,
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 700, color: NP.text.muted, marginBottom: 6 }}>Kurzfassung</div>
+        <div style={{ fontSize: 12, color: NP.text.body, lineHeight: 1.5 }}>{sanitize(view.managementSummary)}</div>
       </div>
 
-      <div style={{ ...cardBase, padding: 14 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 6 }}>Empfohlene Strategie</div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#1e3a5f", marginBottom: 4 }}>{sanitize(view.recommendedStrategy.title)}</div>
-        <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.5 }}>{sanitize(view.recommendedStrategy.rationale)}</div>
+      <div
+        style={{
+          border: NP.border.accent,
+          borderRadius: NP.r.md,
+          padding: "12px 14px 12px 16px",
+          background: NP.bg.card,
+          borderLeft: `4px solid ${NP.text.title}`,
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 700, color: NP.text.muted, marginBottom: 6 }}>Strategie</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: NP.text.title, marginBottom: 6, letterSpacing: "-0.02em" }}>{sanitize(view.recommendedStrategy.title)}</div>
+        <div style={{ fontSize: 12, color: NP.text.muted, lineHeight: 1.45 }}>{sanitize(view.recommendedStrategy.rationale)}</div>
       </div>
-    </div>
-  );
-}
-
-// ================= Management Summary / Angebotsstrategie =================
-
-function OfferStrategyBlock({
-  data,
-  isExpertMode,
-  sanitize,
-}: {
-  data: OfferStrategySummary;
-  isExpertMode: boolean;
-  sanitize: (s: string) => string;
-}) {
-  const approachLabel = labelFor(OFFER_STRATEGY_APPROACH_LABELS, data.recommendedApproach);
-  return (
-    <div style={{ marginTop: 32, marginBottom: 24, border: "1px solid #1e3a5f", borderRadius: 12, padding: 16, background: "#f0f7ff" }}>
-      <div style={{ fontWeight: 800, fontSize: 15, color: "#1e3a5f", marginBottom: 12 }}>Management Summary</div>
-      <div style={{ fontSize: 13, color: "#333", lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 12 }}>
-        {sanitize(data.executiveSummary)}
-      </div>
-
-      <div style={{ fontWeight: 800, fontSize: 14, color: "#1e3a5f", marginBottom: 8 }}>Angebotsstrategie</div>
-      <div style={{ marginBottom: 12 }}>
-        <span style={{ fontWeight: 700, color: "#1565c0" }}>Empfohlener Ansatz: {approachLabel}</span>
-      </div>
-      <div style={{ fontSize: 13, color: "#333", lineHeight: 1.5, marginBottom: 14 }}>
-        {sanitize(data.finalRecommendation)}
-      </div>
-
-      {!isExpertMode && data.immediateActions.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 6 }}>Wichtigste Sofortmaßnahmen</div>
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#333" }}>
-            {data.immediateActions.slice(0, 5).map((a, i) => (
-              <li key={i} style={{ marginBottom: 4 }}>{sanitize(a)}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {isExpertMode && (
-        <>
-          {data.topRisks.length > 0 && (
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 4 }}>Top-Risiken</div>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#333" }}>
-                {data.topRisks.map((r, i) => (
-                  <li key={i} style={{ marginBottom: 2 }}>{sanitize(r)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {data.topNegotiationPoints.length > 0 && (
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 4 }}>Top-Verhandlungspunkte</div>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#333" }}>
-                {data.topNegotiationPoints.map((p, i) => (
-                  <li key={i} style={{ marginBottom: 2 }}>{sanitize(p)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {data.immediateActions.length > 0 && (
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 4 }}>Sofortmaßnahmen</div>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#333" }}>
-                {data.immediateActions.map((a, i) => (
-                  <li key={i} style={{ marginBottom: 2 }}>{sanitize(a)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <div style={{ marginTop: 14, fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 8 }}>Strategievarianten</div>
-          <div style={{ display: "grid", gap: 12 }}>
-            {(["defensiv", "ausgewogen", "offensiv"] as const).map((key) => {
-              const v = data.strategyVariants[key];
-              const label = labelFor(OFFER_STRATEGY_APPROACH_LABELS, key);
-              return (
-                <div key={key} style={{ border: "1px solid #c5d9f0", borderRadius: 8, padding: 10, background: "#fff", fontSize: 12 }}>
-                  <div style={{ fontWeight: 800, color: "#1e3a5f", marginBottom: 6 }}>{label}</div>
-                  <div style={{ marginBottom: 4, color: "#333" }}>{sanitize(v.description)}</div>
-                  <div style={{ marginBottom: 6, color: "#555", fontStyle: "italic" }}>{sanitize(v.expectedTradeoff)}</div>
-                  {v.keyActions.length > 0 && (
-                    <ul style={{ margin: 0, paddingLeft: 16, color: "#444" }}>
-                      {v.keyActions.map((action, i) => (
-                        <li key={i} style={{ marginBottom: 2 }}>{sanitize(action)}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {!isExpertMode && (
-        <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-          {(["defensiv", "ausgewogen", "offensiv"] as const).map((key) => {
-            const v = data.strategyVariants[key];
-            const label = labelFor(OFFER_STRATEGY_APPROACH_LABELS, key);
-            const isRecommended = data.recommendedApproach === key;
-            return (
-              <div key={key} style={{ border: "1px solid #c5d9f0", borderRadius: 8, padding: 8, background: isRecommended ? "#e8f0fa" : "#fff", fontSize: 12 }}>
-                <span style={{ fontWeight: 700, color: "#333" }}>{label}</span>
-                {isRecommended && <span style={{ marginLeft: 6, color: "#1565c0", fontWeight: 600 }}>— empfohlen</span>}
-                <div style={{ marginTop: 4, color: "#555" }}>{sanitize(v.description)}</div>
-              </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
@@ -1337,7 +1389,16 @@ export function NachtragspotenzialBlock({
   const fontWeightTitle = D?.fontWeightSection ?? 700;
 
   return (
-    <div style={{ border: cardBorder, borderRadius: D?.cardRadius ?? 14, padding: D ? 20 : 16, background: cardBg, marginTop: D ? 0 : 24 }}>
+    <div
+      style={{
+        border: cardBorder,
+        borderRadius: D?.cardRadius ?? 12,
+        padding: D ? 20 : 18,
+        background: D ? cardBg : "#fafbfc",
+        marginTop: D ? 0 : 24,
+        boxShadow: D ? undefined : "0 1px 3px rgba(15,23,42,0.04)",
+      }}
+    >
       <div
         style={{
           display: "flex",
@@ -1345,18 +1406,18 @@ export function NachtragspotenzialBlock({
           alignItems: "center",
           gap: D ? 16 : 16,
           rowGap: 12,
-          marginBottom: 24,
+          marginBottom: 20,
         }}
       >
-        <div style={{ fontSize: fontSizeTitle, color: textPrimary, fontWeight: fontWeightTitle }}>Nachtragspotenzial</div>
+        <div style={{ fontSize: fontSizeTitle, color: textPrimary, fontWeight: fontWeightTitle, letterSpacing: "-0.01em" }}>Nachtragspotenzial</div>
         {isExpertMode && (
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: textSecondary, fontWeight: 500 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: textSecondary, fontWeight: 500 }}>
             <input
               type="checkbox"
               checked={useChangePotentialLlm}
               onChange={(e) => onUseChangePotentialLlmChange(e.target.checked)}
             />
-            KI‑Veredelung aktivieren
+            KI‑Feinschliff
           </label>
         )}
         {proFeatureLocked && (
@@ -1387,21 +1448,20 @@ export function NachtragspotenzialBlock({
       </div>
 
       {loading && (
-        <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: textSecondary, fontWeight: fontWeightTitle }}>
-          Analyse läuft…
+        <div style={{ marginTop: 12, padding: "16px 12px", textAlign: "center", color: textMuted, fontSize: 13 }}>
+          Auswertung läuft …
         </div>
       )}
 
       {!loading && !analysis && (
-        <div style={{ marginTop: 14, color: textSecondary, fontSize: 13, fontWeight: 600 }}>
-          Klicke „Nachtragspotenziale ermitteln", um mögliche Nachtragstreiber aus der Analyse abzuleiten (Strang B).
+        <div style={{ marginTop: 12, color: textSecondary, fontSize: 13, lineHeight: 1.45 }}>
+          „Nachtragspotenziale ermitteln“ starten — dann erscheint die Einordnung und die Arbeitsliste.
         </div>
       )}
 
       {isExpertMode && !customerRoute && (
-        <div style={{ marginTop: 8, color: textMuted, fontSize: 11 }}>
-          Die KI verfeinert die erkannten Nachtragspotenziale fachlich/präziser, erzeugt aber keine völlig freien neuen
-          Haupttreffer.
+        <div style={{ marginTop: 6, color: textMuted, fontSize: 11, lineHeight: 1.4 }}>
+          KI schärft Formulierungen, erfindet keine neuen Kerntreffer.
         </div>
       )}
 
@@ -1438,87 +1498,95 @@ export function NachtragspotenzialBlock({
             </div>
           )}
 
-          {analysis.offerStrategySummary && (
-            <OfferStrategyBlock
-              data={analysis.offerStrategySummary}
-              isExpertMode={isExpertMode}
-              sanitize={sanitizeForDisplay}
-            />
-          )}
+          {/* Experten-/Arbeitsansicht – klar abgetrennt */}
+          <div
+            style={{
+              marginTop: 24,
+              paddingTop: 18,
+              borderTop: "1px solid #cbd5e1",
+              background: "linear-gradient(180deg, #f1f5f9 0%, #f8fafc 32px, transparent 100%)",
+              marginLeft: -2,
+              marginRight: -2,
+              paddingLeft: 10,
+              paddingRight: 10,
+              paddingBottom: 4,
+              borderRadius: 10,
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 14, letterSpacing: "-0.01em" }}>Arbeitsansicht</div>
 
-          {analysis?.systemLogic != null && (
-            <div style={{ marginTop: 24 }}>
-              <button
-                type="button"
-                onClick={() => setSystemOpen((v) => !v)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  width: "100%",
-                  padding: "8px 0",
-                  background: "none",
-                  border: "none",
-                  borderBottom: "1px solid #e2e8f0",
-                  cursor: "pointer",
-                  fontWeight: 600,
-                  color: "#334155",
-                  fontSize: 14,
-                  textAlign: "left",
-                }}
-              >
-                <span>Systemanalyse</span>
-                <span style={{ fontSize: 12, color: "#64748b" }}>{systemOpen ? "▼" : "▶"}</span>
-              </button>
-              {systemOpen && (
-                <SystemlogikSection
-                  systemLogic={analysis.systemLogic}
-                  sanitize={sanitizeForDisplay}
-                  isExpertMode={isExpertMode}
-                />
-              )}
-            </div>
-          )}
+            {(() => {
+              const summary = analysis.changePotentialSummary;
+              const useNewEngine = summary != null && summary.items.length > 0;
 
-          {(() => {
-            const summary = analysis.changePotentialSummary;
-            const useNewEngine = summary != null && summary.items.length > 0;
+              if (useNewEngine) {
+                return (
+                  <NewEngineView
+                    analysis={analysis}
+                    summary={summary!}
+                    isExpertMode={isExpertMode}
+                    labelForFieldType={(v) => labelFor(FIELD_TYPE_LABELS, v)}
+                    labelForMechanism={(v) => labelFor(MECHANISM_LABELS, v)}
+                    labelForEnforceability={(v) => labelFor(ENFORCEABILITY_LABELS, v)}
+                    labelForSourceType={(v) => labelFor(SOURCE_TYPE_LABELS, v)}
+                    sanitize={sanitizeForDisplay}
+                  />
+                );
+              }
 
-            if (useNewEngine) {
+              if (deduplicatedOpportunities.length === 0) {
+                return (
+                  <div style={{ marginTop: 14, color: "#666", fontWeight: 700 }}>
+                    {DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noNachtragspotenziale}
+                  </div>
+                );
+              }
+
               return (
-                <NewEngineView
-                  summary={summary!}
-                  commercialActions={analysis.commercialActionsFromChangePotential}
-                  isExpertMode={isExpertMode}
-                  customerRoute={customerRoute}
-                  labelForFieldType={(v) => labelFor(FIELD_TYPE_LABELS, v)}
-                  labelForMechanism={(v) => labelFor(MECHANISM_LABELS, v)}
-                  labelForImpact={(v) => labelFor(IMPACT_LABELS, v)}
-                  labelForEnforceability={(v) => labelFor(ENFORCEABILITY_LABELS, v)}
-                  labelForAction={(v) => labelFor(RECOMMENDED_ACTION_LABELS, v)}
-                  labelForSourceType={(v) => labelFor(SOURCE_TYPE_LABELS, v)}
-                  sanitize={sanitizeForDisplay}
-                />
+                <>
+                  {analysis.systemLogic != null && (
+                    <div style={{ marginTop: 0 }}>
+                      <button
+                        type="button"
+                        onClick={() => setSystemOpen((v) => !v)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          width: "100%",
+                          padding: "8px 0",
+                          background: "none",
+                          border: "none",
+                          borderBottom: "1px solid #e2e8f0",
+                          cursor: "pointer",
+                          fontWeight: 600,
+                          color: "#334155",
+                          fontSize: 14,
+                          textAlign: "left",
+                        }}
+                      >
+                        <span>Arbeitslage auf einen Blick</span>
+                        <span style={{ fontSize: 12, color: "#64748b" }}>{systemOpen ? "▼" : "▶"}</span>
+                      </button>
+                      {systemOpen && (
+                        <SystemlogikSection
+                          systemLogic={analysis.systemLogic}
+                          sanitize={sanitizeForDisplay}
+                          isExpertMode={isExpertMode}
+                        />
+                      )}
+                    </div>
+                  )}
+                  <LegacyView
+                    analysis={analysis}
+                    deduplicatedOpportunities={deduplicatedOpportunities}
+                    isExpertMode={isExpertMode}
+                    sanitize={sanitizeForDisplay}
+                  />
+                </>
               );
-            }
-
-            if (deduplicatedOpportunities.length === 0) {
-              return (
-                <div style={{ marginTop: 14, color: "#666", fontWeight: 700 }}>
-                  {DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noNachtragspotenziale}
-                </div>
-              );
-            }
-
-            return (
-              <LegacyView
-                analysis={analysis}
-                deduplicatedOpportunities={deduplicatedOpportunities}
-                isExpertMode={isExpertMode}
-                sanitize={sanitizeForDisplay}
-              />
-            );
-          })()}
+            })()}
+          </div>
         </>
       )}
     </div>
