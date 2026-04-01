@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { appTheme as T } from "@/components/app/appTheme";
+import { getAnalysisDisplayTitle } from "@/lib/analysisDisplayTitle";
 import { StatusBadge } from "@/components/shared/statusBadge";
 
 const PAGE_SIZE = 10;
@@ -338,7 +339,7 @@ export default function AppAnalysenPage() {
                         />
                       </label>
                     </th>
-                    <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", minWidth: 140 }}>Projekt / Datei</th>
+                    <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", minWidth: 140 }}>Analyse</th>
                     <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Datum</th>
                     <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", width: 72 }}>Score</th>
                     <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", width: 120 }}>Status</th>
@@ -346,7 +347,11 @@ export default function AppAnalysenPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(items ?? []).map((row) => (
+                  {(items ?? []).map((row) => {
+                    const displayTitle = getAnalysisDisplayTitle(row.project_name, row.file_name);
+                    const fileTrim = row.file_name?.trim() ?? "";
+                    const showFileSecondary = fileTrim.length > 0 && displayTitle !== fileTrim;
+                    return (
                     <tr key={row.id} className="app-table-row" style={{ borderBottom: `1px solid ${T.border}` }}>
                       <td style={{ padding: T.space.md, verticalAlign: "middle" }}>
                         <label style={{ display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
@@ -354,15 +359,32 @@ export default function AppAnalysenPage() {
                             type="checkbox"
                             checked={selectedIds.has(row.id)}
                             onChange={() => handleToggleRow(row.id)}
-                            aria-label={`Analyse ${row.project_name ?? row.file_name ?? row.id} auswählen`}
+                            aria-label={`Analyse ${displayTitle} auswählen`}
                             style={{ width: 16, height: 16, accentColor: T.accent }}
                           />
                         </label>
                       </td>
                       <td style={{ padding: T.space.md, color: T.text, minWidth: 0 }}>
-                        <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }} title={row.project_name ?? row.file_name ?? ""}>
-                          {row.project_name ?? row.file_name ?? "Unbenannt"}
+                        <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320, fontWeight: 600 }} title={displayTitle}>
+                          {displayTitle}
                         </span>
+                        {showFileSecondary ? (
+                          <span
+                            style={{
+                              display: "block",
+                              marginTop: 4,
+                              fontSize: 12,
+                              color: T.muted,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              maxWidth: 320,
+                            }}
+                            title={fileTrim}
+                          >
+                            {fileTrim}
+                          </span>
+                        ) : null}
                       </td>
                       <td style={{ padding: T.space.md, color: T.muted, whiteSpace: "nowrap", fontSize: 12 }}>
                         {formatDate(row.created_at)}
@@ -397,7 +419,8 @@ export default function AppAnalysenPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
                 </tbody>
               </table>
             </div>

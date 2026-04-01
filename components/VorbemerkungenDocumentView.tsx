@@ -53,6 +53,12 @@ export type VorbemerkungenDocumentViewProps = {
     textPrimary?: string;
     textSecondary?: string;
     cardBorder?: string;
+    /** Haupt-Scrollfläche (bei Dark-Route z. B. appTheme.card, nicht #fff) */
+    surfaceBg?: string;
+    /** Such-Treffer Vorbemerkungen */
+    highlightBg?: string;
+    /** Such-Treffer Positionen */
+    highlightBgPositionen?: string;
   };
 };
 
@@ -81,17 +87,18 @@ export function VorbemerkungenDocumentView({
   const textPrimary = theme?.textPrimary ?? "#0f172a";
   const textSecondary = theme?.textSecondary ?? "#475569";
   const cardBorder = theme?.cardBorder ?? "#e2e8f0";
+  const surfaceBg = theme?.surfaceBg ?? (variant === "positionen" ? "#fafbfc" : "#fff");
   const isPositionen = variant === "positionen";
 
   const highlightStyle: React.CSSProperties = isPositionen
     ? {
-        background: "#e2e8f0",
+        background: theme?.highlightBgPositionen ?? "#e2e8f0",
         color: textPrimary,
         padding: "0 2px",
         borderRadius: 3,
       }
     : {
-        background: "#fef9c3",
+        background: theme?.highlightBg ?? "#fef9c3",
         color: textPrimary,
         padding: "0 2px",
         borderRadius: 2,
@@ -232,7 +239,7 @@ export function VorbemerkungenDocumentView({
         maxHeight,
         borderRadius: 10,
         border: `1px solid ${cardBorder}`,
-        background: "#fafbfc",
+        background: surfaceBg,
         fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
       }
     : {
@@ -240,7 +247,7 @@ export function VorbemerkungenDocumentView({
         maxHeight,
         borderRadius: 12,
         border: `1px solid ${cardBorder}`,
-        background: "#fff",
+        background: surfaceBg,
         fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
       };
 

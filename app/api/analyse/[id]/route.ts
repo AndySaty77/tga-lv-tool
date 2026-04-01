@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getUser } from "@/lib/auth/get-user";
+import { normalizeEditableTitleInput } from "@/lib/analysisDisplayTitle";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -47,6 +48,97 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
   }
 
   return NextResponse.json({ item: data });
+}
+
+/**
+ * Teilaktualisierung: optional `result_json` (Merge oberster Ebene) und/oder `project_name` über `projectName`.
+ */
+export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const user = await getUser().catch(() => null);
+  if (!user) {
+    return NextResponse.json({ error: "Nicht angemeldet" }, { status: 401 });
+  }
+
+  const supabase = getSupabase();
+  if (!supabase) {
+    return NextResponse.json({ error: "Supabase nicht konfiguriert" }, { status: 503 });
+  }
+
+  const { id } = await context.params;
+  if (!id) {
+    return NextResponse.json({ error: "id erforderlich" }, { status: 400 });
+  }
+
+  let body: { resultJsonMerge?: Record<string, unknown>; projectName?: string | null };
+  try {
+    body = (await req.json()) as { resultJsonMerge?: Record<string, unknown>; projectName?: string | null };
+  } catch {
+    return NextResponse.json({ error: "Ungültiges JSON" }, { status: 400 });
+  }
+
+  const hasMerge =
+    body.resultJsonMerge != null && typeof body.resultJsonMerge === "object" && !Array.isArray(body.resultJsonMerge);
+  const hasTitle = body.projectName !== undefined;
+
+  if (!hasMerge && !hasTitle) {
+    return NextResponse.json({ error: "resultJsonMerge und/oder projectName erforderlich" }, { status: 400 });
+  }
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from("analyse_runs")
+    .select("id, result_json, file_name, project_name")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (fetchErr) {
+    const isRls = fetchErr.message?.includes("row-level security");
+    const msg = isRls
+      ? "Lesen durch RLS blockiert. SUPABASE_SERVICE_ROLE_KEY setzen oder RLS-Policy für analyse_runs anlegen."
+      : fetchErr.message;
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
+  if (!existing) {
+    return NextResponse.json({ error: "Analyse nicht gefunden" }, { status: 404 });
+  }
+
+  const updates: Record<string, unknown> = {};
+
+  if (hasMerge) {
+    const prev =
+      existing.result_json != null && typeof existing.result_json === "object" && !Array.isArray(existing.result_json)
+        ? (existing.result_json as Record<string, unknown>)
+        : {};
+    const merged: Record<string, unknown> = { ...prev, ...body.resultJsonMerge! };
+    updates.result_json = merged;
+  }
+
+  if (hasTitle) {
+    updates.project_name = normalizeEditableTitleInput(body.projectName, existing.file_name);
+  }
+
+  const { data: updated, error: updateErr } = await supabase
+    .from("analyse_runs")
+    .update(updates)
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select("id, created_at, project_name, file_name, score, status, management_summary, result_json")
+    .maybeSingle();
+
+  if (updateErr) {
+    const isRls = updateErr.message?.includes("row-level security");
+    const msg = isRls
+      ? "Update durch RLS blockiert. SUPABASE_SERVICE_ROLE_KEY setzen oder RLS-Policy für analyse_runs anlegen."
+      : updateErr.message;
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
+  if (!updated) {
+    return NextResponse.json({ error: "Analyse nicht gefunden oder kein Zugriff" }, { status: 404 });
+  }
+
+  return NextResponse.json({ ok: true, item: updated });
 }
 
 /**

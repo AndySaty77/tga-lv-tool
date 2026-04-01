@@ -5,6 +5,7 @@ import { buildManagementSummary, type ManagementSummaryInput } from "@/lib/manag
 import type { PlanId } from "@/lib/billing/plans";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { canCreateAnalysis, incrementAnalysisUsedTotal } from "@/lib/billing/usage";
+import { resolveAnalysisTitleForInsert } from "@/lib/analysisDisplayTitle";
 
 type Payload = {
   projectName?: string | null;
@@ -67,12 +68,7 @@ export async function POST(req: Request) {
     }
   }
 
-  const projectName =
-    typeof body.projectName === "string" && body.projectName.trim().length > 0
-      ? body.projectName.trim()
-      : typeof body.fileName === "string" && body.fileName.trim().length > 0
-        ? body.fileName.trim()
-        : "Unbenannte Analyse";
+  const projectName = resolveAnalysisTitleForInsert(body.projectName, body.fileName);
 
   const fileName = typeof body.fileName === "string" && body.fileName.trim().length > 0 ? body.fileName.trim() : null;
   const score = body.score != null && Number.isFinite(Number(body.score)) ? Number(body.score) : null;

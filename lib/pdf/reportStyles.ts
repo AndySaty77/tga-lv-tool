@@ -32,6 +32,22 @@ export const reportStyles = `
     border-bottom: 1pt solid #333;
     page-break-after: avoid;
   }
+  .report-header-main h1 {
+    margin: 4pt 0 6pt;
+    font-size: 17pt;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #111;
+    line-height: 1.2;
+  }
+  .report-doc-label {
+    margin: 0 0 2pt;
+    font-size: 8.5pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #666;
+  }
   .report-header h1 {
     margin: 0 0 4pt;
     font-size: 16pt;
@@ -46,6 +62,34 @@ export const reportStyles = `
   .report-meta span + span::before {
     content: " · ";
     color: #999;
+  }
+
+  .key-facts-grid {
+    display: table;
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9pt;
+    color: #333;
+    page-break-inside: avoid;
+  }
+  .key-fact-row {
+    display: table-row;
+  }
+  .key-fact-label {
+    display: table-cell;
+    width: 40%;
+    padding: 4pt 8pt 4pt 0;
+    font-weight: 600;
+    color: #444;
+    vertical-align: top;
+    border-bottom: 1pt solid #eee;
+  }
+  .key-fact-value {
+    display: table-cell;
+    padding: 4pt 0;
+    vertical-align: top;
+    border-bottom: 1pt solid #eee;
+    line-height: 1.45;
   }
 
   .page-one-block {
@@ -82,9 +126,177 @@ export const reportStyles = `
   }
 
   .section {
-    margin-bottom: 14pt;
+    margin-bottom: 16pt;
+    page-break-inside: auto;
+  }
+  .section-priority {
     page-break-inside: avoid;
   }
+  .section-kpi-wrap .kpi-panel {
+    page-break-inside: avoid;
+  }
+  .section-context .subsection-title {
+    margin: 12pt 0 6pt;
+    font-size: 10pt;
+    font-weight: 700;
+    color: #333;
+    page-break-after: avoid;
+  }
+  .section-context .subsection-title:first-of-type {
+    margin-top: 0;
+  }
+
+  .section-work {
+    page-break-inside: auto;
+  }
+  .work-block-list {
+    margin-top: 4pt;
+  }
+  .work-list-item {
+    margin-bottom: 10pt;
+    padding-bottom: 8pt;
+    border-bottom: 1pt solid #eee;
+  }
+  .work-list-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  .work-list-meta {
+    font-size: 8.5pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #666;
+    margin-bottom: 3pt;
+  }
+  .work-list-text {
+    font-size: 10pt;
+    line-height: 1.5;
+    color: #222;
+  }
+  .work-list-footer {
+    margin-top: 4pt;
+  }
+
+  .strategy-blocks {
+    margin-top: 6pt;
+  }
+  .strategy-block {
+    margin-bottom: 12pt;
+    padding: 10pt 12pt;
+    background: #fafbfc;
+    border: 1pt solid #e4e4e4;
+    border-radius: 4pt;
+    page-break-inside: avoid;
+  }
+  .strategy-block-title {
+    margin: 0 0 6pt;
+    font-size: 10pt;
+    font-weight: 700;
+    color: #1a1a1a;
+    page-break-after: avoid;
+  }
+  .strategy-block-body p {
+    margin: 0;
+    font-size: 10pt;
+    line-height: 1.55;
+    color: #333;
+  }
+  .strategy-list {
+    margin: 0;
+    padding-left: 18pt;
+  }
+  .strategy-list li {
+    margin-bottom: 5pt;
+    line-height: 1.45;
+  }
+
+  .section-nachtrag {
+    page-break-before: always;
+    margin-top: 4pt;
+    padding: 12pt 14pt 14pt;
+    border-left: 4pt solid #2c5282;
+    background: linear-gradient(to right, #f0f6fc 0%, #fafbfc 28%);
+    border-radius: 0 6pt 6pt 0;
+  }
+  .section-nachtrag .section-title {
+    border-bottom-color: #cbd5e0;
+  }
+
+  .section-appendix {
+    margin-top: 6pt;
+    padding-top: 10pt;
+    border-top: 1pt dashed #ccc;
+  }
+  .section-lead {
+    margin: 0 0 8pt;
+    font-size: 9pt;
+    color: #555;
+    line-height: 1.45;
+  }
+  .section-title-sub {
+    font-size: 10pt;
+    text-transform: none;
+    letter-spacing: 0;
+    color: #444;
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .next-steps-list {
+    margin: 0;
+    padding-left: 18pt;
+    counter-reset: step;
+  }
+  .next-steps-list li {
+    margin-bottom: 8pt;
+    line-height: 1.5;
+    padding-left: 4pt;
+  }
+
+  .top-risks-block {
+    margin-top: 4pt;
+  }
+  .top-risk-item {
+    margin-bottom: 10pt;
+    padding: 8pt 10pt;
+    background: #fafafa;
+    border: 1pt solid #eaeaea;
+    border-radius: 4pt;
+    page-break-inside: avoid;
+  }
+  .top-risk-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6pt 10pt;
+    margin-bottom: 4pt;
+  }
+  .top-risk-title {
+    font-weight: 700;
+    font-size: 10pt;
+    color: #1a1a1a;
+    flex: 1 1 60%;
+  }
+  .top-risk-meta {
+    font-size: 8.5pt;
+    color: #555;
+    background: #eee;
+    padding: 2pt 6pt;
+    border-radius: 3pt;
+  }
+  .top-risk-sev {
+    font-size: 8.5pt;
+    font-weight: 600;
+    color: #444;
+  }
+  .top-risk-detail {
+    font-size: 9pt;
+    color: #444;
+    line-height: 1.45;
+    padding-left: 0;
+  }
+
   .section-title {
     margin: 0 0 8pt;
     font-size: 11pt;

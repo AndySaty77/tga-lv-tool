@@ -26,10 +26,43 @@ import { SectionCard, StatusBadge } from "@/components/ui";
 import { colors as themeColors } from "@/lib/ui/theme";
 import Link from "next/link";
 import { appTheme as T } from "@/components/app/appTheme";
+import { getAnalysisDisplayTitle } from "@/lib/analysisDisplayTitle";
+import { computeSavedReportCompleteness } from "@/lib/savedReportCompleteness";
 import type { PlanId } from "@/lib/billing/plans";
 
 /** Einheitliches Design für alle Tabs (Rückfragen, Risiken, Angebotsklarstellungen, Admin). */
 const D = PAGE_DESIGN;
+
+/** Kundenroute (/app/analyse): Dark-Oberflächen wie Header und gespeicherte Berichte (appTheme). */
+const CX = {
+  card: T.card,
+  surface: T.surface,
+  border: T.border,
+  text: T.text,
+  muted: T.muted,
+  faint: T.faint,
+  accent: T.accent,
+  shadow: "0 1px 3px rgba(0,0,0,0.15)",
+  /** Intro-/Hinweisboxen (ersetzt helles Blau) */
+  intro: "rgba(224, 124, 94, 0.12)",
+  chip: "rgba(255,255,255,0.1)",
+  barTrack: "rgba(255,255,255,0.1)",
+  inputBg: "rgba(255,255,255,0.06)",
+  filterBg: "rgba(255,255,255,0.05)",
+  rowHairline: "rgba(255,255,255,0.08)",
+} as const;
+
+/** Dark-Route: Oberflächen-Tokens für eingebettete Previews (ohne Konflikt mit PAGE_DESIGN-Literaltypen). */
+type CustomerSurfaceTokens = {
+  primary?: string;
+  cardBg?: string;
+  cardBorder?: string;
+  textPrimary?: string;
+  textSecondary?: string;
+  textMuted?: string;
+  filterBg?: string;
+  pageBg?: string;
+};
 
 type CategoryKey =
   | "vertrags_lv_risiken"
@@ -418,6 +451,33 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
   const canUseChangeOrder = !customerRoute || plan !== "free";
   const canUseAdvancedFeatures = !customerRoute || plan !== "free";
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  /** Nach /api/analyse/save: ID für PATCH (Rückfragen / Angebotsklarstellungen in result_json nachziehen). */
+  const savedAnalyseIdRef = useRef<string | null>(null);
+  /** Kundenroute: nach erfolgreichem Save — UI für CTA „Bericht öffnen“ (nur bei gültiger ID). */
+  const [savedReportBanner, setSavedReportBanner] = useState<{ id: string; titleHint: string } | null>(null);
+  const clearSavedReportBanner = React.useCallback(() => {
+    savedAnalyseIdRef.current = null;
+    setSavedReportBanner(null);
+  }, []);
+
+  const patchSavedAnalysisResultJson = React.useCallback(async (resultJsonMerge: Record<string, unknown>) => {
+    if (!customerRoute) return;
+    const id = savedAnalyseIdRef.current;
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/analyse/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resultJsonMerge }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        console.error("[analyse PATCH]", j?.error ?? res.status);
+      }
+    } catch (e) {
+      console.error("[analyse PATCH]", e);
+    }
+  }, [customerRoute]);
 
   const [lvText, setLvText] = useState("");
   const [result, setResult] = useState<ScoreResult | null>(null);
@@ -622,6 +682,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || "Rückfragen fehlgeschlagen");
       setClarificationQuestions(data);
+      void patchSavedAnalysisResultJson({ clarificationQuestions: data });
     } catch {
       console.error("Clarification questions: Fehler");
       setClarificationQuestions(null);
@@ -658,6 +719,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || "Nachtragsanalyse fehlgeschlagen");
       setChangeOrderAnalysis(data as ChangeOrderResult);
+      void patchSavedAnalysisResultJson({ changeOrderAnalysis: data });
     } catch {
       console.error("Change order analysis: Fehler");
       setChangeOrderAnalysis(null);
@@ -688,6 +750,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || "Annahmen fehlgeschlagen");
       setOfferAssumptions(data);
+      void patchSavedAnalysisResultJson({ offerAssumptions: data });
     } catch {
       console.error("Offer assumptions: Fehler");
       setOfferAssumptions(null);
@@ -844,7 +907,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
 
   const analyze = async (
     textOverride?: string,
-    options?: { gaebPreviewData?: any; splitData?: SplitResult | null }
+    options?: { gaebPreviewData?: any; splitData?: SplitResult | null; sourceFileName?: string }
   ) => {
     const textToUse = (textOverride ?? lvText).trim();
     if (!textToUse) {
@@ -856,6 +919,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
     setLoading(true);
     setLoadingPhase("analyze");
     setResult(null);
+    clearSavedReportBanner();
     resetVortext();
 
     try {
@@ -959,14 +1023,21 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             }
           }
 
+          // Wichtig: fileMeta/lastFile sind im selben Takt wie setFileMeta noch stale (Closure vor Re-Render).
+          // Dateiname daher immer aus options.sourceFileName (loadFile) oder Fallback nach State.
+          const effectiveSourceFileName =
+            (typeof options?.sourceFileName === "string" && options.sourceFileName.trim() ? options.sourceFileName.trim() : null) ??
+            (typeof fileMeta?.name === "string" && fileMeta.name.trim() ? fileMeta.name.trim() : null) ??
+            (typeof lastFile?.name === "string" && lastFile.name.trim() ? lastFile.name.trim() : null);
+
           const projectName =
             nameFromKeyFacts ??
-            (typeof fileMeta?.name === "string" && fileMeta.name.trim() ? fileMeta.name.trim() : "Unbenannte Analyse");
+            (effectiveSourceFileName ?? "Unbenannte Analyse");
 
           const execSummary = (changeOrderAnalysis as ChangeOrderResult | null)?.offerStrategySummary?.executiveSummary;
           const payload = {
             projectName,
-            fileName: fileMeta?.name ?? null,
+            fileName: effectiveSourceFileName,
             score: data.total,
             status: "completed",
             managementSummary: typeof execSummary === "string" && execSummary.trim() ? execSummary : null,
@@ -982,13 +1053,29 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               split,
             },
           };
-          void fetch("/api/analyse/save", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          }).catch(() => {
-            // Persistenz-Fehler bewusst nicht in die Analyse-UI hochreichen
-          });
+          try {
+            const saveRes = await fetch("/api/analyse/save", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            const saveJson = (await saveRes.json().catch(() => ({}))) as {
+              item?: { id?: string; project_name?: string | null; file_name?: string | null };
+            };
+            const savedRow = saveJson?.item;
+            if (saveRes.ok && savedRow?.id && typeof savedRow.id === "string") {
+              const savedId: string = savedRow.id;
+              savedAnalyseIdRef.current = savedId;
+              setSavedReportBanner({
+                id: savedId,
+                titleHint: getAnalysisDisplayTitle(savedRow.project_name, savedRow.file_name),
+              });
+            } else {
+              clearSavedReportBanner();
+            }
+          } catch {
+            clearSavedReportBanner();
+          }
         } catch {
           // Fehler bei der Vorbereitung der Persistenz ignorieren
         }
@@ -1031,6 +1118,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
   const loadFile = async (file: File) => {
     setError(null);
     setResult(null);
+    clearSavedReportBanner();
     resetVortext();
     resetGaebPreview();
     resetSplit();
@@ -1065,7 +1153,11 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
       if (autoAnalyze) {
         setLoadingPhase("analyze");
         setAnalysisStep(0);
-        await analyze(text, { gaebPreviewData: previewData ?? undefined, splitData: splitData ?? undefined });
+        await analyze(text, {
+          gaebPreviewData: previewData ?? undefined,
+          splitData: splitData ?? undefined,
+          sourceFileName: file.name,
+        });
       }
     } catch (e: any) {
       setError(e?.message ?? "Fehler beim Laden oder bei der Analyse");
@@ -1557,6 +1649,11 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
 
   const hasResult = Boolean(result && !loading);
 
+  const savedReportCompleteness = useMemo(() => {
+    if (!customerRoute || !savedReportBanner) return null;
+    return computeSavedReportCompleteness(clarificationQuestions, offerAssumptions, changeOrderAnalysis);
+  }, [customerRoute, savedReportBanner, clarificationQuestions, offerAssumptions, changeOrderAnalysis]);
+
   return (
     <div
       className={customerRoute ? "tga-analyse-dark" : undefined}
@@ -1741,7 +1838,17 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
           {hasResult && (
             <button
               type="button"
-              onClick={() => { setLvText(""); setResult(null); setError(null); setFileMeta(null); setLastFile(null); resetVortext(); resetGaebPreview(); resetSplit(); }}
+              onClick={() => {
+                setLvText("");
+                setResult(null);
+                setError(null);
+                setFileMeta(null);
+                setLastFile(null);
+                clearSavedReportBanner();
+                resetVortext();
+                resetGaebPreview();
+                resetSplit();
+              }}
               style={{
                 padding: customerRoute ? "8px 14px" : "6px 12px",
                 borderRadius: customerRoute ? T.radiusSm : D.radiusButton,
@@ -2042,6 +2149,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               setError(null);
               setFileMeta(null);
               setLastFile(null);
+              clearSavedReportBanner();
               resetVortext();
               resetGaebPreview();
               resetSplit();
@@ -2117,15 +2225,26 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
 
       {/* Dateistruktur / Struktur LV (nur in erweiterter Ansicht) – heller Content-Bereich, eigene Light-Logik (keine Vererbung von T.text) */}
       {isExpertMode && (
-      <div className="tga-expert-light-panel" style={{ marginTop: 14, border: "1px solid #e2e8f0", borderRadius: 14, padding: 16, background: "#fff", color: D.textPrimary }}>
+      <div
+        className={customerRoute ? "tga-expert-dark-panel" : "tga-expert-light-panel"}
+        style={{
+          marginTop: 14,
+          border: customerRoute ? `1px solid ${CX.border}` : "1px solid #e2e8f0",
+          borderRadius: customerRoute ? T.radius : 14,
+          padding: 16,
+          background: customerRoute ? CX.card : "#fff",
+          color: customerRoute ? CX.text : D.textPrimary,
+          boxShadow: customerRoute ? CX.shadow : undefined,
+        }}
+      >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-          <div style={{ fontSize: 14, color: D.textSecondary, fontWeight: 900 }}>{customerRoute ? "Dateistruktur" : "Struktur des Leistungsverzeichnisses"}</div>
-          <div style={{ color: D.textSecondary, fontWeight: 700 }}>
+          <div style={{ fontSize: 14, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 900 }}>{customerRoute ? "Dateistruktur" : "Struktur des Leistungsverzeichnisses"}</div>
+          <div style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 700 }}>
             {gaebPreviewLoading ? "Lade…" : gaebPreview ? `${gaebPreview.filename} (${fmtKB(gaebPreview.size)})` : "—"}
           </div>
         </div>
 
-        <p style={{ margin: "10px 0 0", fontSize: 12, color: D.textMuted, lineHeight: 1.5, maxWidth: 720 }}>
+        <p style={{ margin: "10px 0 0", fontSize: 12, color: customerRoute ? CX.faint : D.textMuted, lineHeight: 1.5, maxWidth: 720 }}>
           <strong>Struktur</strong> zeigt die erkannte GAEB-/LV-Gliederung. <strong>Analysebasis Vorbemerkungen</strong> und <strong>Analysebasis Positionen</strong> zeigen den bereinigten Text, auf dem die Analyse tatsächlich basiert. <strong>Diagnose / Rohdaten</strong> ist nur für technische Prüfung gedacht.
         </p>
 
@@ -2151,9 +2270,17 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                   style={{
                     padding: t === "raw" ? "6px 9px" : "8px 10px",
                     borderRadius: 10,
-                    border: `1px solid ${t === "raw" ? "#cbd5e1" : "#e2e8f0"}`,
-                    background: gaebTab === t ? (t === "raw" ? "#64748b" : (customerRoute ? D.primary : "#111")) : (t === "raw" ? "#f1f5f9" : "#fff"),
-                    color: gaebTab === t ? "#fff" : (t === "raw" ? "#64748b" : D.textPrimary),
+                    border: `1px solid ${customerRoute ? CX.border : t === "raw" ? "#cbd5e1" : "#e2e8f0"}`,
+                    background: gaebTab === t
+                      ? (t === "raw" ? "#64748b" : customerRoute ? T.accent : "#111")
+                      : customerRoute
+                        ? (t === "raw" ? "rgba(255,255,255,0.08)" : CX.surface)
+                        : (t === "raw" ? "#f1f5f9" : "#fff"),
+                    color: gaebTab === t
+                      ? (t === "raw" ? "#fff" : customerRoute ? "#0c1222" : "#fff")
+                      : customerRoute
+                        ? (t === "raw" ? CX.faint : CX.muted)
+                        : (t === "raw" ? "#64748b" : D.textPrimary),
                     cursor: "pointer",
                     fontWeight: t === "raw" ? 600 : 700,
                     fontSize: t === "raw" ? 12 : undefined,
@@ -2173,12 +2300,12 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                 <button
                   type="button"
                   onClick={() => setLvText(gaebTextForTab || "")}
-                  style={{
+                    style={{
                     padding: "8px 10px",
                     borderRadius: 10,
-                    border: `1px solid ${D.textPrimary}`,
-                    background: "#fff",
-                    color: D.textPrimary,
+                    border: `1px solid ${customerRoute ? CX.border : D.textPrimary}`,
+                    background: customerRoute ? CX.surface : "#fff",
+                    color: customerRoute ? CX.text : D.textPrimary,
                     cursor: "pointer",
                     fontWeight: 700,
                   }}
@@ -2194,10 +2321,23 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                   normalized={gaebPreview.normalized}
                   debug={gaebPreview.debug}
                   customerRoute={!!customerRoute}
-                  customerDesign={customerRoute ? D : undefined}
+                  customerDesign={
+                    customerRoute
+                      ? {
+                          primary: D.primary,
+                          cardBg: CX.card,
+                          cardBorder: CX.border,
+                          textPrimary: CX.text,
+                          textSecondary: CX.muted,
+                          textMuted: CX.faint,
+                          pageBg: T.bg,
+                          filterBg: CX.filterBg,
+                        }
+                      : undefined
+                  }
                 />
               ) : gaebTab === "structure" && !gaebPreview?.normalized ? (
-                <div style={{ padding: 12, color: D.textMuted, fontSize: 13 }}>Keine Strukturansicht verfügbar (nur bei GAEB-Daten mit Gliederung).</div>
+                <div style={{ padding: 12, color: customerRoute ? CX.faint : D.textMuted, fontSize: 13 }}>Keine Strukturansicht verfügbar (nur bei GAEB-Daten mit Gliederung).</div>
               ) : gaebTab === "raw" ? (
                 gaebPreview ? (
                   <pre
@@ -2205,9 +2345,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                       margin: 0,
                       padding: 12,
                       borderRadius: 12,
-                      border: "1px solid #e2e8f0",
-                      background: "#f8fafc",
-                      color: D.textPrimary,
+                      border: customerRoute ? `1px solid ${CX.border}` : "1px solid #e2e8f0",
+                      background: customerRoute ? CX.surface : "#f8fafc",
+                      color: customerRoute ? CX.text : D.textPrimary,
                       fontSize: 12,
                       whiteSpace: "pre-wrap",
                       maxHeight: 320,
@@ -2218,7 +2358,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                     {gaebTextForTab}
                   </pre>
                 ) : (
-                  <div style={{ padding: 12, color: D.textMuted, fontSize: 13 }}>Rohdaten nur nach Datei-Upload verfügbar.</div>
+                  <div style={{ padding: 12, color: customerRoute ? CX.faint : D.textMuted, fontSize: 13 }}>Rohdaten nur nach Datei-Upload verfügbar.</div>
                 )
               ) : (
                 <Lesansicht
@@ -2227,8 +2367,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                   styles={
                     customerRoute
                       ? {
-                          textPrimary: D.textPrimary,
-                          textSecondary: D.textSecondary,
+                          textPrimary: CX.text,
+                          textSecondary: CX.muted,
                         }
                       : undefined
                   }
@@ -2236,7 +2376,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               )}
             </div>
 
-            <div style={{ marginTop: 8, color: D.textSecondary, fontSize: 12, fontWeight: 600 }}>
+            <div style={{ marginTop: 8, color: customerRoute ? CX.muted : D.textSecondary, fontSize: 12, fontWeight: 600 }}>
               {split ? (
                 <>
                   Automatische Textanalyse: Einleitung {effectiveVortextLen} Zeichen • Positionen {effectivePositionsLen} Zeichen
@@ -2267,6 +2407,74 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
       {/* Results: Tabs + Inhalt (kompakt unter Header/Upload-Leiste) */}
       {result && !loading && (
         <div style={{ marginTop: hasResult ? (customerRoute ? 12 : 10) : (customerRoute ? D.spacingSection : 18) }}>
+          {customerRoute && savedReportBanner && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: "10px 14px",
+                borderRadius: T.radiusSm,
+                border: `1px solid ${T.border}`,
+                background: T.surface,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                fontSize: 13,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: "8px 14px",
+                }}
+              >
+                <span style={{ fontWeight: 600, color: T.text }}>Analyse gespeichert.</span>
+                <span
+                  style={{
+                    color: T.muted,
+                    flex: "1 1 140px",
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={savedReportBanner.titleHint}
+                >
+                  {savedReportBanner.titleHint}
+                </span>
+                <Link
+                  href={`/app/analysen/${savedReportBanner.id}`}
+                  style={{
+                    fontWeight: 700,
+                    fontSize: 13,
+                    color: "#0c1222",
+                    background: T.accent,
+                    padding: "6px 14px",
+                    borderRadius: T.radiusSm,
+                    textDecoration: "none",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Bericht öffnen
+                </Link>
+              </div>
+              {savedReportCompleteness && (
+                <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.45 }}>
+                  {savedReportCompleteness.complete ? (
+                    <span style={{ color: T.text, fontWeight: 600 }}>Bericht vollständig</span>
+                  ) : (
+                    <>
+                      <span style={{ color: T.text, fontWeight: 600 }}>Bericht noch nicht vollständig</span>
+                      <span style={{ display: "block", marginTop: 4 }}>
+                        Es fehlen noch: {savedReportCompleteness.missingLabels.join(", ")}
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {/* Tab-Leiste */}
           <div
             style={{
@@ -2334,15 +2542,15 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
           <div style={{ display: "flex", flexDirection: "column", gap: customerRoute ? D.spacingCard : 12, maxHeight: "calc(100vh - 220px)", minHeight: 0 }}>
             {/* Erkannte Gewerke – kompakte Kopfzone (defensiv: nur wenn detectedTrades vorhanden) */}
             {(result as any)?.detectedTrades != null && (
-              <div style={{ background: customerRoute ? D.cardBg : "#fff", border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? "12px 16px" : "10px 14px", boxShadow: customerRoute ? D.cardShadow : undefined }}>
-                <div style={{ fontSize: 11, color: customerRoute ? D.textMuted : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>Erkannte Gewerke</div>
+              <div style={{ background: customerRoute ? CX.card : "#fff", border: customerRoute ? `1px solid ${CX.border}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? "12px 16px" : "10px 14px", boxShadow: customerRoute ? CX.shadow : undefined }}>
+                <div style={{ fontSize: 11, color: customerRoute ? CX.faint : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>Erkannte Gewerke</div>
                 {(() => {
                   const dt = (result as any).detectedTrades as DetectedTradesResult | undefined;
                   const primary = dt?.primaryTrade ?? null;
                   const secondary = (dt?.secondaryTrades ?? []) as string[];
                   const confidence = dt?.confidence;
                   if (!primary && (!secondary || secondary.length === 0)) {
-                    return <span style={{ fontSize: 14, color: customerRoute ? D.textMuted : "#9ca3af", fontStyle: "italic" }}>Keine eindeutige Zuordnung</span>;
+                    return <span style={{ fontSize: 14, color: customerRoute ? CX.faint : "#9ca3af", fontStyle: "italic" }}>Keine eindeutige Zuordnung</span>;
                   }
                   const confText = typeof confidence === "number" && Number.isFinite(confidence)
                     ? formatTradeConfidencePercent(confidence)
@@ -2350,17 +2558,17 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                   return (
                     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
                       {primary && (
-                        <span style={{ fontSize: 16, fontWeight: 700, color: customerRoute ? D.textPrimary : "#111" }}>{primary}</span>
+                        <span style={{ fontSize: 16, fontWeight: 700, color: customerRoute ? CX.text : "#111" }}>{primary}</span>
                       )}
                       {secondary.length > 0 && (
                         <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                           {secondary.map((s) => (
-                            <span key={s} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 8, background: customerRoute ? "rgba(0,0,0,0.06)" : "#f3f4f6", color: customerRoute ? D.textSecondary : "#4b5563", fontWeight: 500 }}>{s}</span>
+                            <span key={s} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 8, background: customerRoute ? CX.chip : "#f3f4f6", color: customerRoute ? CX.muted : "#4b5563", fontWeight: 500 }}>{s}</span>
                           ))}
                         </span>
                       )}
                       {(confText && confText !== "—") && (
-                        <span style={{ fontSize: 12, color: customerRoute ? D.textMuted : "#9ca3af", fontWeight: 500 }}>Sicherheit: {confText}</span>
+                        <span style={{ fontSize: 12, color: customerRoute ? CX.faint : "#9ca3af", fontWeight: 500 }}>Sicherheit: {confText}</span>
                       )}
                     </div>
                   );
@@ -2369,27 +2577,27 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             )}
             {/* Zeile 1: KPI-Karten Komplexität | Gesamt-Risiko | Claim-Potenzial */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: customerRoute ? 12 : 10 }}>
-              <div style={{ background: customerRoute ? D.cardBg : "#fff", border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? "14px 16px" : "12px 14px", boxShadow: customerRoute ? D.cardShadow : undefined }}>
-                <div style={{ fontSize: 11, color: customerRoute ? D.textMuted : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.complexity}</div>
-                <div style={{ marginTop: 4, fontSize: 28, fontWeight: 700, color: customerRoute ? D.textPrimary : "#111" }}>
+              <div style={{ background: customerRoute ? CX.card : "#fff", border: customerRoute ? `1px solid ${CX.border}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? "14px 16px" : "12px 14px", boxShadow: customerRoute ? CX.shadow : undefined }}>
+                <div style={{ fontSize: 11, color: customerRoute ? CX.faint : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.complexity}</div>
+                <div style={{ marginTop: 4, fontSize: 28, fontWeight: 700, color: customerRoute ? CX.text : "#111" }}>
                   {clamp0_100(result.total)}
-                  <span style={{ fontSize: 14, color: customerRoute ? D.textMuted : "#9ca3af", fontWeight: 500 }}> / 100</span>
+                  <span style={{ fontSize: 14, color: customerRoute ? CX.faint : "#9ca3af", fontWeight: 500 }}> / 100</span>
                 </div>
               </div>
-              <div style={{ background: customerRoute ? D.cardBg : "#fff", border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? "14px 16px" : "12px 14px", boxShadow: customerRoute ? D.cardShadow : undefined }}>
-                <div style={{ fontSize: 11, color: customerRoute ? D.textMuted : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.totalRisk}</div>
+              <div style={{ background: customerRoute ? CX.card : "#fff", border: customerRoute ? `1px solid ${CX.border}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? "14px 16px" : "12px 14px", boxShadow: customerRoute ? CX.shadow : undefined }}>
+                <div style={{ fontSize: 11, color: customerRoute ? CX.faint : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.totalRisk}</div>
                 <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 20 }}>{totalAmp.dot}</span>
                   <span style={{ fontSize: 18, fontWeight: 700, color: totalAmp.tone }}>{totalAmp.text}</span>
                 </div>
               </div>
               {/* Claim-Potenzial: nur aus Nachtragsanalyse (Strang B), nicht aus Gesamt-Score – sonst "Nicht ermittelt" */}
-              <div style={{ background: customerRoute ? D.cardBg : "#fff", border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? "14px 16px" : "12px 14px", boxShadow: customerRoute ? D.cardShadow : undefined }}>
-                <div style={{ fontSize: 11, color: customerRoute ? D.textMuted : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.claimPotential}</div>
-                <div style={{ marginTop: 4, fontSize: 16, fontWeight: 700, color: customerRoute ? D.textPrimary : "#111" }}>
+              <div style={{ background: customerRoute ? CX.card : "#fff", border: customerRoute ? `1px solid ${CX.border}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? "14px 16px" : "12px 14px", boxShadow: customerRoute ? CX.shadow : undefined }}>
+                <div style={{ fontSize: 11, color: customerRoute ? CX.faint : "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.claimPotential}</div>
+                <div style={{ marginTop: 4, fontSize: 16, fontWeight: 700, color: customerRoute ? CX.text : "#111" }}>
                   {(() => {
                     if (!changeOrderAnalysis) {
-                      return <span style={{ color: customerRoute ? D.textMuted : "#9ca3af", fontWeight: 600 }}>Nicht ermittelt</span>;
+                      return <span style={{ color: customerRoute ? CX.faint : "#9ca3af", fontWeight: 600 }}>Nicht ermittelt</span>;
                     }
                     const opps = deduplicatedOpportunities;
                     const hasHigh = opps.some((o) => (o.potential ?? "").toString().toLowerCase() === "high");
@@ -2404,16 +2612,16 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
 
             {/* Zeile 2: Risiko-Ampel + Top Findings nebeneinander */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: customerRoute ? D.spacingCard : 12, flex: 1, minHeight: 0 }}>
-              <div style={{ background: customerRoute ? D.cardBg : "#fff", border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? D.spacingCard : 12, overflow: "auto", boxShadow: customerRoute ? D.cardShadow : undefined }}>
-                <div style={{ fontSize: 12, color: customerRoute ? D.textSecondary : "#6b7280", fontWeight: 700, marginBottom: 10 }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.riskAmpelCategories}</div>
+              <div style={{ background: customerRoute ? CX.card : "#fff", border: customerRoute ? `1px solid ${CX.border}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? D.spacingCard : 12, overflow: "auto", boxShadow: customerRoute ? CX.shadow : undefined }}>
+                <div style={{ fontSize: 12, color: customerRoute ? CX.muted : "#6b7280", fontWeight: 700, marginBottom: 10 }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.riskAmpelCategories}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {CATEGORY_ORDER.map((k) => {
                     const v = clamp0_100(result.perCategory?.[k] ?? 0);
                     const amp = traffic(v);
                     return (
                       <div key={k} style={{ display: "grid", gridTemplateColumns: "140px 1fr 28px", gap: 8, alignItems: "center", fontSize: 12 }}>
-                        <span style={{ color: customerRoute ? D.textPrimary : "#374151", fontWeight: 500 }}>{catLabel(k)}</span>
-                        <div style={{ height: 8, background: "#f3f4f6", borderRadius: 4, overflow: "hidden" }}>
+                        <span style={{ color: customerRoute ? CX.text : "#374151", fontWeight: 500 }}>{catLabel(k)}</span>
+                        <div style={{ height: 8, background: customerRoute ? CX.barTrack : "#f3f4f6", borderRadius: 4, overflow: "hidden" }}>
                           <div style={{ width: `${v}%`, height: "100%", background: amp.tone, borderRadius: 4 }} />
                         </div>
                         <span style={{ fontWeight: 700, color: amp.tone }}>{amp.dot}</span>
@@ -2422,16 +2630,16 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                   })}
                 </div>
               </div>
-              <div style={{ background: customerRoute ? D.cardBg : "#fff", border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? D.spacingCard : 12, overflow: "auto", boxShadow: customerRoute ? D.cardShadow : undefined }}>
-                <div style={{ fontSize: 12, color: customerRoute ? D.textSecondary : "#6b7280", fontWeight: 700, marginBottom: 10 }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.topFindings}</div>
+              <div style={{ background: customerRoute ? CX.card : "#fff", border: customerRoute ? `1px solid ${CX.border}` : "1px solid #e5e7eb", borderRadius: customerRoute ? D.cardRadius : 12, padding: customerRoute ? D.spacingCard : 12, overflow: "auto", boxShadow: customerRoute ? CX.shadow : undefined }}>
+                <div style={{ fontSize: 12, color: customerRoute ? CX.muted : "#6b7280", fontWeight: 700, marginBottom: 10 }}>{DEFAULT_TEXTS_CONFIG.customerUI.kpiLabels.topFindings}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {(filteredFindings.slice(0, 8)).length === 0 ? (
-                    <div style={{ color: customerRoute ? D.textMuted : "#9ca3af", fontSize: 13 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noTreffer}</div>
+                    <div style={{ color: customerRoute ? CX.faint : "#9ca3af", fontSize: 13 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noTreffer}</div>
                   ) : (
                     filteredFindings.slice(0, 8).map((f) => (
-                      <div key={f.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0", borderBottom: "1px solid #f3f4f6" }}>
+                      <div key={f.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0", borderBottom: customerRoute ? `1px solid ${CX.rowHairline}` : "1px solid #f3f4f6" }}>
                         <span style={{ flexShrink: 0 }}>{severityDot(f.severity)}</span>
-                        <span style={{ fontSize: 13, color: customerRoute ? D.textPrimary : "#111", fontWeight: 500, lineHeight: 1.35 }}>{sanitizeForDisplay(f.title ?? "")}</span>
+                        <span style={{ fontSize: 13, color: customerRoute ? CX.text : "#111", fontWeight: 500, lineHeight: 1.35 }}>{sanitizeForDisplay(f.title ?? "")}</span>
                       </div>
                     ))
                   )}
@@ -2445,20 +2653,20 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
           {/* Tab-Inhalt: Risiken */}
           {resultTab === "risiken" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: D.spacingCard }}>
-          <SectionCard accent="accent" style={{ marginBottom: 4, background: D.cardBg, borderColor: D.cardBorder }}>
-            <p style={{ margin: 0, color: D.textPrimary, fontSize: 14, lineHeight: 1.65 }}>
+          <SectionCard accent="accent" style={{ marginBottom: 4, background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
+            <p style={{ margin: 0, color: customerRoute ? CX.text : D.textPrimary, fontSize: 14, lineHeight: 1.65 }}>
               <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.risiken}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.risiken}
             </p>
           </SectionCard>
 
           {/* ===== Risiken im Einleitungstext ===== */}
-          <SectionCard accent="warning" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+          <SectionCard accent="warning" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
               <div>
-                <div style={{ fontSize: 14, color: D.textSecondary, fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenVortext}</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: D.textMuted, fontWeight: 500 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenVortextSub}</div>
+                <div style={{ fontSize: 14, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenVortext}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: customerRoute ? CX.faint : D.textMuted, fontWeight: 500 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenVortextSub}</div>
               </div>
-              <div style={{ color: D.textSecondary, fontWeight: 600 }}>
+              <div style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>
                 {vortextLoading ? "Analysiere…" : `${riskClauses.length} Treffer`}
               </div>
             </div>
@@ -2471,7 +2679,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             )}
 
             {!vortextLoading && !vortextError && riskClauses.length === 0 && (
-              <div style={{ marginTop: 10, color: D.textSecondary, fontWeight: D.fontWeightSection }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noRisikoformulierungen}</div>
+              <div style={{ marginTop: 10, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: D.fontWeightSection }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noRisikoformulierungen}</div>
             )}
 
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
@@ -2481,9 +2689,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                 const teaser = cleaned.length <= teaserLen ? cleaned : `${cleaned.slice(0, teaserLen)}…`;
                 const title = `${r.type || "Risiko"} · ${String(r.riskLevel).toUpperCase()}`;
                 return (
-                  <div key={idx} style={{ border: `1px solid ${D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: D.cardBg }}>
+                  <div key={idx} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                      <div style={{ fontWeight: D.fontWeightSection, color: D.textPrimary, fontSize: D.fontSizeCardTitle }}>
+                      <div style={{ fontWeight: D.fontWeightSection, color: customerRoute ? CX.text : D.textPrimary, fontSize: D.fontSizeCardTitle }}>
                         {riskIcon(r.riskLevel)} {r.type || "Risiko"}
                       </div>
                       <StatusBadge variant={(() => { const l = String(r.riskLevel); return l === "high" || l === "sehr_hoch" ? "danger" : l === "medium" || l === "mittel" ? "warning" : "success"; })()} small>
@@ -2496,7 +2704,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         marginTop: 8,
                         fontSize: 14,
                         lineHeight: 1.5,
-                        color: D.textPrimary,
+                        color: customerRoute ? CX.text : D.textPrimary,
                       }}
                     >
                       {teaser}
@@ -2509,9 +2717,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         marginTop: 10,
                         padding: "8px 14px",
                         borderRadius: 8,
-                        border: `1px solid ${D.cardBorder}`,
+                        border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`,
                         background: "transparent",
-                        color: D.primary,
+                        color: customerRoute ? T.accent : D.primary,
                         fontSize: 13,
                         fontWeight: 600,
                         cursor: "pointer",
@@ -2531,19 +2739,24 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                 longText={riskClauses[riskClauseDetailIndex].text}
                 interpretation={riskClauses[riskClauseDetailIndex].interpretation}
                 onClose={() => setRiskClauseDetailIndex(null)}
-                theme={{ textPrimary: D.textPrimary, textSecondary: D.textSecondary, cardBg: D.cardBg, cardBorder: D.cardBorder }}
+                theme={{
+                  textPrimary: customerRoute ? CX.text : D.textPrimary,
+                  textSecondary: customerRoute ? CX.muted : D.textSecondary,
+                  cardBg: customerRoute ? CX.card : D.cardBg,
+                  cardBorder: customerRoute ? CX.border : D.cardBorder,
+                }}
               />
             )}
 
-            <div style={{ marginTop: 10, color: D.textMuted, fontSize: 12, fontWeight: 500 }}>
+            <div style={{ marginTop: 10, color: customerRoute ? CX.faint : D.textMuted, fontSize: 12, fontWeight: 500 }}>
               Einleitungstext aus automatischer Textanalyse.
             </div>
           </SectionCard>
 
           {/* Nachtragspotenzial (Strang B): Hinweis → Tab „Nachtragspotenzial“ */}
-          <SectionCard accent="secondary" style={{ marginTop: D.spacingCard, background: D.cardBg, borderColor: D.cardBorder }}>
-            <div style={{ fontSize: 14, color: D.textSecondary, fontWeight: 700, marginBottom: 8 }}>Nachtragspotenzial (Claim-Potenzial)</div>
-            <p style={{ margin: 0, fontSize: 13, color: D.textPrimary, lineHeight: 1.5 }}>
+          <SectionCard accent="secondary" style={{ marginTop: D.spacingCard, background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
+            <div style={{ fontSize: 14, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 700, marginBottom: 8 }}>Nachtragspotenzial (Claim-Potenzial)</div>
+            <p style={{ margin: 0, fontSize: 13, color: customerRoute ? CX.text : D.textPrimary, lineHeight: 1.5 }}>
               Die Nachtragsanalyse wird im Tab „{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}" ermittelt und angezeigt.
             </p>
             <button
@@ -2575,18 +2788,18 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               style={{
                 padding: customerRoute ? "18px 20px" : "14px 18px",
                 borderRadius: customerRoute ? D.cardRadius : 12,
-                background: customerRoute ? "#e8f4f8" : "#f0f4f8",
-                border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e2e8f0",
+                background: customerRoute ? CX.intro : "#f0f4f8",
+                border: customerRoute ? `1px solid ${CX.border}` : "1px solid #e2e8f0",
                 marginBottom: 4,
               }}
             >
-              <p style={{ margin: 0, color: customerRoute ? D.textPrimary : "#334155", fontSize: 14, lineHeight: 1.65 }}>
+              <p style={{ margin: 0, color: customerRoute ? CX.text : "#334155", fontSize: 14, lineHeight: 1.65 }}>
                 <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.vorbemerkungen}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.vorbemerkungen}
               </p>
             </div>
-            <div style={{ border: `1px solid ${D.cardBorder}`, borderRadius: D.cardRadiusLg, padding: D.spacingCard, background: D.cardBg, boxShadow: D.cardShadow }}>
+            <div style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: D.cardRadiusLg, padding: D.spacingCard, background: customerRoute ? CX.card : D.cardBg, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
               <div style={{ marginBottom: 16 }}>
-                <label htmlFor="vorbemerkungen-suche" style={{ display: "block", fontSize: 13, fontWeight: 600, color: customerRoute ? D.textSecondary : "#475569", marginBottom: 6 }}>
+                <label htmlFor="vorbemerkungen-suche" style={{ display: "block", fontSize: 13, fontWeight: 600, color: customerRoute ? CX.muted : "#475569", marginBottom: 6 }}>
                   In Vorbemerkungen suchen
                 </label>
                 <input
@@ -2603,22 +2816,22 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                     maxWidth: 360,
                     padding: "10px 14px",
                     borderRadius: customerRoute ? D.radiusButton : 10,
-                    border: `1px solid ${customerRoute ? D.cardBorder : "#e2e8f0"}`,
-                    background: "#fff",
+                    border: `1px solid ${customerRoute ? CX.border : "#e2e8f0"}`,
+                    background: customerRoute ? CX.inputBg : "#fff",
                     fontSize: 14,
-                    color: customerRoute ? D.textPrimary : "#0f172a",
+                    color: customerRoute ? CX.text : "#0f172a",
                   }}
                 />
               </div>
               {vorbemerkungenSearchQuery.trim() && (
                 <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                   {vorbemerkungenMatchCount === 0 ? (
-                    <span style={{ fontSize: 13, color: customerRoute ? D.textMuted : "#94a3b8" }}>
+                    <span style={{ fontSize: 13, color: customerRoute ? CX.faint : "#94a3b8" }}>
                       Keine Treffer für &quot;{vorbemerkungenSearchQuery.trim()}&quot;.
                     </span>
                   ) : (
                     <>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: customerRoute ? D.textSecondary : "#475569" }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: customerRoute ? CX.muted : "#475569" }}>
                         {vorbemerkungenMatchCount} {vorbemerkungenMatchCount === 1 ? "Treffer" : "Treffer"}
                       </span>
                       <button
@@ -2627,11 +2840,11 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         style={{
                           padding: "6px 12px",
                           borderRadius: 8,
-                          border: `1px solid ${customerRoute ? D.cardBorder : "#e2e8f0"}`,
-                          background: "#fff",
+                          border: `1px solid ${customerRoute ? CX.border : "#e2e8f0"}`,
+                          background: customerRoute ? CX.surface : "#fff",
                           fontSize: 13,
                           fontWeight: 500,
-                          color: customerRoute ? D.textSecondary : "#475569",
+                          color: customerRoute ? CX.muted : "#475569",
                           cursor: "pointer",
                         }}
                       >
@@ -2643,11 +2856,11 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         style={{
                           padding: "6px 12px",
                           borderRadius: 8,
-                          border: `1px solid ${customerRoute ? D.cardBorder : "#e2e8f0"}`,
-                          background: "#fff",
+                          border: `1px solid ${customerRoute ? CX.border : "#e2e8f0"}`,
+                          background: customerRoute ? CX.surface : "#fff",
                           fontSize: 13,
                           fontWeight: 500,
-                          color: customerRoute ? D.textSecondary : "#475569",
+                          color: customerRoute ? CX.muted : "#475569",
                           cursor: "pointer",
                         }}
                       >
@@ -2684,7 +2897,18 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                 content={vortextForDocumentViewDisplay}
                 maxHeight="420px"
                 searchQuery={vorbemerkungenSearchQuery.trim() || undefined}
-                theme={{ textPrimary: D.textPrimary, textSecondary: D.textSecondary, cardBorder: D.cardBorder }}
+                theme={{
+                  textPrimary: customerRoute ? CX.text : D.textPrimary,
+                  textSecondary: customerRoute ? CX.muted : D.textSecondary,
+                  cardBorder: customerRoute ? CX.border : D.cardBorder,
+                  ...(customerRoute
+                    ? {
+                        surfaceBg: CX.card,
+                        highlightBg: "rgba(251, 191, 36, 0.2)",
+                        highlightBgPositionen: "rgba(255,255,255,0.14)",
+                      }
+                    : {}),
+                }}
               />
               {vortextForDocumentViewDisplay.trim().length > 0 && (
                 <div style={{ marginTop: 16 }}>
@@ -2694,9 +2918,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                     style={{
                       padding: "10px 16px",
                       borderRadius: customerRoute ? D.radiusButton : 10,
-                      border: `1px solid ${customerRoute ? D.cardBorder : "#ddd"}`,
+                      border: `1px solid ${customerRoute ? CX.border : "#ddd"}`,
                       background: "transparent",
-                      color: customerRoute ? D.primary : "#111",
+                      color: customerRoute ? T.accent : "#111",
                       fontSize: 13,
                       fontWeight: 600,
                       cursor: "pointer",
@@ -2717,18 +2941,18 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               style={{
                 padding: customerRoute ? "18px 20px" : "14px 18px",
                 borderRadius: customerRoute ? D.cardRadius : 12,
-                background: customerRoute ? "#e8f4f8" : "#f0f4f8",
-                border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e2e8f0",
+                background: customerRoute ? CX.intro : "#f0f4f8",
+                border: customerRoute ? `1px solid ${CX.border}` : "1px solid #e2e8f0",
                 marginBottom: 4,
               }}
             >
-              <p style={{ margin: 0, color: customerRoute ? D.textPrimary : "#334155", fontSize: 14, lineHeight: 1.65 }}>
+              <p style={{ margin: 0, color: customerRoute ? CX.text : "#334155", fontSize: 14, lineHeight: 1.65 }}>
                 <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.positionen}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.positionen}
               </p>
             </div>
-            <div style={{ border: customerRoute ? `1px solid ${D.cardBorder}` : "1px solid #e5e5e5", borderRadius: customerRoute ? D.cardRadiusLg : 14, padding: customerRoute ? D.spacingCard : 16, background: customerRoute ? D.cardBg : "#fff", boxShadow: customerRoute ? D.cardShadow : undefined }}>
+            <div style={{ border: customerRoute ? `1px solid ${CX.border}` : "1px solid #e5e5e5", borderRadius: customerRoute ? D.cardRadiusLg : 14, padding: customerRoute ? D.spacingCard : 16, background: customerRoute ? CX.card : "#fff", boxShadow: customerRoute ? CX.shadow : undefined }}>
               <div style={{ marginBottom: 16 }}>
-                <label htmlFor="positionen-suche" style={{ display: "block", fontSize: 13, fontWeight: 600, color: customerRoute ? D.textSecondary : "#475569", marginBottom: 6 }}>
+                <label htmlFor="positionen-suche" style={{ display: "block", fontSize: 13, fontWeight: 600, color: customerRoute ? CX.muted : "#475569", marginBottom: 6 }}>
                   In Positionen suchen
                 </label>
                 <input
@@ -2745,22 +2969,22 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                     maxWidth: 360,
                     padding: "10px 14px",
                     borderRadius: customerRoute ? D.radiusButton : 10,
-                    border: `1px solid ${customerRoute ? D.cardBorder : "#e2e8f0"}`,
-                    background: "#fff",
+                    border: `1px solid ${customerRoute ? CX.border : "#e2e8f0"}`,
+                    background: customerRoute ? CX.inputBg : "#fff",
                     fontSize: 14,
-                    color: customerRoute ? D.textPrimary : "#0f172a",
+                    color: customerRoute ? CX.text : "#0f172a",
                   }}
                 />
               </div>
               {positionenSearchQuery.trim() && (
                 <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                   {positionenMatchCount === 0 ? (
-                    <span style={{ fontSize: 13, color: customerRoute ? D.textMuted : "#94a3b8" }}>
+                    <span style={{ fontSize: 13, color: customerRoute ? CX.faint : "#94a3b8" }}>
                       Keine Treffer für &quot;{positionenSearchQuery.trim()}&quot;.
                     </span>
                   ) : (
                     <>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: customerRoute ? D.textSecondary : "#475569" }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: customerRoute ? CX.muted : "#475569" }}>
                         {positionenMatchCount} {positionenMatchCount === 1 ? "Treffer" : "Treffer"}
                       </span>
                       <button
@@ -2769,11 +2993,11 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         style={{
                           padding: "6px 12px",
                           borderRadius: 8,
-                          border: `1px solid ${customerRoute ? D.cardBorder : "#e2e8f0"}`,
-                          background: "#fff",
+                          border: `1px solid ${customerRoute ? CX.border : "#e2e8f0"}`,
+                          background: customerRoute ? CX.surface : "#fff",
                           fontSize: 13,
                           fontWeight: 500,
-                          color: customerRoute ? D.textSecondary : "#475569",
+                          color: customerRoute ? CX.muted : "#475569",
                           cursor: "pointer",
                         }}
                       >
@@ -2785,11 +3009,11 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         style={{
                           padding: "6px 12px",
                           borderRadius: 8,
-                          border: `1px solid ${customerRoute ? D.cardBorder : "#e2e8f0"}`,
-                          background: "#fff",
+                          border: `1px solid ${customerRoute ? CX.border : "#e2e8f0"}`,
+                          background: customerRoute ? CX.surface : "#fff",
                           fontSize: 13,
                           fontWeight: 500,
-                          color: customerRoute ? D.textSecondary : "#475569",
+                          color: customerRoute ? CX.muted : "#475569",
                           cursor: "pointer",
                         }}
                       >
@@ -2803,7 +3027,20 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                 <PositionenNodeView
                   nodes={gaebPreview.normalized.displayNodes as import("@/lib/gaebPreviewModel").GaebPreviewDisplayNode[]}
                   maxHeight="420px"
-                  theme={{ textPrimary: D.textPrimary, textSecondary: D.textSecondary, cardBorder: D.cardBorder }}
+                  theme={{
+                    textPrimary: customerRoute ? CX.text : D.textPrimary,
+                    textSecondary: customerRoute ? CX.muted : D.textSecondary,
+                    cardBorder: customerRoute ? CX.border : D.cardBorder,
+                    ...(customerRoute
+                      ? {
+                          surfaceBg: CX.card,
+                          groupRowBg: CX.filterBg,
+                          expandedRowBg: CX.inputBg,
+                          groupAccentBorder: CX.muted,
+                          controlAccent: T.accent,
+                        }
+                      : {}),
+                  }}
                 />
               ) : (
                 <VorbemerkungenDocumentView
@@ -2811,7 +3048,18 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                   maxHeight="420px"
                   variant="positionen"
                   searchQuery={positionenSearchQuery.trim() || undefined}
-                  theme={{ textPrimary: D.textPrimary, textSecondary: D.textSecondary, cardBorder: D.cardBorder }}
+                  theme={{
+                    textPrimary: customerRoute ? CX.text : D.textPrimary,
+                    textSecondary: customerRoute ? CX.muted : D.textSecondary,
+                    cardBorder: customerRoute ? CX.border : D.cardBorder,
+                    ...(customerRoute
+                      ? {
+                          surfaceBg: CX.card,
+                          highlightBg: "rgba(251, 191, 36, 0.2)",
+                          highlightBgPositionen: "rgba(255,255,255,0.14)",
+                        }
+                      : {}),
+                  }}
                 />
               )}
             </div>
@@ -2823,34 +3071,67 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               title={DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.vorbemerkungen}
               longText={vortextForDocumentViewDisplay}
               onClose={() => setVorbemerkungenModalOpen(false)}
-              theme={{ textPrimary: D.textPrimary, textSecondary: D.textSecondary, cardBg: D.cardBg, cardBorder: D.cardBorder }}
+              theme={{
+                textPrimary: customerRoute ? CX.text : D.textPrimary,
+                textSecondary: customerRoute ? CX.muted : D.textSecondary,
+                cardBg: customerRoute ? CX.card : D.cardBg,
+                cardBorder: customerRoute ? CX.border : D.cardBorder,
+              }}
             />
           )}
 
           {/* Tab-Inhalt: Nachtragspotenzial (Strang B) – eine gemeinsame Komponente, keine Dopplung */}
           {resultTab === "nachtragspotenzial" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: D.spacingCard }}>
-            <SectionCard accent="accent" style={{ marginBottom: 0, background: D.cardBg, borderColor: D.cardBorder }}>
-              <p style={{ margin: 0, color: D.textPrimary, fontSize: D.fontSizeSectionTitle, lineHeight: 1.65 }}>
+            <SectionCard accent="accent" style={{ marginBottom: 0, background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
+              <p style={{ margin: 0, color: customerRoute ? CX.text : D.textPrimary, fontSize: D.fontSizeSectionTitle, lineHeight: 1.65 }}>
                 <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.nachtragspotenzial}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.nachtragspotenzial}
               </p>
             </SectionCard>
             {isAdminUser && (
-              <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                  <div style={{ fontSize: D.fontSizeBody, color: D.textSecondary, fontWeight: 600 }}>
-                    Interne V2-Berechnung (Nachtragspotenzial) ist nur zu Analysezwecken vorgesehen.
+              customerRoute ? (
+                <div
+                  role="region"
+                  style={{
+                    borderRadius: D.cardRadius,
+                    border: `1px solid ${CX.border}`,
+                    background: CX.surface,
+                    boxShadow: CX.shadow,
+                    padding: 20,
+                    borderLeft: `3px solid ${T.accent}`,
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: D.fontSizeBody, color: CX.text, fontWeight: 600 }}>
+                      Interne V2-Berechnung (Nachtragspotenzial) ist nur zu Analysezwecken vorgesehen.
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: D.fontSizeBody, color: CX.muted }}>
+                      <input
+                        type="checkbox"
+                        checked={showNachtragV2Debug}
+                        onChange={(e) => setShowNachtragV2Debug(e.target.checked)}
+                      />
+                      <span>V2 Debug anzeigen</span>
+                    </label>
                   </div>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: D.fontSizeBody, color: D.textSecondary }}>
-                    <input
-                      type="checkbox"
-                      checked={showNachtragV2Debug}
-                      onChange={(e) => setShowNachtragV2Debug(e.target.checked)}
-                    />
-                    <span>V2 Debug anzeigen</span>
-                  </label>
                 </div>
-              </SectionCard>
+              ) : (
+                <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder, boxShadow: D.cardShadow }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                    <div style={{ fontSize: D.fontSizeBody, color: D.textSecondary, fontWeight: 600 }}>
+                      Interne V2-Berechnung (Nachtragspotenzial) ist nur zu Analysezwecken vorgesehen.
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: D.fontSizeBody, color: D.textSecondary }}>
+                      <input
+                        type="checkbox"
+                        checked={showNachtragV2Debug}
+                        onChange={(e) => setShowNachtragV2Debug(e.target.checked)}
+                      />
+                      <span>V2 Debug anzeigen</span>
+                    </label>
+                  </div>
+                </SectionCard>
+              )
             )}
             <NachtragspotenzialBlock
               analysis={changeOrderAnalysis}
@@ -2861,20 +3142,32 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               deduplicatedOpportunities={deduplicatedOpportunities}
               isExpertMode={isExpertMode}
               customerRoute={!!customerRoute}
-              designTokens={D}
+              designTokens={
+                customerRoute
+                  ? {
+                      ...D,
+                      cardBg: CX.card,
+                      cardBorder: CX.border,
+                      textPrimary: CX.text,
+                      textSecondary: CX.muted,
+                      textMuted: CX.faint,
+                      primary: T.accent,
+                    }
+                  : D
+              }
               proFeatureLocked={!canUseChangeOrder}
             />
             {isAdminUser && showNachtragV2Debug && changeOrderAnalysis?.changePotentialSummary?.v2Debug && (
-              <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+              <SectionCard accent="secondary" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-                  <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection }}>
+                  <div style={{ fontSize: D.fontSizeSectionTitle, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: D.fontWeightSection }}>
                     Nachtragspotenzial V2 (intern)
                   </div>
-                  <div style={{ fontSize: D.fontSizeCaption, color: D.textMuted }}>
+                  <div style={{ fontSize: D.fontSizeCaption, color: customerRoute ? CX.faint : D.textMuted }}>
                     Nur Admin/Debug – Legacy bleibt produktiv.
                   </div>
                 </div>
-                <div style={{ display: "grid", gap: 8, fontSize: D.fontSizeBody, color: D.textPrimary }}>
+                <div style={{ display: "grid", gap: 8, fontSize: D.fontSizeBody, color: customerRoute ? CX.text : D.textPrimary }}>
                   <div>
                     <strong>Exposure-Score:</strong> {changeOrderAnalysis.changePotentialSummary.v2Debug.exposureScore} / 100
                   </div>
@@ -3001,7 +3294,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                     <strong>Gesamtpotenzial V2:</strong> {changeOrderAnalysis.changePotentialSummary.v2Debug.potentialScore} / 100
                   </div>
                 </div>
-                <div style={{ marginTop: 10, display: "grid", gap: 6, fontSize: D.fontSizeCaption, color: D.textSecondary }}>
+                <div style={{ marginTop: 10, display: "grid", gap: 6, fontSize: D.fontSizeCaption, color: customerRoute ? CX.muted : D.textSecondary }}>
                   <div>
                     <strong>Subscores:</strong>{" "}
                     VA {changeOrderAnalysis.changePotentialSummary.v2Debug.subscores.vertrags_abgrenzung} ·{" "}
@@ -3066,12 +3359,12 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             {isAdminUser &&
               showNachtragV2Debug &&
               changeOrderAnalysis?.changePotentialSummary?.v2Debug?.validationReport && (
-                <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
-                  <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection, marginBottom: 8 }}>
+                <SectionCard accent="secondary" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
+                  <div style={{ fontSize: D.fontSizeSectionTitle, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: D.fontWeightSection, marginBottom: 8 }}>
                     V2-Kalibrierungsreport
                   </div>
 
-                  <div style={{ display: "grid", gap: 8, fontSize: D.fontSizeCaption, color: D.textSecondary }}>
+                  <div style={{ display: "grid", gap: 8, fontSize: D.fontSizeCaption, color: customerRoute ? CX.muted : D.textSecondary }}>
                     <div>
                       <strong>Family-Verteilung (nur family-eligible evidences):</strong>{" "}
                       {Object.entries(
@@ -3082,7 +3375,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         .map(([fam, v]) => `${fam} (${v.count})`)
                         .join(" · ") || "-"}
                       {(changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.familyExcludedCount ?? 0) > 0 && (
-                        <span style={{ marginLeft: 8, color: D.textSecondary }}>
+                        <span style={{ marginLeft: 8, color: customerRoute ? CX.muted : D.textSecondary }}>
                           · Ausgeschlossen: {changeOrderAnalysis.changePotentialSummary.v2Debug.validationReport.familyExcludedCount} synthetic evidences
                         </span>
                       )}
@@ -3219,16 +3512,16 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
           {resultTab === "trigger" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: D.spacingCard }}>
           {isExpertMode && (
-          <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+          <SectionCard accent="secondary" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection }}>Filter</div>
+              <div style={{ fontSize: D.fontSizeSectionTitle, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: D.fontWeightSection }}>Filter</div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
                 {result.llmMode && (
-                  <div style={{ fontSize: D.fontSizeSmall, color: D.textSecondary, fontWeight: 600 }}>
+                  <div style={{ fontSize: D.fontSizeSmall, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>
                     KI-Analyse: {result.findingsBeforeLlm ?? 0} Regeln + {(result.findingsAfterLlm ?? 0) - (result.findingsBeforeLlm ?? 0)} KI = {result.findingsAfterLlm ?? 0} erkannte Risiken
                   </div>
                 )}
-                <div style={{ color: D.textSecondary, fontWeight: 600 }}>Treffer nach Filter: {filteredFindings.length}</div>
+                <div style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Treffer nach Filter: {filteredFindings.length}</div>
               </div>
             </div>
 
@@ -3237,13 +3530,13 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Suche (Titel, Detail, ID, Kategorie)..."
-                style={{ padding: "10px 12px", borderRadius: D.radiusButton, border: `1px solid ${D.cardBorder}`, width: "100%", fontSize: D.fontSizeBody }}
+                style={{ padding: "10px 12px", borderRadius: D.radiusButton, border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, width: "100%", fontSize: D.fontSizeBody }}
               />
 
               <select
                 value={sourceFilter}
                 onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
-                style={{ padding: "10px 12px", borderRadius: D.radiusButton, border: `1px solid ${D.cardBorder}`, width: "100%", fontSize: D.fontSizeBody }}
+                style={{ padding: "10px 12px", borderRadius: D.radiusButton, border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, width: "100%", fontSize: D.fontSizeBody }}
               >
                 <option value="both">Quelle: alle</option>
                 <option value="db">Quelle: nur DB</option>
@@ -3254,7 +3547,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               <select
                 value={severityFilter}
                 onChange={(e) => setSeverityFilter(e.target.value as SeverityFilter)}
-                style={{ padding: "10px 12px", borderRadius: D.radiusButton, border: `1px solid ${D.cardBorder}`, width: "100%", fontSize: D.fontSizeBody }}
+                style={{ padding: "10px 12px", borderRadius: D.radiusButton, border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, width: "100%", fontSize: D.fontSizeBody }}
               >
                 <option value="all">Risiko: alle</option>
                 <option value="high">Risiko: hoch</option>
@@ -3265,7 +3558,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               <select
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
-                style={{ padding: "10px 12px", borderRadius: D.radiusButton, border: `1px solid ${D.cardBorder}`, width: "100%", fontSize: D.fontSizeBody }}
+                style={{ padding: "10px 12px", borderRadius: D.radiusButton, border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, width: "100%", fontSize: D.fontSizeBody }}
               >
                 <option value="all">Kategorie: alle</option>
                 {availableFindingCategories.map((c) => (
@@ -3278,7 +3571,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               <select
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as SortMode)}
-                style={{ padding: "10px 12px", borderRadius: D.radiusButton, border: `1px solid ${D.cardBorder}`, width: "100%", fontSize: D.fontSizeBody }}
+                style={{ padding: "10px 12px", borderRadius: D.radiusButton, border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, width: "100%", fontSize: D.fontSizeBody }}
               >
                 <option value="penalty_desc">Sort: Gewichtung ↓</option>
                 <option value="severity_desc">Sort: Risiko ↓</option>
@@ -3290,9 +3583,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                 style={{
                   padding: "10px 12px",
                   borderRadius: D.radiusButton,
-                  border: `1px solid ${D.cardBorder}`,
-                  background: D.cardBg,
-                  color: D.textSecondary,
+                  border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`,
+                  background: customerRoute ? CX.card : D.cardBg,
+                  color: customerRoute ? CX.muted : D.textSecondary,
                   cursor: "pointer",
                   fontWeight: 600,
                   fontSize: D.fontSizeBody,
@@ -3303,12 +3596,12 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             </div>
 
             <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-              <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer", color: D.textPrimary, fontWeight: 600, fontSize: D.fontSizeBody }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer", color: customerRoute ? CX.text : D.textPrimary, fontWeight: 600, fontSize: D.fontSizeBody }}>
                 <input type="checkbox" checked={top10} onChange={(e) => setTop10(e.target.checked)} />
                 <span>Nur die 10 wichtigsten</span>
               </label>
 
-              <div style={{ color: D.textSecondary, fontWeight: 600, fontSize: D.fontSizeCaption }}>
+              <div style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600, fontSize: D.fontSizeCaption }}>
                 Datenbank: {dbFindings.length} | System: {sysFindings.length}
                 {llmFindings.length > 0 ? ` | KI: ${llmFindings.length}` : ""}
                 {otherFindings.length > 0 ? ` | Sonstige: ${otherFindings.length}` : ""}
@@ -3319,20 +3612,20 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
 
           {/* Findings: Standard = vereinfachte Darstellung (nur Titel, Kategorie, Risiko), Experte = Filter + getrennte Blöcke mit allen Infos */}
           {!isExpertMode && (
-          <SectionCard accent="primary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+          <SectionCard accent="primary" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection }}>Treffer</div>
-              <div style={{ color: D.textSecondary, fontWeight: 600 }}>{filteredFindings.length} Treffer</div>
+              <div style={{ fontSize: D.fontSizeSectionTitle, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: D.fontWeightSection }}>Treffer</div>
+              <div style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>{filteredFindings.length} Treffer</div>
             </div>
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {filteredFindings.length === 0 ? (
-                <div style={{ color: D.textMuted, fontSize: D.fontSizeBody }}>Keine Treffer.</div>
+                <div style={{ color: customerRoute ? CX.faint : D.textMuted, fontSize: D.fontSizeBody }}>Keine Treffer.</div>
               ) : (
                 filteredFindings.map((f) => (
-                  <div key={f.id} style={{ border: `1px solid ${D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: D.cardBg }}>
-                    <div style={{ fontWeight: D.fontWeightCardTitle, color: D.textPrimary, marginBottom: 6, fontSize: D.fontSizeBody }}>{sanitizeForDisplay(f.title ?? "")}</div>
-                    <div style={{ fontSize: D.fontSizeBody, color: D.textSecondary }}>Kategorie: {catLabel(f.category)}</div>
-                    <div style={{ fontSize: D.fontSizeBody, color: D.textSecondary, marginTop: 2 }}>Risiko: {severityLabel(f.severity)}</div>
+                  <div key={f.id} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
+                    <div style={{ fontWeight: D.fontWeightCardTitle, color: customerRoute ? CX.text : D.textPrimary, marginBottom: 6, fontSize: D.fontSizeBody }}>{sanitizeForDisplay(f.title ?? "")}</div>
+                    <div style={{ fontSize: D.fontSizeBody, color: customerRoute ? CX.muted : D.textSecondary }}>Kategorie: {catLabel(f.category)}</div>
+                    <div style={{ fontSize: D.fontSizeBody, color: customerRoute ? CX.muted : D.textSecondary, marginTop: 2 }}>Risiko: {severityLabel(f.severity)}</div>
                   </div>
                 ))
               )}
@@ -3344,29 +3637,29 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
           {isExpertMode && (
           <div style={{ display: "grid", gap: D.spacingCard }}>
             {/* DB */}
-            <SectionCard accent="primary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+            <SectionCard accent="primary" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection }}>Erkannte Risiken (Regel-Datenbank)</div>
-                <div style={{ color: D.textSecondary, fontWeight: 600 }}>{dbFindings.length} Treffer</div>
+                <div style={{ fontSize: D.fontSizeSectionTitle, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: D.fontWeightSection }}>Erkannte Risiken (Regel-Datenbank)</div>
+                <div style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>{dbFindings.length} Treffer</div>
               </div>
 
               <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
                 {dbFindings.length === 0 ? (
-                  <div style={{ color: D.textMuted, fontSize: D.fontSizeBody }}>Keine Treffer aus der Regel-Datenbank.</div>
+                  <div style={{ color: customerRoute ? CX.faint : D.textMuted, fontSize: D.fontSizeBody }}>Keine Treffer aus der Regel-Datenbank.</div>
                 ) : (
                   dbFindings.map((f) => (
-                    <div key={f.id} style={{ border: `1px solid ${D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: D.cardBg }}>
+                    <div key={f.id} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
                       <div style={{ display: "grid", gap: 6, fontSize: D.fontSizeBody }}>
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>{customerRoute ? "Prüfregel: " : "Trigger-ID: "}</span>{stripPrefix(f.id)}</div>
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Kategorie:</span> {catLabel(f.category)}</div>
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Gewichtung:</span> -{f.penalty}</div>
-                        {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Norm:</span> {(f as any).norm}</div>}
-                        {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
-                        {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: D.fontSizeCaption }}><span style={{ color: D.textSecondary, fontWeight: 600 }}>Regex:</span> {(f as any).regex}</div>}
-                        {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Keywords:</span> {(f as any).keywords}</div>}
-                        <div style={{ marginTop: 4, fontWeight: D.fontWeightCardTitle, color: D.textPrimary }}>{sanitizeForDisplay(f.title ?? "")}</div>
-                        {f.detail && <div style={{ color: D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(f.detail)}</div>}
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>{customerRoute ? "Prüfregel: " : "Trigger-ID: "}</span>{stripPrefix(f.id)}</div>
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Kategorie:</span> {catLabel(f.category)}</div>
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Gewichtung:</span> -{f.penalty}</div>
+                        {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Norm:</span> {(f as any).norm}</div>}
+                        {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
+                        {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: D.fontSizeCaption }}><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Regex:</span> {(f as any).regex}</div>}
+                        {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Keywords:</span> {(f as any).keywords}</div>}
+                        <div style={{ marginTop: 4, fontWeight: D.fontWeightCardTitle, color: customerRoute ? CX.text : D.textPrimary }}>{sanitizeForDisplay(f.title ?? "")}</div>
+                        {f.detail && <div style={{ color: customerRoute ? CX.muted : D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(f.detail)}</div>}
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
                       </div>
                     </div>
                   ))
@@ -3375,29 +3668,29 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             </SectionCard>
 
             {/* SYS */}
-            <SectionCard accent="accent" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+            <SectionCard accent="accent" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection }}>Erkannte Risiken (Systemprüfung)</div>
-                <div style={{ color: D.textSecondary, fontWeight: 600 }}>{sysFindings.length} Treffer</div>
+                <div style={{ fontSize: D.fontSizeSectionTitle, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: D.fontWeightSection }}>Erkannte Risiken (Systemprüfung)</div>
+                <div style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>{sysFindings.length} Treffer</div>
               </div>
 
               <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
                 {sysFindings.length === 0 ? (
-                  <div style={{ color: D.textMuted, fontSize: D.fontSizeBody }}>Keine Treffer aus Systemprüfung.</div>
+                  <div style={{ color: customerRoute ? CX.faint : D.textMuted, fontSize: D.fontSizeBody }}>Keine Treffer aus Systemprüfung.</div>
                 ) : (
                   sysFindings.map((f) => (
-                    <div key={f.id} style={{ border: `1px solid ${D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: D.cardBg }}>
+                    <div key={f.id} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
                       <div style={{ display: "grid", gap: 6, fontSize: D.fontSizeBody }}>
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>{customerRoute ? "Prüfregel: " : "Trigger-ID: "}</span>{stripPrefix(f.id)}</div>
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Kategorie:</span> {catLabel(f.category)}</div>
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Gewichtung:</span> -{f.penalty}</div>
-                        {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Norm:</span> {(f as any).norm}</div>}
-                        {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
-                        {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: D.fontSizeCaption }}><span style={{ color: D.textSecondary, fontWeight: 600 }}>Regex:</span> {(f as any).regex}</div>}
-                        {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Keywords:</span> {(f as any).keywords}</div>}
-                        <div style={{ marginTop: 4, fontWeight: D.fontWeightCardTitle, color: D.textPrimary }}>{sanitizeForDisplay(f.title ?? "")}</div>
-                        {f.detail && <div style={{ color: D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(f.detail)}</div>}
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>{customerRoute ? "Prüfregel: " : "Trigger-ID: "}</span>{stripPrefix(f.id)}</div>
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Kategorie:</span> {catLabel(f.category)}</div>
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Gewichtung:</span> -{f.penalty}</div>
+                        {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Norm:</span> {(f as any).norm}</div>}
+                        {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
+                        {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: D.fontSizeCaption }}><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Regex:</span> {(f as any).regex}</div>}
+                        {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Keywords:</span> {(f as any).keywords}</div>}
+                        <div style={{ marginTop: 4, fontWeight: D.fontWeightCardTitle, color: customerRoute ? CX.text : D.textPrimary }}>{sanitizeForDisplay(f.title ?? "")}</div>
+                        {f.detail && <div style={{ color: customerRoute ? CX.muted : D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(f.detail)}</div>}
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
                       </div>
                     </div>
                   ))
@@ -3405,7 +3698,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               </div>
 
               {otherFindings.length > 0 && (
-                <div style={{ marginTop: 12, color: D.textMuted, fontSize: D.fontSizeCaption }}>
+                <div style={{ marginTop: 12, color: customerRoute ? CX.faint : D.textMuted, fontSize: D.fontSizeCaption }}>
                   Hinweis: {otherFindings.length} erkannte Risiken ohne Zuordnung (Datenbank/System/KI) im Ergebnis.
                 </div>
               )}
@@ -3413,26 +3706,26 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
 
             {/* LLM */}
             {llmFindings.length > 0 && (
-              <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+              <SectionCard accent="secondary" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <div style={{ fontSize: D.fontSizeSectionTitle, color: D.textSecondary, fontWeight: D.fontWeightSection }}>Erkannte Risiken (KI-Analyse)</div>
-                  <div style={{ color: D.textSecondary, fontWeight: 600 }}>{llmFindings.length} Treffer</div>
+                  <div style={{ fontSize: D.fontSizeSectionTitle, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: D.fontWeightSection }}>Erkannte Risiken (KI-Analyse)</div>
+                  <div style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>{llmFindings.length} Treffer</div>
                 </div>
 
                 <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
                   {llmFindings.map((f) => (
-                    <div key={f.id} style={{ border: `1px solid ${D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: D.cardBg }}>
+                    <div key={f.id} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
                       <div style={{ display: "grid", gap: 6, fontSize: D.fontSizeBody }}>
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>{customerRoute ? "Prüfregel: " : "Trigger-ID: "}</span>{stripPrefix(f.id)}</div>
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Kategorie:</span> {catLabel(f.category)}</div>
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Gewichtung:</span> -{f.penalty}</div>
-                        {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Norm:</span> {(f as any).norm}</div>}
-                        {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
-                        {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: D.fontSizeCaption }}><span style={{ color: D.textSecondary, fontWeight: 600 }}>Regex:</span> {(f as any).regex}</div>}
-                        {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Keywords:</span> {(f as any).keywords}</div>}
-                        <div style={{ marginTop: 4, fontWeight: D.fontWeightCardTitle, color: D.textPrimary }}>{sanitizeForDisplay(f.title ?? "")}</div>
-                        {f.detail && <div style={{ color: D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(f.detail)}</div>}
-                        <div><span style={{ color: D.textSecondary, fontWeight: 600 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>{customerRoute ? "Prüfregel: " : "Trigger-ID: "}</span>{stripPrefix(f.id)}</div>
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Kategorie:</span> {catLabel(f.category)}</div>
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Gewichtung:</span> -{f.penalty}</div>
+                        {(f as any).norm != null && (f as any).norm !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Norm:</span> {(f as any).norm}</div>}
+                        {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
+                        {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: D.fontSizeCaption }}><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Regex:</span> {(f as any).regex}</div>}
+                        {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Keywords:</span> {(f as any).keywords}</div>}
+                        <div style={{ marginTop: 4, fontWeight: D.fontWeightCardTitle, color: customerRoute ? CX.text : D.textPrimary }}>{sanitizeForDisplay(f.title ?? "")}</div>
+                        {f.detail && <div style={{ color: customerRoute ? CX.muted : D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(f.detail)}</div>}
+                        <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
                       </div>
                     </div>
                   ))}
@@ -3447,18 +3740,18 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
           {/* Tab-Inhalt: Rückfragen */}
           {resultTab === "rueckfragen" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: D.spacingCard }}>
-          <SectionCard accent="accent" style={{ marginBottom: 0, background: D.cardBg, borderColor: D.cardBorder }}>
-            <p style={{ margin: 0, color: D.textPrimary, fontSize: D.fontSizeSectionTitle, lineHeight: 1.65 }}>
+          <SectionCard accent="accent" style={{ marginBottom: 0, background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
+            <p style={{ margin: 0, color: customerRoute ? CX.text : D.textPrimary, fontSize: D.fontSizeSectionTitle, lineHeight: 1.65 }}>
               <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.rueckfragen}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.rueckfragen}
             </p>
           </SectionCard>
-          <SectionCard accent="primary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+          <SectionCard accent="primary" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: clarificationQuestions ? 16 : 0 }}>
-              <div style={{ fontSize: 15, color: D.textPrimary, fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.rueckfragenBlock}</div>
+              <div style={{ fontSize: 15, color: customerRoute ? CX.text : D.textPrimary, fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.rueckfragenBlock}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 {!canUseAdvancedFeatures && (
                   <>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: D.textMuted }}>Nur in Pro</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: customerRoute ? CX.faint : D.textMuted }}>Nur in Pro</span>
                     <Link href="/pricing" style={{ fontSize: 12, fontWeight: 600, color: D.primary }}>→ Pro</Link>
                   </>
                 )}
@@ -3490,25 +3783,25 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                     const labels = DEFAULT_TEXTS_CONFIG.rueckfragen.groupLabels;
                     if (items.length === 0) return null;
                     return (
-                      <div key={group} style={{ border: `1px solid ${D.cardBorder}`, borderRadius: D.cardRadius, padding: 14, background: D.filterBg }}>
-                        <div style={{ fontSize: 12, color: D.textSecondary, fontWeight: 700, marginBottom: 10 }}>
+                      <div key={group} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: D.cardRadius, padding: 14, background: customerRoute ? CX.filterBg : D.filterBg }}>
+                        <div style={{ fontSize: 12, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 700, marginBottom: 10 }}>
                           {labels[group]} ({items.length})
                         </div>
                         <div style={{ display: "grid", gap: 10 }}>
                           {items.map((q: any) => (
-                            <div key={q.id} style={{ border: `1px solid ${D.cardBorder}`, borderRadius: 10, padding: 12, background: D.cardBg }}>
+                            <div key={q.id} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: 10, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                                 <StatusBadge variant={q.severity === "high" ? "danger" : q.severity === "medium" ? "warning" : "info"} small>
                                   {q.severity ?? "—"}
                                 </StatusBadge>
                                 {q.sourceFindingId && (
-                                  <span style={{ fontSize: 11, color: D.textMuted }}>← {q.sourceFindingId}</span>
+                                  <span style={{ fontSize: 11, color: customerRoute ? CX.faint : D.textMuted }}>← {q.sourceFindingId}</span>
                                 )}
                               </div>
-                              <div style={{ marginTop: 8, fontWeight: 600, color: D.textPrimary, fontSize: 13, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(q.question ?? "")}</div>
-                              <div style={{ marginTop: 6, fontSize: 12, color: D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(q.reason ?? "")}</div>
+                              <div style={{ marginTop: 8, fontWeight: 600, color: customerRoute ? CX.text : D.textPrimary, fontSize: 13, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(q.question ?? "")}</div>
+                              <div style={{ marginTop: 6, fontSize: 12, color: customerRoute ? CX.muted : D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(q.reason ?? "")}</div>
                               {q.sourceTextSnippet && (
-                                <div style={{ marginTop: 6, fontSize: 11, color: D.textMuted, fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap" }}>
+                                <div style={{ marginTop: 6, fontSize: 11, color: customerRoute ? CX.faint : D.textMuted, fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap" }}>
                                   &quot;{sanitizeForDisplay(q.sourceTextSnippet)}&quot;
                                 </div>
                               )}
@@ -3524,7 +3817,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             )}
 
             {!clarificationQuestions && (
-              <div style={{ marginTop: 12, color: D.textSecondary, fontSize: 13, fontWeight: 600 }}>
+              <div style={{ marginTop: 12, color: customerRoute ? CX.muted : D.textSecondary, fontSize: 13, fontWeight: 600 }}>
                 {DEFAULT_TEXTS_CONFIG.rueckfragen.emptyState}
               </div>
             )}
@@ -3535,18 +3828,18 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
           {/* Tab-Inhalt: Angebotsklarstellungen */}
           {resultTab === "angebotsklarstellungen" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: D.spacingCard }}>
-          <SectionCard accent="primary" style={{ marginBottom: 0, background: D.cardBg, borderColor: D.cardBorder }}>
-            <p style={{ margin: 0, color: D.textPrimary, fontSize: D.fontSizeSectionTitle, lineHeight: 1.65 }}>
+          <SectionCard accent="primary" style={{ marginBottom: 0, background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
+            <p style={{ margin: 0, color: customerRoute ? CX.text : D.textPrimary, fontSize: D.fontSizeSectionTitle, lineHeight: 1.65 }}>
               <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.angebotsklarstellungen}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.angebotsklarstellungen}
             </p>
           </SectionCard>
-          <SectionCard accent="secondary" style={{ background: D.cardBg, borderColor: D.cardBorder }}>
+          <SectionCard accent="secondary" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: offerAssumptions ? 16 : 0 }}>
-              <div style={{ fontSize: 15, color: D.textPrimary, fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.angebotsBlock}</div>
+              <div style={{ fontSize: 15, color: customerRoute ? CX.text : D.textPrimary, fontWeight: 700 }}>{DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.angebotsBlock}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 {!canUseAdvancedFeatures && (
                   <>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: D.textMuted }}>Nur in Pro</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: customerRoute ? CX.faint : D.textMuted }}>Nur in Pro</span>
                     <Link href="/pricing" style={{ fontSize: 12, fontWeight: 600, color: D.primary }}>→ Pro</Link>
                   </>
                 )}
@@ -3557,7 +3850,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                     padding: "10px 18px",
                     borderRadius: D.radiusButton,
                     border: "none",
-                    background: !canUseAdvancedFeatures ? D.textMuted : offerAssumptionsLoading ? D.textMuted : D.secondary,
+                    background: !canUseAdvancedFeatures ? D.textMuted : offerAssumptionsLoading ? D.textMuted : D.primary,
                     color: "#fff",
                     fontWeight: 600,
                     fontSize: 13,
@@ -3578,25 +3871,25 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                     const labels = DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.groupLabels;
                     if (items.length === 0) return null;
                     return (
-                      <div key={group} style={{ border: `1px solid ${D.cardBorder}`, borderRadius: D.cardRadius, padding: 14, background: D.filterBg }}>
-                        <div style={{ fontSize: 12, color: D.textSecondary, fontWeight: 700, marginBottom: 10 }}>
+                      <div key={group} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: D.cardRadius, padding: 14, background: customerRoute ? CX.filterBg : D.filterBg }}>
+                        <div style={{ fontSize: 12, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 700, marginBottom: 10 }}>
                           {labels[group]} ({items.length})
                         </div>
                         <div style={{ display: "grid", gap: 10 }}>
                           {items.map((a: any) => (
-                            <div key={a.id} style={{ border: `1px solid ${D.cardBorder}`, borderRadius: 10, padding: 12, background: D.cardBg }}>
+                            <div key={a.id} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: 10, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                                 <StatusBadge variant={a.severity === "high" ? "danger" : a.severity === "medium" ? "warning" : "info"} small>
                                   {a.severity ?? "—"}
                                 </StatusBadge>
-                                <span style={{ fontSize: 11, color: D.textMuted }}>
+                                <span style={{ fontSize: 11, color: customerRoute ? CX.faint : D.textMuted }}>
                                   {a.sourceFindingId && <>Risiko: {a.sourceFindingId}</>}
                                   {a.sourceFindingId && a.sourceQuestionId && " · "}
                                   {a.sourceQuestionId && <>Frage: {a.sourceQuestionId}</>}
                                 </span>
                               </div>
-                              <div style={{ marginTop: 8, fontWeight: 600, color: D.textPrimary, fontSize: 13, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(a.assumption ?? "")}</div>
-                              <div style={{ marginTop: 6, fontSize: 12, color: D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(a.reason ?? "")}</div>
+                              <div style={{ marginTop: 8, fontWeight: 600, color: customerRoute ? CX.text : D.textPrimary, fontSize: 13, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(a.assumption ?? "")}</div>
+                              <div style={{ marginTop: 6, fontSize: 12, color: customerRoute ? CX.muted : D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(a.reason ?? "")}</div>
                             </div>
                           ))}
                         </div>
@@ -3609,13 +3902,13 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             )}
 
             {!offerAssumptions && !offerAssumptionsLoading && (
-              <div style={{ marginTop: 12, color: D.textSecondary, fontSize: 13, fontWeight: 600 }}>
+              <div style={{ marginTop: 12, color: customerRoute ? CX.muted : D.textSecondary, fontSize: 13, fontWeight: 600 }}>
                 {DEFAULT_TEXTS_CONFIG.angebotsklarstellungen.emptyState}
               </div>
             )}
 
             {offerAssumptionsLoading && (
-              <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: D.textSecondary, fontWeight: 600 }}>
+              <div style={{ marginTop: 14, padding: 20, textAlign: "center", color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>
                 Annahmen werden erzeugt… (KI-Optimierung kann einige Sekunden dauern)
               </div>
             )}
@@ -3794,19 +4087,39 @@ function GaebNormalizedPreview(props: {
   normalized: { groups: any[]; remarks: any[]; items: any[] };
   debug?: Record<string, any>;
   customerRoute: boolean;
-  customerDesign?: typeof D;
+  customerDesign?: CustomerSurfaceTokens;
 }) {
-  const { normalized, debug, customerRoute, customerDesign } = props;
+  const { normalized, customerRoute, customerDesign } = props;
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const primary = customerDesign?.primary ?? "#111";
   const maxH = "320px";
 
+  const dark = customerRoute && customerDesign;
+  const border = dark ? (customerDesign!.cardBorder ?? CX.border) : "#eee";
+  const bg = dark ? (customerDesign!.cardBg ?? CX.card) : "#fff";
+  const labelColor = dark ? (customerDesign!.textSecondary ?? CX.muted) : "#666";
+  const bodyColor = dark ? (customerDesign!.textPrimary ?? CX.text) : "#111";
+  const groupRowBg = dark ? CX.filterBg : "#fafafa";
+  const remarkBg = dark ? CX.inputBg : "#f8f9fa";
+  const rowLine = dark ? CX.rowHairline : "#eee";
+  const theadBorder = dark ? "rgba(255,255,255,0.14)" : "#ddd";
+  const expandRowBg = dark ? CX.filterBg : "#f8f9fa";
+
   return (
-    <div style={{ maxHeight: maxH, overflow: "auto", border: "1px solid #eee", borderRadius: 12, background: "#fff" }}>
+    <div
+      style={{
+        maxHeight: maxH,
+        overflow: "auto",
+        border: `1px solid ${border}`,
+        borderRadius: D.cardRadius,
+        background: bg,
+        color: bodyColor,
+      }}
+    >
       {/* Gruppen als Abschnitte */}
       {normalized.groups?.length > 0 && (
-        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
-          <div style={{ fontSize: 11, fontWeight: 800, color: "#666", marginBottom: 8 }}>Gruppen</div>
+        <div style={{ padding: "12px 14px", borderBottom: `1px solid ${rowLine}` }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: labelColor, marginBottom: 8 }}>Gruppen</div>
           {normalized.groups.map((g: any, i: number) => (
             <div
               key={i}
@@ -3815,7 +4128,7 @@ function GaebNormalizedPreview(props: {
                 paddingLeft: (g.level ?? 0) * 12,
                 borderLeft: `3px solid ${primary}`,
                 padding: "6px 10px",
-                background: "#fafafa",
+                background: groupRowBg,
                 borderRadius: 6,
               }}
             >
@@ -3829,10 +4142,21 @@ function GaebNormalizedPreview(props: {
 
       {/* Hinweistexte separat */}
       {normalized.remarks?.length > 0 && (
-        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
-          <div style={{ fontSize: 11, fontWeight: 800, color: "#666", marginBottom: 8 }}>Hinweise / Vorbemerkungen</div>
+        <div style={{ padding: "12px 14px", borderBottom: `1px solid ${rowLine}` }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: labelColor, marginBottom: 8 }}>Hinweise / Vorbemerkungen</div>
           {normalized.remarks.map((r: any, i: number) => (
-            <div key={i} style={{ marginBottom: 8, padding: 8, background: "#f8f9fa", borderRadius: 8, whiteSpace: "pre-wrap", fontSize: 12 }}>
+            <div
+              key={i}
+              style={{
+                marginBottom: 8,
+                padding: 8,
+                background: remarkBg,
+                borderRadius: 8,
+                whiteSpace: "pre-wrap",
+                fontSize: 12,
+                color: bodyColor,
+              }}
+            >
               {r.kind && <strong>{r.kind}: </strong>}
               {r.text}
             </div>
@@ -3843,22 +4167,22 @@ function GaebNormalizedPreview(props: {
       {/* Positionen tabellarisch: Pos, Kurztext, Menge, Einheit, Langtext per Accordion */}
       {normalized.items?.length > 0 && (
         <div style={{ padding: "12px 14px" }}>
-          <div style={{ fontSize: 11, fontWeight: 800, color: "#666", marginBottom: 8 }}>Positionen</div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: labelColor, marginBottom: 8 }}>Positionen</div>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, color: bodyColor }}>
               <thead>
-                <tr style={{ borderBottom: "2px solid #ddd" }}>
-                  <th style={{ textAlign: "left", padding: "8px 6px", fontWeight: 800 }}>Pos</th>
-                  <th style={{ textAlign: "left", padding: "8px 6px", fontWeight: 800 }}>Kurztext</th>
-                  <th style={{ textAlign: "right", padding: "8px 6px", fontWeight: 800 }}>Menge</th>
-                  <th style={{ textAlign: "left", padding: "8px 6px", fontWeight: 800 }}>Einheit</th>
+                <tr style={{ borderBottom: `2px solid ${theadBorder}` }}>
+                  <th style={{ textAlign: "left", padding: "8px 6px", fontWeight: 800, color: labelColor }}>Pos</th>
+                  <th style={{ textAlign: "left", padding: "8px 6px", fontWeight: 800, color: labelColor }}>Kurztext</th>
+                  <th style={{ textAlign: "right", padding: "8px 6px", fontWeight: 800, color: labelColor }}>Menge</th>
+                  <th style={{ textAlign: "left", padding: "8px 6px", fontWeight: 800, color: labelColor }}>Einheit</th>
                   <th style={{ width: 36 }} />
                 </tr>
               </thead>
               <tbody>
                 {normalized.items.map((it: any, idx: number) => (
                   <React.Fragment key={idx}>
-                    <tr style={{ borderBottom: "1px solid #eee" }}>
+                    <tr style={{ borderBottom: `1px solid ${rowLine}` }}>
                       <td style={{ padding: "6px", fontWeight: 700, verticalAlign: "top" }}>{it.posNr ?? "—"}</td>
                       <td style={{ padding: "6px", verticalAlign: "top" }}>{it.shortText ?? "—"}</td>
                       <td style={{ padding: "6px", textAlign: "right", verticalAlign: "top" }}>{it.quantity ?? "—"}</td>
@@ -3874,6 +4198,7 @@ function GaebNormalizedPreview(props: {
                               cursor: "pointer",
                               fontWeight: 800,
                               padding: 4,
+                              color: dark ? CX.accent : undefined,
                             }}
                             aria-expanded={expandedRow === idx}
                           >
@@ -3884,7 +4209,17 @@ function GaebNormalizedPreview(props: {
                     </tr>
                     {expandedRow === idx && (it.longText ?? "").trim() && (
                       <tr>
-                        <td colSpan={5} style={{ padding: "8px 6px 12px", background: "#f8f9fa", whiteSpace: "pre-wrap", fontSize: 12, borderBottom: "1px solid #eee" }}>
+                        <td
+                          colSpan={5}
+                          style={{
+                            padding: "8px 6px 12px",
+                            background: expandRowBg,
+                            whiteSpace: "pre-wrap",
+                            fontSize: 12,
+                            borderBottom: `1px solid ${rowLine}`,
+                            color: bodyColor,
+                          }}
+                        >
                           {it.longText}
                         </td>
                       </tr>

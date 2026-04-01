@@ -4,7 +4,10 @@ import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { appTheme as T } from "@/components/app/appTheme";
-import { KEYFACT_LABELS } from "@/lib/keyFactsDefinition";
+import { getAnalysisDisplayTitle, normalizeEditableTitleInput } from "@/lib/analysisDisplayTitle";
+import { buildPdfReport } from "@/lib/pdf/buildPdfReport";
+import { stripScoringEngineeringJargon } from "@/lib/pdf/pdfFormatters";
+import type { PdfTopRiskItem, PdfCategoryScore, PdfQuestion } from "@/lib/pdf/pdfTypes";
 
 type AnalyseItem = {
   id: string;
@@ -17,36 +20,14 @@ type AnalyseItem = {
   result_json?: unknown;
 };
 
-function Block({
-  title,
-  children,
-  fallback = "Keine Daten vorhanden.",
-}: { title: string; children: React.ReactNode; fallback?: string }) {
-  return (
-    <section
-      style={{
-        border: `1px solid ${T.border}`,
-        borderRadius: T.radius,
-        background: T.card,
-        padding: T.space.lg,
-      }}
-    >
-      <h2
-        style={{
-          margin: "0 0 " + T.space.md + "px",
-          fontSize: 14,
-          fontWeight: 700,
-          color: T.faint,
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-        }}
-      >
-        {title}
-      </h2>
-      {children != null && children !== "" ? children : <p style={{ margin: 0, fontSize: 13, color: T.muted }}>{fallback}</p>}
-    </section>
-  );
-}
+type RiskFinding = {
+  id?: string;
+  category?: string;
+  title?: string;
+  detail?: string;
+  severity?: string;
+  penalty?: number;
+};
 
 const RISK_CATEGORY_LABELS: Record<string, string> = {
   vertrags_lv_risiken: "Vertrags- und LV-Risiken",
@@ -54,24 +35,13 @@ const RISK_CATEGORY_LABELS: Record<string, string> = {
   technische_vollstaendigkeit: "Technische Vollständigkeit",
   schnittstellen_nebenleistungen: "Schnittstellen und Nebenleistungen",
   kalkulationsunsicherheit: "Kalkulationsunsicherheit",
+  normen: "Normen und Vertragsgrundlagen",
+  mengen_schnittstellen: "Mengen und Schnittstellen",
+  nachtrag: "Nachtragsrisiko",
+  ausfuehrung: "Ausführung",
+  vollstaendigkeit: "Vollständigkeit",
+  vortext: "Vortext / Projektkontext",
 };
-
-function prettyKey(k: string): string {
-  return (KEYFACT_LABELS[k] ?? k)
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (m) => m.toUpperCase());
-}
-
-function isMeaningfulValue(v: unknown): v is string {
-  if (typeof v !== "string") return false;
-  const t = v.trim();
-  if (!t) return false;
-  if (/^nicht erkannt/i.test(t)) return false;
-  if (/^(n\/a|k\.a\.)$/i.test(t)) return false;
-  if (/^\[debug\]/i.test(t)) return false;
-  if (t === "-") return false;
-  return true;
-}
 
 function mapStatus(status: string | null): string | null {
   if (!status) return null;
@@ -106,14 +76,117 @@ function getFilenameFromDisposition(header: string | null): string | null {
   return match ? match[1].trim() : null;
 }
 
+function labelUnknownCategory(catKey: string): string {
+  return catKey.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function severityRank(s?: string): number {
+  const x = (s || "").toLowerCase();
+  if (x === "high") return 0;
+  if (x === "medium") return 1;
+  if (x === "low") return 2;
+  return 3;
+}
+
+function sortFindingsByPriority(findings: RiskFinding[]): RiskFinding[] {
+  return [...findings].sort((a, b) => {
+    const sr = severityRank(a.severity) - severityRank(b.severity);
+    if (sr !== 0) return sr;
+    const pa = typeof a.penalty === "number" && !Number.isNaN(a.penalty) ? a.penalty : 0;
+    const pb = typeof b.penalty === "number" && !Number.isNaN(b.penalty) ? b.penalty : 0;
+    return pb - pa;
+  });
+}
+
+function isHighPriority(priority: unknown): boolean {
+  if (priority == null) return false;
+  if (typeof priority === "number") return priority <= 1;
+  const s = String(priority).toLowerCase().trim();
+  if (s === "1" || s === "p1") return true;
+  return s.includes("hoch") || s === "high" || s === "kritisch";
+}
+
+function sortQuestions(qs: PdfQuestion[]): PdfQuestion[] {
+  const high = qs.filter((q) => isHighPriority(q.priority));
+  const rest = qs.filter((q) => !isHighPriority(q.priority));
+  return [...high, ...rest];
+}
+
+/** Anzeige-Text ohne Engine-Sprache; optional längeren Klartext für „Mehr“. */
+function cleanRiskProse(raw: string): string {
+  return stripScoringEngineeringJargon(raw.replace(/\s+/g, " ").trim());
+}
+
+function severityLabelDe(sev?: string): string {
+  const s = (sev || "").toLowerCase();
+  if (s === "high") return "Hohes Einzelrisiko";
+  if (s === "medium") return "Mittleres Einzelrisiko";
+  if (s === "low") return "Niedriges Einzelrisiko";
+  return "";
+}
+
+function trafficLightLabel(t: "green" | "yellow" | "red"): string {
+  if (t === "green") return "Niedrig";
+  if (t === "yellow") return "Erhöht";
+  return "Kritisch";
+}
+
+/** Einheitliche Fläche für Arbeitsblöcke (heller als reine Engine-Karten). */
+function workSurfaceStyle(): React.CSSProperties {
+  return {
+    border: `1px solid ${T.border}`,
+    borderRadius: T.radius,
+    background: T.surface,
+    padding: T.space.lg,
+  };
+}
+
+function ZoneTitle({
+  kicker,
+  title,
+  subtitle,
+}: {
+  kicker?: string;
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <header style={{ marginBottom: T.space.md }}>
+      {kicker ? (
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: T.faint,
+            marginBottom: 6,
+          }}
+        >
+          {kicker}
+        </div>
+      ) : null}
+      <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: T.text, letterSpacing: "-0.02em" }}>{title}</h2>
+      {subtitle ? (
+        <p style={{ margin: "6px 0 0", fontSize: 13, color: T.muted, lineHeight: 1.5, maxWidth: 640 }}>{subtitle}</p>
+      ) : null}
+    </header>
+  );
+}
+
 export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfExport?: boolean }) {
   const [item, setItem] = React.useState<AnalyseItem | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [expandedRiskId, setExpandedRiskId] = React.useState<string | null>(null);
+  const [expandedTechnicalRiskId, setExpandedTechnicalRiskId] = React.useState<string | null>(null);
+  const [depthOpen, setDepthOpen] = React.useState(false);
   const [exportLoading, setExportLoading] = React.useState(false);
   const [exportError, setExportError] = React.useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = React.useState(false);
+  const [titleDraft, setTitleDraft] = React.useState("");
+  const [titleSaving, setTitleSaving] = React.useState(false);
+  const [titleError, setTitleError] = React.useState<string | null>(null);
   const router = useRouter();
 
   React.useEffect(() => {
@@ -138,6 +211,41 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
       cancelled = true;
     };
   }, [id]);
+
+  React.useEffect(() => {
+    if (item) {
+      setTitleDraft(item.project_name?.trim() ?? "");
+      setTitleError(null);
+    }
+  }, [item?.id, item?.project_name]);
+
+  const titleDirty = React.useMemo(() => {
+    if (!item) return false;
+    return (
+      normalizeEditableTitleInput(titleDraft, item.file_name) !==
+      normalizeEditableTitleInput(item.project_name ?? "", item.file_name)
+    );
+  }, [item, titleDraft]);
+
+  const handleSaveTitle = React.useCallback(async () => {
+    if (!item || !titleDirty) return;
+    setTitleSaving(true);
+    setTitleError(null);
+    try {
+      const res = await fetch(`/api/analyse/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectName: titleDraft }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Titel konnte nicht gespeichert werden.");
+      if (data?.item) setItem(data.item as AnalyseItem);
+    } catch (e: unknown) {
+      setTitleError(e instanceof Error ? e.message : "Unbekannter Fehler");
+    } finally {
+      setTitleSaving(false);
+    }
+  }, [id, item, titleDirty, titleDraft]);
 
   const handlePdfExport = React.useCallback(async () => {
     if (!item || !canPdfExport) return;
@@ -216,103 +324,144 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
   }
 
   const rj = (item.result_json ?? {}) as Record<string, unknown>;
-  type RiskFinding = {
-    id?: string;
-    category?: string;
-    title?: string;
-    detail?: string;
-    severity?: string;
-    penalty?: number;
-  };
+
+  const report = buildPdfReport({
+    result_json: item.result_json,
+    management_summary: item.management_summary,
+    score: item.score,
+    project_name: item.project_name,
+    file_name: item.file_name,
+    created_at: item.created_at,
+  });
 
   const scoreResult = rj.scoreResult as { total?: number; level?: string; findingsSorted?: RiskFinding[] } | undefined;
   const changeOrder = rj.changeOrderAnalysis as {
     offerStrategySummary?: { executiveSummary?: string };
     opportunities?: unknown[];
   } | undefined;
-  const keyFacts = rj.keyFacts as Record<string, string> | undefined;
-  const clarificationQuestions = rj.clarificationQuestions as unknown[] | undefined;
-  const riskCategories = (scoreResult as { riskCategories?: unknown[] })?.riskCategories;
   const findingsSorted = scoreResult?.findingsSorted;
 
   const displayScore = item.score ?? scoreResult?.total ?? null;
-  const executiveSummary =
-    typeof changeOrder?.offerStrategySummary?.executiveSummary === "string"
-      ? changeOrder.offerStrategySummary.executiveSummary.trim()
-      : "";
-  const templateSummary =
-    typeof item.management_summary === "string" ? item.management_summary.trim() : "";
-
-  const displaySummary =
-    (executiveSummary && executiveSummary.length > 0 ? executiveSummary : null) ??
-    (templateSummary && templateSummary.length > 0 ? templateSummary : null);
-
-  const summarySource: "llm" | "template" | null =
-    displaySummary === executiveSummary && executiveSummary
-      ? "llm"
-      : displaySummary === templateSummary && templateSummary
-        ? "template"
-        : null;
-  const title = ((typeof item.project_name === "string" && item.project_name.trim()) || item.file_name) ?? "Ergebnisansicht";
+  const displaySummary = report.summary.executiveSummary?.trim() || null;
 
   const mappedStatus = mapStatus(item.status);
 
-  const keyFactEntries =
-    keyFacts && typeof keyFacts === "object"
-      ? Object.entries(keyFacts).filter(([, v]) => isMeaningfulValue(v))
-      : [];
-
-  const hasKeyFacts = keyFactEntries.length > 0;
-  const hasRisks = (Array.isArray(riskCategories) && riskCategories.length > 0) || (Array.isArray(findingsSorted) && findingsSorted.length > 0);
-  const hasClarifications = Array.isArray(clarificationQuestions) && clarificationQuestions.length > 0;
-  const hasChangeOrder = changeOrder && (changeOrder.offerStrategySummary != null || (Array.isArray(changeOrder.opportunities) && changeOrder.opportunities.length > 0));
+  const keyFactRows = report.keyFacts ?? [];
+  const hasKeyFacts = keyFactRows.length > 0;
+  const questions = sortQuestions(report.questions ?? []);
+  const offerClarifications = report.clarifications ?? [];
+  const hasQuestions = questions.length > 0;
+  const hasOfferClarifications = offerClarifications.length > 0;
+  const cp = report.claimPotential;
+  const hasClaimPotential = !!(cp && Object.keys(cp).length > 0);
+  const hasChangeOrder = !!(
+    changeOrder &&
+    (changeOrder.offerStrategySummary != null || (Array.isArray(changeOrder.opportunities) && changeOrder.opportunities.length > 0))
+  );
+  const showNachtragFallback = !hasClaimPotential && hasChangeOrder;
 
   const scoreMeta = scoreToLabel(displayScore);
+  const categoryScores = Array.isArray(report.categoryScores) ? report.categoryScores : [];
+  const hasCategoryScores = categoryScores.length > 0;
 
-  const groupedFindings: Array<{ categoryKey: string; label: string; items: RiskFinding[] }> = [];
-  if (Array.isArray(findingsSorted) && findingsSorted.length > 0) {
-    const byCat: Record<string, RiskFinding[]> = {};
-    findingsSorted.forEach((f) => {
-      const key = (f.category ?? "ohne_kategorie") || "ohne_kategorie";
-      if (!byCat[key]) byCat[key] = [];
-      byCat[key].push(f);
-    });
-    Object.entries(byCat).forEach(([catKey, items]) => {
-      const label = RISK_CATEGORY_LABELS[catKey] ?? prettyKey(catKey);
-      groupedFindings.push({ categoryKey: catKey, label, items });
-    });
-    groupedFindings.sort((a, b) => a.label.localeCompare(b.label, "de"));
-  }
+  const topFromReport: PdfTopRiskItem[] = report.topRisks ?? [];
+  const sortedFindings = Array.isArray(findingsSorted) ? sortFindingsByPriority(findingsSorted) : [];
+  const fallbackTopSlice = sortedFindings.slice(0, 8);
+  const useReportTop = topFromReport.length > 0;
+  const hasTopRisksBlock = useReportTop || fallbackTopSlice.length > 0;
+
+  const hideClaimTopRisksList = topFromReport.length > 0;
+  const hasMoreFindingsThanTop = Array.isArray(findingsSorted) && findingsSorted.length > (useReportTop ? topFromReport.length : fallbackTopSlice.length);
+
+  const nextSteps = report.nextSteps ?? [];
 
   return (
     <>
-      <div style={{ marginBottom: T.space.lg, display: "flex", alignItems: "center", gap: T.space.md, flexWrap: "wrap" }}>
-        <Link href="/app/analysen" style={{ fontSize: 13, fontWeight: 600, color: T.muted, textDecoration: "none" }}>
-          ← Analysen
-        </Link>
-        <span style={{ color: T.faint }}>/</span>
-        <span style={{ fontSize: 13, color: T.text }}>{title}</span>
-      </div>
-
+      {/* A. Berichtskopf */}
       <div style={{ marginBottom: T.space.xl }}>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: T.space.md }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: T.text }}>{title}</h1>
-            <p style={{ margin: "8px 0 0", fontSize: 14, color: T.muted }}>
+        <div style={{ marginBottom: T.space.md, display: "flex", alignItems: "center", gap: T.space.md, flexWrap: "wrap" }}>
+          <Link href="/app/analysen" style={{ fontSize: 13, fontWeight: 600, color: T.muted, textDecoration: "none" }}>
+            ← Analysen
+          </Link>
+          <span style={{ color: T.faint }}>/</span>
+          <span style={{ fontSize: 12, color: T.faint, letterSpacing: "0.04em", textTransform: "uppercase" }}>Gespeicherter Bericht</span>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", justifyContent: "space-between", gap: T.space.lg }}>
+          <div style={{ minWidth: 0, flex: "1 1 280px" }}>
+            <label htmlFor="analyse-title-edit" style={{ display: "block", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.faint, marginBottom: 8 }}>
+              Analyse-Titel
+            </label>
+            <input
+              id="analyse-title-edit"
+              type="text"
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              placeholder={getAnalysisDisplayTitle(null, item.file_name)}
+              autoComplete="off"
+              style={{
+                display: "block",
+                width: "100%",
+                maxWidth: 560,
+                boxSizing: "border-box",
+                margin: 0,
+                padding: "10px 12px",
+                fontSize: 22,
+                fontWeight: 700,
+                letterSpacing: "-0.03em",
+                color: T.text,
+                lineHeight: 1.25,
+                background: T.surface,
+                border: `1px solid ${T.border}`,
+                borderRadius: T.radiusSm,
+                outline: "none",
+              }}
+            />
+            <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+              {titleDirty ? (
+                <button
+                  type="button"
+                  onClick={() => void handleSaveTitle()}
+                  disabled={titleSaving}
+                  style={{
+                    padding: "8px 14px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#0c1222",
+                    background: T.accent,
+                    border: "none",
+                    borderRadius: T.radiusSm,
+                    cursor: titleSaving ? "not-allowed" : "pointer",
+                    opacity: titleSaving ? 0.75 : 1,
+                  }}
+                >
+                  {titleSaving ? "Speichern…" : "Titel speichern"}
+                </button>
+              ) : null}
+              {titleError ? <span style={{ fontSize: 13, color: T.danger }}>{titleError}</span> : null}
+            </div>
+            <p style={{ margin: "10px 0 0", fontSize: 14, color: T.muted }}>
               {item.created_at ? new Date(item.created_at).toLocaleString("de-DE") : "—"}
-              {mappedStatus && (
+              {mappedStatus ? (
                 <>
                   {" · "}
                   <span style={{ textTransform: "capitalize" }}>{mappedStatus}</span>
                 </>
-              )}
+              ) : null}
+              {item.file_name ? (
+                <>
+                  {" · "}
+                  <span title={item.file_name}>Datei: {item.file_name}</span>
+                </>
+              ) : null}
             </p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             {!canPdfExport && (
               <>
-                <span style={{ fontSize: 12, fontWeight: 600, color: T.muted }}>Nur in Pro</span>
-                <Link href="/pricing" style={{ fontSize: 12, fontWeight: 600, color: T.accent, textDecoration: "none" }}>→ Pro</Link>
+                <span style={{ fontSize: 12, fontWeight: 600, color: T.muted }}>PDF nur in Pro</span>
+                <Link href="/pricing" style={{ fontSize: 12, fontWeight: 600, color: T.accent, textDecoration: "none" }}>
+                  → Pro
+                </Link>
               </>
             )}
             <button
@@ -320,25 +469,25 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
               onClick={handlePdfExport}
               disabled={exportLoading || !canPdfExport}
               style={{
-                padding: "8px 14px",
+                padding: "9px 16px",
                 fontSize: 13,
                 fontWeight: 600,
-                color: T.text,
-                background: T.card,
-                border: `1px solid ${T.border}`,
+                color: "#0c1222",
+                background: T.accent,
+                border: "none",
                 borderRadius: T.radiusSm,
                 cursor: exportLoading || !canPdfExport ? "not-allowed" : "pointer",
                 opacity: exportLoading || !canPdfExport ? 0.7 : 1,
               }}
             >
-              {exportLoading ? "Export läuft…" : "PDF exportieren"}
+              {exportLoading ? "PDF …" : "PDF exportieren"}
             </button>
             <button
               type="button"
               onClick={handleDelete}
               disabled={deleteLoading}
               style={{
-                padding: "8px 14px",
+                padding: "9px 14px",
                 fontSize: 13,
                 fontWeight: 600,
                 color: T.danger ?? "#f87171",
@@ -349,240 +498,520 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
                 opacity: deleteLoading ? 0.7 : 1,
               }}
             >
-              {deleteLoading ? "Wird gelöscht…" : "Analyse löschen"}
+              {deleteLoading ? "Löschen …" : "Löschen"}
             </button>
           </div>
         </div>
-        {exportError && (
-          <p style={{ margin: "10px 0 0", fontSize: 13, color: T.danger }}>{exportError}</p>
-        )}
+        {exportError ? <p style={{ margin: "12px 0 0", fontSize: 13, color: T.danger }}>{exportError}</p> : null}
       </div>
 
-      {displaySummary && (
-        <div style={{ marginBottom: T.space.lg }}>
-          <Block title="Management-Zusammenfassung">
-            <div
-              style={{
-                padding: T.space.md,
-                background: "rgba(255,255,255,0.03)",
-                borderRadius: T.radiusSm,
-                borderLeft: `3px solid ${T.accent}`,
-                fontSize: 14,
-                lineHeight: 1.7,
-                color: T.muted,
-                whiteSpace: "pre-wrap",
-                maxWidth: 720,
-              }}
-            >
-              {displaySummary}
-            </div>
-          </Block>
-        </div>
-      )}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: T.space.lg }}>
-        <Block title="Gesamtbewertung">
-          <div style={{ display: "flex", alignItems: "baseline", gap: T.space.lg, flexWrap: "wrap" }}>
+      {/* B. Management-Zone */}
+      <section
+        style={{
+          marginBottom: T.space.xl,
+          padding: T.space.lg,
+          borderRadius: T.radius,
+          border: `1px solid ${T.border}`,
+          background: `linear-gradient(135deg, ${T.surface} 0%, rgba(224,124,94,0.06) 100%)`,
+          borderLeft: `4px solid ${T.accent}`,
+        }}
+      >
+        <ZoneTitle
+          kicker="Entscheidung & Einordnung"
+          title="Management"
+          subtitle="Kurzfassung für Abstimmung mit Angebots- und Kalkulationsteam."
+        />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: T.space.lg, alignItems: "start" }}>
+          {displaySummary ? (
             <div>
-              <div style={{ fontSize: 11, color: T.faint, marginBottom: 4 }}>Gesamt</div>
-              <div style={{ fontSize: 36, fontWeight: 800, color: T.text }}>{displayScore != null ? displayScore : "—"}</div>
-              <div style={{ fontSize: 12, color: T.muted }}>von 100 Punkten</div>
-            </div>
-            {scoreMeta && (
-              <div style={{ maxWidth: 320, fontSize: 12, color: T.muted, lineHeight: 1.6 }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>{scoreMeta.title}</div>
-                <div>{scoreMeta.description}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                Management Summary
               </div>
-            )}
-          </div>
-        </Block>
-
-        {hasKeyFacts && (
-          <Block title="Eckdaten">
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: T.space.md,
-                fontSize: 13,
-                color: T.muted,
-              }}
-            >
-              {keyFactEntries.map(([k, v]) => (
-                <div
-                  key={k}
-                  style={{
-                    padding: T.space.sm,
-                    borderRadius: T.radiusSm,
-                    border: `1px solid ${T.border}`,
-                    background: "rgba(15,23,42,0.7)",
-                  }}
-                >
-                  <div style={{ fontSize: 11, color: T.faint, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>
-                    {prettyKey(k)}
-                  </div>
-                  <div style={{ fontSize: 13, color: T.text }}>{String(v).trim()}</div>
-                </div>
-              ))}
+              <div style={{ fontSize: 14, lineHeight: 1.7, color: T.muted, whiteSpace: "pre-wrap" }}>{displaySummary}</div>
             </div>
-          </Block>
-        )}
+          ) : (
+            <p style={{ margin: 0, fontSize: 13, color: T.faint }}>Kein Management Summary hinterlegt.</p>
+          )}
+          <div
+            style={{
+              padding: T.space.md,
+              borderRadius: T.radiusSm,
+              border: `1px solid ${T.border}`,
+              background: "rgba(0,0,0,0.2)",
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+              Gesamtbewertung
+            </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 40, fontWeight: 800, color: T.text, lineHeight: 1 }}>{displayScore != null ? displayScore : "—"}</span>
+              <span style={{ fontSize: 13, color: T.muted }}>/ 100</span>
+            </div>
+            {report.summary.totalRiskLabel ? (
+              <div style={{ marginTop: 8, fontSize: 14, fontWeight: 600, color: T.text }}>{report.summary.totalRiskLabel}</div>
+            ) : null}
+            {scoreMeta ? (
+              <p style={{ margin: "10px 0 0", fontSize: 13, color: T.muted, lineHeight: 1.55 }}>{scoreMeta.description}</p>
+            ) : null}
+          </div>
+        </div>
+      </section>
 
-        {hasRisks && (
-          <Block title="Risiken">
-            {groupedFindings.length > 0 ? (
+      {/* C. Arbeits-Zone */}
+      <section style={{ marginBottom: T.space.xl }}>
+        <ZoneTitle
+          kicker="Operative Bearbeitung"
+          title="Arbeitsbereiche"
+          subtitle="Eckdaten, priorisierte Risiken, Rückfragen, Klarstellungen und Strategie – in der Reihenfolge der Bearbeitung."
+        />
+
+        <div style={{ display: "flex", flexDirection: "column", gap: T.space.lg }}>
+          {nextSteps.length > 0 ? (
+            <div style={workSurfaceStyle()}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: T.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>
+                Nächste Schritte · vor Angebotsabgabe
+              </div>
+              <ol style={{ margin: 0, paddingLeft: 20, fontSize: 14, color: T.muted, lineHeight: 1.65 }}>
+                {nextSteps.map((s, i) => (
+                  <li key={i} style={{ marginBottom: 6 }}>
+                    {s}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+
+          {hasKeyFacts ? (
+            <div style={workSurfaceStyle()}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: T.space.md }}>Eckdaten</div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: T.space.md,
+                }}
+              >
+                {keyFactRows.map((row) => (
+                  <div
+                    key={row.label + row.value}
+                    style={{
+                      padding: T.space.sm,
+                      borderRadius: T.radiusSm,
+                      border: `1px solid ${T.border}`,
+                      background: "rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    <div style={{ fontSize: 11, color: T.faint, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{row.label}</div>
+                    <div style={{ fontSize: 14, color: T.text, lineHeight: 1.45 }}>{row.value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {hasTopRisksBlock ? (
+            <div style={workSurfaceStyle()}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 6 }}>Top-Risiken</div>
+              <p style={{ margin: `0 0 ${T.space.md}px`, fontSize: 13, color: T.muted, lineHeight: 1.5 }}>
+                Priorisiert nach Dringlichkeit – fachliche Kurzeinordnung ohne Bewertungsrohdaten.
+              </p>
               <div style={{ display: "flex", flexDirection: "column", gap: T.space.md }}>
-                {groupedFindings.map((group) => (
-                  <section key={group.categoryKey}>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: T.faint,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.08em",
-                        marginBottom: 6,
-                      }}
-                    >
-                      {group.label}{" "}
-                      <span style={{ fontWeight: 400, color: T.muted }}>({group.items.length} Risiko{group.items.length === 1 ? "" : "s"})</span>
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: T.space.md }}>
-                      {group.items.slice(0, 16).map((f, i) => {
-                        const riskId = f.id ?? `${group.categoryKey}-${i}`;
-                        const titleText = (f.title ?? "").toString().trim() || group.label || `Risiko ${i + 1}`;
-                        const fullDetail = (f.detail ?? "").toString().trim();
-                        const shortDetail = fullDetail.length > 220 ? `${fullDetail.slice(0, 220)}…` : fullDetail;
-                        const severity = (f.severity ?? "").toString().toLowerCase();
-                        const penalty = typeof f.penalty === "number" ? f.penalty : null;
-
-                        const severityLabel =
-                          severity === "high" ? "Hohes Risiko" : severity === "medium" ? "Mittleres Risiko" : severity === "low" ? "Niedriges Risiko" : "";
-                        const severityColor =
-                          severity === "high" ? "#fecaca" : severity === "medium" ? "#fed7aa" : severity === "low" ? "#bbf7d0" : T.muted;
-
-                        const isExpanded = expandedRiskId === riskId;
-
-                        return (
-                          <div
-                            key={riskId}
-                            style={{
-                              borderRadius: T.radiusSm,
-                              border: `1px solid ${T.border}`,
-                              background: "rgba(15,23,42,0.7)",
-                              padding: T.space.md,
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 6,
-                            }}
-                          >
-                            <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{titleText}</div>
-                            {shortDetail && (
-                              <p style={{ margin: 0, fontSize: 12, color: T.muted, lineHeight: 1.5 }}>
-                                {shortDetail}
-                              </p>
-                            )}
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: 11, marginTop: 2 }}>
-                              {severityLabel && (
-                                <span
-                                  style={{
-                                    padding: "3px 6px",
-                                    borderRadius: 999,
-                                    border: "1px solid transparent",
-                                    background: "rgba(0,0,0,0.3)",
-                                    color: severityColor,
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  {severityLabel}
-                                </span>
-                              )}
-                              {penalty != null && (
-                                <span
-                                  style={{
-                                    padding: "3px 6px",
-                                    borderRadius: 999,
-                                    border: `1px solid ${T.border}`,
-                                    color: T.muted,
-                                  }}
-                                >
-                                  Abzug: {penalty}
-                                </span>
-                              )}
-                            </div>
-                            {fullDetail && fullDetail.length > shortDetail.length && (
+                {useReportTop
+                  ? topFromReport.map((tr, i) => {
+                      const key = `tr-${i}-${tr.title}`;
+                      return (
+                        <div
+                          key={key}
+                          style={{
+                            padding: T.space.md,
+                            borderRadius: T.radiusSm,
+                            border: `1px solid ${T.border}`,
+                            background: "rgba(0,0,0,0.12)",
+                          }}
+                        >
+                          <div style={{ fontSize: 15, fontWeight: 600, color: T.text, marginBottom: 6 }}>{tr.title}</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                            {tr.categoryLabel ? (
+                              <span style={{ fontSize: 11, fontWeight: 600, color: T.muted, padding: "4px 8px", borderRadius: 6, background: "rgba(255,255,255,0.06)" }}>
+                                {tr.categoryLabel}
+                              </span>
+                            ) : null}
+                            {tr.severityHint ? (
+                              <span style={{ fontSize: 11, fontWeight: 600, color: T.warning, padding: "4px 8px", borderRadius: 6, background: "rgba(251,191,36,0.1)" }}>
+                                {tr.severityHint}
+                              </span>
+                            ) : null}
+                          </div>
+                          {tr.detail ? (
+                            <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.6 }}>{cleanRiskProse(tr.detail)}</p>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  : fallbackTopSlice.map((f, i) => {
+                      const riskId = f.id ?? `fb-${i}`;
+                      const catKey = (f.category ?? "").trim();
+                      const catLabel = catKey ? RISK_CATEGORY_LABELS[catKey] ?? labelUnknownCategory(catKey) : "";
+                      const titleText = (f.title ?? "").trim() || `Risiko ${i + 1}`;
+                      const rawDetail = (f.detail ?? "").toString();
+                      const cleaned = cleanRiskProse(rawDetail);
+                      const sev = severityLabelDe(f.severity);
+                      const isOpen = expandedRiskId === riskId;
+                      const techOpen = expandedTechnicalRiskId === riskId;
+                      return (
+                        <div
+                          key={riskId}
+                          style={{
+                            padding: T.space.md,
+                            borderRadius: T.radiusSm,
+                            border: `1px solid ${T.border}`,
+                            background: "rgba(0,0,0,0.12)",
+                          }}
+                        >
+                          <div style={{ fontSize: 15, fontWeight: 600, color: T.text, marginBottom: 6 }}>{titleText}</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                            {catLabel ? (
+                              <span style={{ fontSize: 11, fontWeight: 600, color: T.muted, padding: "4px 8px", borderRadius: 6, background: "rgba(255,255,255,0.06)" }}>
+                                {catLabel}
+                              </span>
+                            ) : null}
+                            {sev ? (
+                              <span style={{ fontSize: 11, fontWeight: 600, color: T.warning, padding: "4px 8px", borderRadius: 6, background: "rgba(251,191,36,0.1)" }}>
+                                {sev}
+                              </span>
+                            ) : null}
+                          </div>
+                          {cleaned ? (
+                            <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                              {isOpen || cleaned.length <= 320 ? cleaned : `${cleaned.slice(0, 320)}…`}
+                            </p>
+                          ) : null}
+                          {cleaned && cleaned.length > 320 ? (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedRiskId(isOpen ? null : riskId)}
+                              style={{
+                                marginTop: 10,
+                                padding: 0,
+                                border: "none",
+                                background: "none",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                color: T.accent,
+                                cursor: "pointer",
+                              }}
+                            >
+                              {isOpen ? "Weniger" : "Vollständige Einordnung"}
+                            </button>
+                          ) : null}
+                          {(typeof f.penalty === "number" || rawDetail.length > 0) ? (
+                            <div style={{ marginTop: 10 }}>
                               <button
                                 type="button"
-                                onClick={() => setExpandedRiskId(isExpanded ? null : riskId)}
+                                onClick={() => setExpandedTechnicalRiskId(techOpen ? null : riskId)}
                                 style={{
-                                  marginTop: 4,
-                                  alignSelf: "flex-start",
-                                  padding: "2px 0",
+                                  padding: 0,
                                   border: "none",
-                                  background: "transparent",
+                                  background: "none",
                                   fontSize: 11,
-                                  color: T.accent,
+                                  fontWeight: 600,
+                                  color: T.faint,
                                   cursor: "pointer",
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.06em",
                                 }}
                               >
-                                {isExpanded ? "Weniger Details" : "Mehr Details"}
+                                {techOpen ? "Technische Details ausblenden" : "Technische Details (optional)"}
                               </button>
-                            )}
-                            {isExpanded && fullDetail && (
+                              {techOpen ? (
+                                <div
+                                  style={{
+                                    marginTop: 8,
+                                    padding: T.space.sm,
+                                    borderRadius: T.radiusSm,
+                                    border: `1px dashed ${T.border}`,
+                                    fontSize: 12,
+                                    color: T.faint,
+                                    fontFamily: "ui-monospace, monospace",
+                                    whiteSpace: "pre-wrap",
+                                    lineHeight: 1.5,
+                                  }}
+                                >
+                                  {typeof f.penalty === "number" ? <div>Interner Abzug (Kategorie): {f.penalty}</div> : null}
+                                  {rawDetail ? <div style={{ marginTop: 6 }}>{rawDetail}</div> : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+              </div>
+            </div>
+          ) : null}
+
+          {hasQuestions ? (
+            <div style={workSurfaceStyle()}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 6 }}>Rückfragen an Auftraggeber / Planung</div>
+              <p style={{ margin: `0 0 ${T.space.md}px`, fontSize: 13, color: T.muted }}>
+                Priorisierte Bieterfragen – für E-Mail oder Rückfragenliste.
+              </p>
+              <ol style={{ margin: 0, paddingLeft: 0, listStyle: "none", counterReset: "rq" }}>
+                {questions.map((q, i) => (
+                  <li
+                    key={i}
+                    style={{
+                      counterIncrement: "rq",
+                      marginBottom: T.space.md,
+                      padding: T.space.md,
+                      borderRadius: T.radiusSm,
+                      border: `1px solid ${T.border}`,
+                      background: "rgba(0,0,0,0.1)",
+                    }}
+                  >
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>{i + 1}.</span>
+                      {q.categoryLabel ? (
+                        <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.05em" }}>{q.categoryLabel}</span>
+                      ) : null}
+                      {isHighPriority(q.priority) ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, color: T.danger, padding: "2px 8px", borderRadius: 999, background: "rgba(248,113,113,0.12)" }}>
+                          Dringend
+                        </span>
+                      ) : null}
+                    </div>
+                    <div style={{ fontSize: 14, color: T.text, lineHeight: 1.6 }}>
+                      {q.title ? <strong>{q.title}: </strong> : null}
+                      {q.text}
+                    </div>
+                    {q.priority != null && q.priority !== "" && !isHighPriority(q.priority) ? (
+                      <div style={{ marginTop: 6, fontSize: 12, color: T.faint }}>Priorität: {String(q.priority)}</div>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+
+          {hasOfferClarifications ? (
+            <div style={workSurfaceStyle()}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 6 }}>Angebotsklarstellungen</div>
+              <p style={{ margin: `0 0 ${T.space.md}px`, fontSize: 13, color: T.muted }}>Formulierungen für Anschreiben oder Anlage – zum Übernehmen.</p>
+              <ol style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
+                {offerClarifications.map((c, i) => (
+                  <li
+                    key={i}
+                    style={{
+                      marginBottom: T.space.md,
+                      padding: T.space.md,
+                      borderRadius: T.radiusSm,
+                      border: `1px solid ${T.border}`,
+                      background: "rgba(0,0,0,0.1)",
+                    }}
+                  >
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>{i + 1}.</span>
+                      {c.categoryLabel ? (
+                        <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.05em" }}>{c.categoryLabel}</span>
+                      ) : null}
+                    </div>
+                    <div style={{ fontSize: 14, color: T.text, lineHeight: 1.65 }}>
+                      {c.title ? <strong>{c.title}: </strong> : null}
+                      {c.text}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+
+          {(hasClaimPotential || showNachtragFallback) && (
+            <div style={{ ...workSurfaceStyle(), borderLeft: `4px solid ${T.accent}` }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 6 }}>Nachtragspotenzial & Angebotsstrategie</div>
+              <p style={{ margin: `0 0 ${T.space.md}px`, fontSize: 13, color: T.muted }}>Einordnung, Maßnahmen und Verhandlung aus der Strategieauswertung.</p>
+              {hasClaimPotential && cp ? (
+                <div style={{ fontSize: 14, color: T.muted, lineHeight: 1.65 }}>
+                  {cp.executiveSummary ? (
+                    <div style={{ marginBottom: T.space.md }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 6 }}>Einordnung</div>
+                      <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{cp.executiveSummary}</p>
+                    </div>
+                  ) : null}
+                  {cp.finalRecommendation ? (
+                    <div style={{ marginBottom: T.space.md }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 6 }}>Empfehlung & Strategie</div>
+                      <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{cp.finalRecommendation}</p>
+                    </div>
+                  ) : null}
+                  {cp.immediateActions && cp.immediateActions.length > 0 ? (
+                    <div style={{ marginBottom: T.space.md }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 6 }}>Sofortmaßnahmen</div>
+                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                        {cp.immediateActions.map((r, i) => (
+                          <li key={i}>{r}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {cp.topNegotiationPoints && cp.topNegotiationPoints.length > 0 ? (
+                    <div style={{ marginBottom: T.space.md }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 6 }}>Verhandlungspunkte</div>
+                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                        {cp.topNegotiationPoints.map((r, i) => (
+                          <li key={i}>{r}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {!hideClaimTopRisksList && cp.topRisks && cp.topRisks.length > 0 ? (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 6 }}>Zusätzliche Stichworte</div>
+                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                        {cp.topRisks.map((r, i) => (
+                          <li key={i}>{r}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              ) : showNachtragFallback && changeOrder ? (
+                <>
+                  {typeof changeOrder.offerStrategySummary?.executiveSummary === "string" && changeOrder.offerStrategySummary.executiveSummary.trim() ? (
+                    <div style={{ fontSize: 14, color: T.muted, lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{changeOrder.offerStrategySummary.executiveSummary}</div>
+                  ) : Array.isArray(changeOrder.opportunities) && changeOrder.opportunities.length > 0 ? (
+                    <p style={{ margin: 0, fontSize: 14, color: T.muted }}>{changeOrder.opportunities.length} Einträge im Nachtragspotenzial.</p>
+                  ) : (
+                    <p style={{ margin: 0, fontSize: 14, color: T.muted }}>Daten aus der Nachtragsanalyse vorhanden.</p>
+                  )}
+                </>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* D. Vertiefung */}
+      {(hasCategoryScores || hasMoreFindingsThanTop) && (
+        <section style={{ marginBottom: T.space.xl }}>
+          <button
+            type="button"
+            onClick={() => setDepthOpen(!depthOpen)}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              padding: T.space.md,
+              borderRadius: T.radius,
+              border: `1px solid ${T.border}`,
+              background: "rgba(0,0,0,0.2)",
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.faint, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>
+              Vertiefung · optional
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: T.text }}>Score-Kategorien & technische Details</div>
+            <div style={{ fontSize: 13, color: T.muted, marginTop: 4 }}>{depthOpen ? "Einklappen" : "Ausklappen – für Kalkulation und Feinarbeit"}</div>
+          </button>
+          {depthOpen ? (
+            <div style={{ marginTop: T.space.md, padding: T.space.lg, borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.card }}>
+              {hasCategoryScores ? (
+                <div style={{ marginBottom: hasMoreFindingsThanTop ? T.space.xl : 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: T.space.md }}>Score nach Kategorien</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: T.space.md }}>
+                    {categoryScores.map((cat: PdfCategoryScore) => (
+                      <div
+                        key={cat.key}
+                        style={{
+                          padding: T.space.md,
+                          borderRadius: T.radiusSm,
+                          border: `1px solid ${T.border}`,
+                          background: T.surface,
+                        }}
+                      >
+                        <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{cat.label}</div>
+                        <div style={{ marginTop: 6, fontSize: 13, color: T.muted }}>
+                          {cat.score != null ? `${cat.score} Punkte` : ""}
+                          {cat.trafficLight ? (
+                            <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600 }}>· Ampel: {trafficLightLabel(cat.trafficLight)}</span>
+                          ) : null}
+                        </div>
+                        {cat.shortReason ? <p style={{ margin: "8px 0 0", fontSize: 13, color: T.muted }}>{cat.shortReason}</p> : null}
+                        {cat.topDrivers && cat.topDrivers.length > 0 ? (
+                          <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12, color: T.faint }}>
+                            {cat.topDrivers.map((d, i) => (
+                              <li key={i}>{d}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {hasMoreFindingsThanTop && Array.isArray(findingsSorted) ? (
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: T.space.sm }}>Alle Einzelrisiken (Liste)</div>
+                  <p style={{ margin: `0 0 ${T.space.md}px`, fontSize: 12, color: T.faint }}>
+                    Vollständige Liste aus der Bewertung – bei Bedarf mit Rohdetails.
+                  </p>
+                  {(() => {
+                    const byCat: Record<string, RiskFinding[]> = {};
+                    findingsSorted.forEach((f) => {
+                      const key = (f.category ?? "ohne_kategorie") || "ohne_kategorie";
+                      if (!byCat[key]) byCat[key] = [];
+                      byCat[key].push(f);
+                    });
+                    const groups = Object.entries(byCat).sort((a, b) =>
+                      (RISK_CATEGORY_LABELS[a[0]] ?? a[0]).localeCompare(RISK_CATEGORY_LABELS[b[0]] ?? b[0], "de")
+                    );
+                    return groups.map(([catKey, items]) => (
+                      <div key={catKey} style={{ marginBottom: T.space.lg }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: T.faint, marginBottom: 8 }}>
+                          {RISK_CATEGORY_LABELS[catKey] ?? labelUnknownCategory(catKey)}
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: T.space.sm }}>
+                          {items.map((f, i) => {
+                            const riskId = f.id ?? `${catKey}-${i}`;
+                            const titleText = (f.title ?? "").trim() || `Risiko ${i + 1}`;
+                            const rawDetail = (f.detail ?? "").toString();
+                            return (
                               <div
+                                key={riskId}
                                 style={{
-                                  marginTop: 4,
-                                  paddingTop: 4,
-                                  borderTop: `1px dashed ${T.border}`,
+                                  padding: T.space.sm,
+                                  borderRadius: T.radiusSm,
+                                  border: `1px solid ${T.border}`,
                                   fontSize: 12,
                                   color: T.muted,
-                                  whiteSpace: "pre-wrap",
                                 }}
                               >
-                                {fullDetail}
+                                <div style={{ fontWeight: 600, color: T.text }}>{titleText}</div>
+                                <div style={{ marginTop: 4 }}>{cleanRiskProse(rawDetail) || "—"}</div>
+                                <details style={{ marginTop: 8 }}>
+                                  <summary style={{ cursor: "pointer", fontSize: 11, color: T.faint }}>Technische Rohdaten</summary>
+                                  <div style={{ marginTop: 6, fontFamily: "ui-monospace, monospace", fontSize: 11, color: T.faint, whiteSpace: "pre-wrap" }}>
+                                    {typeof f.penalty === "number" ? `Abzug: ${f.penalty}\n` : ""}
+                                    {rawDetail}
+                                  </div>
+                                </details>
                               </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ))}
-              </div>
-            ) : Array.isArray(riskCategories) && riskCategories.length > 0 ? (
-              <ul style={{ margin: 0, paddingLeft: T.space.lg, fontSize: 13, color: T.muted }}>
-                {riskCategories.slice(0, 20).map((c: unknown, i: number) => (
-                  <li key={i}>{typeof c === "object" && c != null && "label" in c ? String((c as { label?: string }).label) : String(c)}</li>
-                ))}
-              </ul>
-            ) : null}
-          </Block>
-        )}
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+      )}
 
-        {hasClarifications && (
-          <Block title="Rückfragen">
-            <ul style={{ margin: 0, paddingLeft: T.space.lg, fontSize: 13, color: T.muted }}>
-              {clarificationQuestions!.slice(0, 15).map((q: unknown, i: number) => (
-                <li key={i}>{typeof q === "object" && q != null && "question" in q ? String((q as { question?: string }).question) : String(q)}</li>
-              ))}
-            </ul>
-          </Block>
-        )}
+      <p style={{ margin: `0 0 ${T.space.xl}px`, fontSize: 12, color: T.faint, lineHeight: 1.6, maxWidth: 560 }}>{report.disclaimer.text}</p>
 
-        {hasChangeOrder && (
-          <Block title="Nachtragspotenzial / Angebotsstrategie">
-            {typeof changeOrder!.offerStrategySummary?.executiveSummary === "string" && changeOrder!.offerStrategySummary.executiveSummary.trim() ? (
-              <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{changeOrder!.offerStrategySummary.executiveSummary}</div>
-            ) : Array.isArray(changeOrder!.opportunities) && changeOrder!.opportunities.length > 0 ? (
-              <p style={{ margin: 0, fontSize: 13, color: T.muted }}>{changeOrder!.opportunities.length} Einträge im Nachtragspotenzial.</p>
-            ) : (
-              <p style={{ margin: 0, fontSize: 13, color: T.muted }}>Daten aus der Nachtragsanalyse vorhanden.</p>
-            )}
-          </Block>
-        )}
-      </div>
-
-      <div style={{ marginTop: T.space.xl, display: "flex", flexWrap: "wrap", alignItems: "center", gap: T.space.md }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: T.space.md }}>
         <Link href="/app/analysen" style={{ fontSize: 13, fontWeight: 600, color: T.accent, textDecoration: "none" }}>
           ← Zurück zur Liste
         </Link>
@@ -592,7 +1021,7 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
           style={{
             display: "inline-flex",
             alignItems: "center",
-            padding: "6px 12px",
+            padding: "8px 14px",
             borderRadius: T.radiusSm,
             fontSize: 13,
             fontWeight: 600,
@@ -607,4 +1036,3 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
     </>
   );
 }
-

@@ -59,6 +59,29 @@ const TECHNICAL_TOKENS = [
   "kalkulationsunsicherheit",
 ];
 
+/**
+ * Entfernt typische interne Scoring-/Engine-Formulierungen aus Fließtext (Hauptbericht).
+ * Keine inhaltliche Neubewertung – nur Textbereinigung für Lesbarkeit.
+ */
+export function stripScoringEngineeringJargon(input: string): string {
+  let s = input.replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  s = s.replace(/\([^)]*(?:penalty|treffer|faktor|trefferanzahl|abzug|gewichtung|kategoriegewicht)[^)]*\)/gi, "");
+  s = s.replace(/\[[^\]]*(?:penalty|treffer|faktor|trefferanzahl|abzug|gewichtung)[^\]]*\]/gi, "");
+  s = s.replace(/\b(?:penalty|treffer(?:anzahl)?|faktor|abzug|gewichtung)\s*[:\-]?\s*[\d.,]+\s*%?/gi, "");
+  s = s.replace(/\b(?:treffer|trefferanzahl)\s*[:\-]?\s*[\d.,]+/gi, "");
+  s = s.replace(/\s*[;,]\s*[;,]/g, ";");
+  s = s.replace(/\s{2,}/g, " ").trim();
+  const sentences = s.split(/(?<=[.!?])\s+/).filter((x) => x.trim());
+  const kept = sentences.filter((sent) => {
+    const t = sent.trim();
+    if (t.length < 100 && /^(?:penalty|treffer|faktor|abzug|trefferanzahl)\b/i.test(t)) return false;
+    return true;
+  });
+  s = kept.join(" ").replace(/\s+/g, " ").trim();
+  return s;
+}
+
 export function sanitizeText(
   value: unknown,
   options?: { maxLength?: number; stripTechnical?: boolean }

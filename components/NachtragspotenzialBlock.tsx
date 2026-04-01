@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { createContext, useContext, useMemo, useState } from "react";
+import { appTheme as T } from "@/components/app/appTheme";
 import Link from "next/link";
 import { sanitizeForDisplay } from "@/lib/displayText";
 import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
@@ -126,7 +127,16 @@ export type NachtragspotenzialAnalysisResult = {
 const SHOW_DEBUG_UI = false;
 
 /** Einheitliches visuelles System — Nachtragspotenzial-Modul (nur UI). */
-const NP = {
+type NachtragPalette = {
+  r: { sm: number; md: number; lg: number };
+  border: { hairline: string; card: string; accent: string };
+  bg: { canvas: string; card: string; elevated: string; action: string; next: string };
+  text: { title: string; body: string; muted: string; hint: string };
+  shadow: { kpi: string; card: string };
+  accent: { primary: string; ink: string };
+};
+
+const NP_LIGHT: NachtragPalette = {
   r: { sm: 8, md: 10, lg: 12 },
   border: { hairline: "1px solid #e2e8f0", card: "1px solid #e2e8f0", accent: "1px solid #cbd5e1" },
   bg: { canvas: "#f8fafc", card: "#ffffff", elevated: "#f1f5f9", action: "#eff6ff", next: "#f8fafc" },
@@ -134,6 +144,50 @@ const NP = {
   shadow: { kpi: "0 1px 3px rgba(15,23,42,0.07), 0 1px 2px rgba(15,23,42,0.04)", card: "0 1px 2px rgba(15,23,42,0.05)" },
   accent: { primary: "#2563eb", ink: "#1e293b" },
 };
+
+const NachtragPaletteContext = createContext<NachtragPalette>(NP_LIGHT);
+
+function useNachtragPalette() {
+  return useContext(NachtragPaletteContext);
+}
+
+/** Dark-Route: gleiche Struktur wie NP_LIGHT, Token aus PAGE_DESIGN-Override + appTheme. */
+function buildDarkPalette(dt: {
+  cardBorder: string;
+  cardBg: string;
+  textPrimary: string;
+  textSecondary: string;
+  textMuted: string;
+  primary: string;
+}): NachtragPalette {
+  const hair = `1px solid ${dt.cardBorder}`;
+  return {
+    r: NP_LIGHT.r,
+    border: {
+      hairline: hair,
+      card: hair,
+      accent: `1px solid ${dt.primary}`,
+    },
+    bg: {
+      canvas: T.surface,
+      card: dt.cardBg,
+      elevated: "rgba(255,255,255,0.06)",
+      action: T.accentMuted,
+      next: T.card,
+    },
+    text: {
+      title: dt.textPrimary,
+      body: dt.textSecondary,
+      muted: dt.textMuted,
+      hint: dt.textMuted,
+    },
+    shadow: {
+      kpi: "0 1px 3px rgba(0,0,0,0.25)",
+      card: "0 1px 2px rgba(0,0,0,0.2)",
+    },
+    accent: { primary: dt.primary, ink: dt.textPrimary },
+  };
+}
 
 const CLUSTER_LABELS: Record<string, string> = {
   leistungsaenderung: "Leistungsänderung",
@@ -424,10 +478,13 @@ function WorkSnapshotMiniGrid({
   belastbarkeit: string[];
   risiko: string[];
 }) {
+  const P = useNachtragPalette();
+  const isDarkSurface = P.bg.card !== NP_LIGHT.bg.card;
+  const gridGutter = isDarkSurface ? "rgba(255,255,255,0.12)" : "#cbd5e1";
   const cell = (title: string, lines: string[]) => (
     <div
       style={{
-        background: NP.bg.card,
+        background: P.bg.card,
         padding: "8px 10px 10px",
         minWidth: 0,
       }}
@@ -436,16 +493,16 @@ function WorkSnapshotMiniGrid({
         style={{
           fontWeight: 700,
           fontSize: 11,
-          color: NP.text.muted,
+          color: P.text.muted,
           marginBottom: 6,
           paddingBottom: 6,
-          borderBottom: "1px solid #e2e8f0",
+          borderBottom: P.border.hairline,
           letterSpacing: "0.02em",
         }}
       >
         {title}
       </div>
-      <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, color: NP.text.body, lineHeight: 1.38, display: "grid", gap: 2 }}>
+      <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, color: P.text.body, lineHeight: 1.38, display: "grid", gap: 2 }}>
         {lines.map((line, i) => (
           <li key={i} style={{ paddingLeft: 2 }}>
             {line}
@@ -461,11 +518,11 @@ function WorkSnapshotMiniGrid({
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(152px, 1fr))",
         gap: 1,
-        background: "#cbd5e1",
-        borderRadius: NP.r.md,
+        background: gridGutter,
+        borderRadius: P.r.md,
         overflow: "hidden",
-        border: "1px solid #cbd5e1",
-        boxShadow: NP.shadow.card,
+        border: P.border.hairline,
+        boxShadow: P.shadow.card,
       }}
     >
       {cell("Treiber", treiber)}
@@ -486,6 +543,7 @@ function NewEngineView({
   labelForSourceType,
   sanitize,
 }: NewEngineViewProps) {
+  const P = useNachtragPalette();
   const [analysisOverviewOpen, setAnalysisOverviewOpen] = useState(false);
   const [workOverviewOpen, setWorkOverviewOpen] = useState(false);
   const [fieldsOpen, setFieldsOpen] = useState(false);
@@ -500,16 +558,16 @@ function NewEngineView({
     justifyContent: "space-between",
     width: "100%",
     padding: "10px 4px",
-    background: NP.bg.card,
-    border: NP.border.hairline,
-    borderRadius: NP.r.sm,
+    background: P.bg.card,
+    border: P.border.hairline,
+    borderRadius: P.r.sm,
     cursor: "pointer",
     fontWeight: 700,
-    color: NP.text.title,
+    color: P.text.title,
     fontSize: 13,
     textAlign: "left",
     marginTop: 8,
-    boxShadow: NP.shadow.card,
+    boxShadow: P.shadow.card,
   };
 
   return (
@@ -518,23 +576,23 @@ function NewEngineView({
       <div style={{ marginTop: 0 }}>
         <button type="button" onClick={() => setAnalysisOverviewOpen((v) => !v)} style={{ ...accBtn, marginTop: 0 }}>
           <span style={{ letterSpacing: "-0.01em" }}>Warum diese Einschätzung?</span>
-          <span style={{ fontSize: 11, color: NP.text.muted, fontWeight: 700 }}>{analysisOverviewOpen ? "▼" : "▶"}</span>
+          <span style={{ fontSize: 11, color: P.text.muted, fontWeight: 700 }}>{analysisOverviewOpen ? "▼" : "▶"}</span>
         </button>
         {analysisOverviewOpen && (
           <div style={{ marginTop: 12, paddingLeft: 2, paddingRight: 4 }}>
             <div style={{ display: "grid", gap: 10 }}>
               {why.main.map((line, i) => (
-                <p key={i} style={{ margin: 0, fontSize: 13, color: NP.text.body, lineHeight: 1.55 }}>
+                <p key={i} style={{ margin: 0, fontSize: 13, color: P.text.body, lineHeight: 1.55 }}>
                   {sanitize(line)}
                 </p>
               ))}
             </div>
             {why.uncertainties.length > 0 && (
-              <div style={{ marginTop: 12, padding: "10px 12px", background: NP.bg.card, borderRadius: NP.r.sm, border: NP.border.hairline }}>
-                <div style={{ fontWeight: 700, fontSize: 12, color: NP.text.muted, marginBottom: 6 }}>Was unsicher bleibt</div>
+              <div style={{ marginTop: 12, padding: "10px 12px", background: P.bg.card, borderRadius: P.r.sm, border: P.border.hairline }}>
+                <div style={{ fontWeight: 700, fontSize: 12, color: P.text.muted, marginBottom: 6 }}>Was unsicher bleibt</div>
                 <div style={{ display: "grid", gap: 6 }}>
                   {why.uncertainties.map((line, i) => (
-                    <p key={i} style={{ margin: 0, fontSize: 12, color: "#475569", lineHeight: 1.45 }}>
+                    <p key={i} style={{ margin: 0, fontSize: 12, color: P.text.body, lineHeight: 1.45 }}>
                       {sanitize(line)}
                     </p>
                   ))}
@@ -549,7 +607,7 @@ function NewEngineView({
       <div style={{ marginTop: 10 }}>
         <button type="button" onClick={() => setWorkOverviewOpen((v) => !v)} style={accBtn}>
           <span style={{ letterSpacing: "-0.01em" }}>Arbeitslage auf einen Blick</span>
-          <span style={{ fontSize: 11, color: NP.text.muted, fontWeight: 700 }}>{workOverviewOpen ? "▼" : "▶"}</span>
+          <span style={{ fontSize: 11, color: P.text.muted, fontWeight: 700 }}>{workOverviewOpen ? "▼" : "▶"}</span>
         </button>
         {workOverviewOpen && (
           <WorkSnapshotMiniGrid
@@ -565,7 +623,7 @@ function NewEngineView({
       <div style={{ marginTop: 10 }}>
         <button type="button" onClick={() => setFieldsOpen((v) => !v)} style={accBtn}>
           <span style={{ letterSpacing: "-0.01em" }}>Arbeitsliste Nachtragsfelder</span>
-          <span style={{ fontSize: 11, color: NP.text.muted, fontWeight: 700 }}>{fieldsOpen ? "▼" : "▶"}</span>
+          <span style={{ fontSize: 11, color: P.text.muted, fontWeight: 700 }}>{fieldsOpen ? "▼" : "▶"}</span>
         </button>
         {fieldsOpen && (
           <>
@@ -583,7 +641,7 @@ function NewEngineView({
                 />
               ))}
             </div>
-            <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #e2e8f0", color: NP.text.hint, fontSize: 11, lineHeight: 1.45 }}>
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: P.border.hairline, color: P.text.hint, fontSize: 11, lineHeight: 1.45 }}>
               Operative Liste — technische Rohdaten nur im Expertenmodus.
             </div>
           </>
@@ -610,6 +668,8 @@ function ItemCard({
   labelForSourceType: (v: ChangePotentialSourceType) => string;
   sanitize: (s: string) => string;
 }) {
+  const P = useNachtragPalette();
+  const isDarkSurface = P.bg.card !== NP_LIGHT.bg.card;
   const handlung = mapRecommendedToHandlung(item.recommendedAction);
   const prio = priorityFromImpact(item.impactLevel);
   const nextParts = buildNextStepParts(item);
@@ -635,16 +695,16 @@ function ItemCard({
   return (
     <div
       style={{
-        border: NP.border.card,
-        borderRadius: NP.r.md,
-        borderLeft: `3px solid ${NP.accent.primary}`,
+        border: P.border.card,
+        borderRadius: P.r.md,
+        borderLeft: `3px solid ${P.accent.primary}`,
         padding: "12px 14px 12px 13px",
-        background: NP.bg.card,
-        boxShadow: NP.shadow.card,
+        background: P.bg.card,
+        boxShadow: P.shadow.card,
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid #f1f5f9" }}>
-        <div style={{ fontWeight: 700, color: NP.text.title, fontSize: 14, lineHeight: 1.35, flex: 1, letterSpacing: "-0.02em" }}>{sanitize(item.title)}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, paddingBottom: 8, borderBottom: P.border.hairline }}>
+        <div style={{ fontWeight: 700, color: P.text.title, fontSize: 14, lineHeight: 1.35, flex: 1, letterSpacing: "-0.02em" }}>{sanitize(item.title)}</div>
         <span
           title="Priorität"
           style={{
@@ -653,9 +713,31 @@ function ItemCard({
             fontWeight: 700,
             padding: "5px 11px",
             borderRadius: 6,
-            background: prio === "hoch" ? "#fff1f2" : prio === "mittel" ? "#fffbeb" : NP.bg.canvas,
-            color: prio === "hoch" ? "#be123c" : prio === "mittel" ? "#b45309" : "#64748b",
-            border: `1px solid ${prio === "hoch" ? "#fecdd3" : prio === "mittel" ? "#fde68a" : "#e2e8f0"}`,
+            background: isDarkSurface
+              ? prio === "hoch"
+                ? "rgba(248,113,113,0.18)"
+                : prio === "mittel"
+                  ? "rgba(251,191,36,0.16)"
+                  : P.bg.canvas
+              : prio === "hoch"
+                ? "#fff1f2"
+                : prio === "mittel"
+                  ? "#fffbeb"
+                  : P.bg.canvas,
+            color: prio === "hoch" ? (isDarkSurface ? "#fb7185" : "#be123c") : prio === "mittel" ? (isDarkSurface ? "#fbbf24" : "#b45309") : P.text.muted,
+            border: `1px solid ${
+              isDarkSurface
+                ? prio === "hoch"
+                  ? "rgba(248,113,113,0.35)"
+                  : prio === "mittel"
+                    ? "rgba(251,191,36,0.35)"
+                    : T.border
+                : prio === "hoch"
+                  ? "#fecdd3"
+                  : prio === "mittel"
+                    ? "#fde68a"
+                    : "#e2e8f0"
+            }`,
             fontVariantNumeric: "tabular-nums",
           }}
         >
@@ -664,12 +746,12 @@ function ItemCard({
       </div>
 
       {bezug ? (
-        <div style={{ fontSize: 11, color: NP.text.hint, marginBottom: 10, lineHeight: 1.35 }}>{sanitize(bezug)}</div>
+        <div style={{ fontSize: 11, color: P.text.hint, marginBottom: 10, lineHeight: 1.35 }}>{sanitize(bezug)}</div>
       ) : null}
 
       <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: NP.text.muted, marginBottom: 5 }}>Inhalt</div>
-        <div style={{ fontSize: 13, color: NP.text.body, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{sanitize(item.reasoning)}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: P.text.muted, marginBottom: 5 }}>Inhalt</div>
+        <div style={{ fontSize: 13, color: P.text.body, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{sanitize(item.reasoning)}</div>
       </div>
 
       <div
@@ -680,16 +762,16 @@ function ItemCard({
           justifyContent: "space-between",
           gap: "10px 16px",
           padding: "10px 0",
-          borderTop: "1px solid #e2e8f0",
+          borderTop: P.border.hairline,
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: NP.text.muted, marginBottom: 4 }}>Aktion</div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: NP.accent.primary, letterSpacing: "-0.02em" }}>{handlung}</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: P.text.muted, marginBottom: 4 }}>Aktion</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: P.accent.primary, letterSpacing: "-0.02em" }}>{handlung}</div>
         </div>
-        <div style={{ fontSize: 11, color: NP.text.hint, textAlign: "right", maxWidth: 200 }}>
-          <span style={{ color: NP.text.hint }}>Tragfähigkeit </span>
-          <span style={{ fontWeight: 600, color: NP.text.muted }}>{labelForEnforceability(item.enforceability)}</span>
+        <div style={{ fontSize: 11, color: P.text.hint, textAlign: "right", maxWidth: 200 }}>
+          <span style={{ color: P.text.hint }}>Tragfähigkeit </span>
+          <span style={{ fontWeight: 600, color: P.text.muted }}>{labelForEnforceability(item.enforceability)}</span>
         </div>
       </div>
 
@@ -697,40 +779,53 @@ function ItemCard({
         style={{
           marginTop: 10,
           padding: "10px 0 0 12px",
-          borderLeft: `3px solid ${NP.accent.primary}`,
-          background: "linear-gradient(90deg, #eff6ff 0%, #ffffff 48%)",
+          borderLeft: `3px solid ${P.accent.primary}`,
+          background: isDarkSurface
+            ? `linear-gradient(90deg, ${T.accentMuted} 0%, ${P.bg.card} 48%)`
+            : "linear-gradient(90deg, #eff6ff 0%, #ffffff 48%)",
         }}
       >
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#1d4ed8", marginBottom: 6 }}>Als Nächstes</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: isDarkSurface ? T.accent : "#1d4ed8", marginBottom: 6 }}>Als Nächstes</div>
         {nextParts.length > 0 ? (
           <div style={{ display: "grid", gap: 6 }}>
-            {nextParts.map((p, i) => (
+            {nextParts.map((part, i) => (
               <div key={i}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: NP.text.muted, marginBottom: 2 }}>{p.label}</div>
-                <div style={{ fontSize: 13, color: NP.text.title, lineHeight: 1.4 }}>{sanitize(p.text)}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: P.text.muted, marginBottom: 2 }}>{part.label}</div>
+                <div style={{ fontSize: 13, color: P.text.title, lineHeight: 1.4 }}>{sanitize(part.text)}</div>
               </div>
             ))}
           </div>
         ) : (
-          <div style={{ fontSize: 12, color: NP.text.muted, lineHeight: 1.45 }}>Rückfrage oder Klarstellung vorbereiten und intern abstimmen.</div>
+          <div style={{ fontSize: 12, color: P.text.muted, lineHeight: 1.45 }}>Rückfrage oder Klarstellung vorbereiten und intern abstimmen.</div>
         )}
       </div>
 
       {showMeta && (
-        <div style={{ marginTop: 8, fontSize: 10, color: "#cbd5e1", lineHeight: 1.35 }}>
+        <div style={{ marginTop: 8, fontSize: 10, color: isDarkSurface ? T.muted : "#cbd5e1", lineHeight: 1.35 }}>
           {labelForFieldType(item.fieldType)} · {labelForMechanism(item.changeMechanism)}
         </div>
       )}
 
       {item.commercialStrategy && isExpertMode && (
-        <div style={{ marginTop: 8, padding: "8px 10px", background: NP.bg.action, borderRadius: NP.r.sm, fontSize: 11, color: NP.text.body, lineHeight: 1.4, border: "1px solid #bfdbfe" }}>
-          <span style={{ fontWeight: 700, color: "#1d4ed8" }}>Kommerziell </span>
+        <div
+          style={{
+            marginTop: 8,
+            padding: "8px 10px",
+            background: P.bg.action,
+            borderRadius: P.r.sm,
+            fontSize: 11,
+            color: P.text.body,
+            lineHeight: 1.4,
+            border: isDarkSurface ? `1px solid ${T.border}` : "1px solid #bfdbfe",
+          }}
+        >
+          <span style={{ fontWeight: 700, color: isDarkSurface ? T.accent : "#1d4ed8" }}>Kommerziell </span>
           {labelFor(COMMERCIAL_STRATEGY_ACTION_LABELS, item.commercialStrategy.primaryAction)} — {sanitize(truncateOneLine(item.commercialStrategy.strategyReasoning, 140))}
         </div>
       )}
 
       {!isExpertMode && (item.llmValidated || item.llmAdjusted) && (
-        <div style={{ marginTop: 6, fontSize: 10, color: "#cbd5e1" }}>{item.llmAdjusted ? "KI überarbeitet" : "KI geprüft"}</div>
+        <div style={{ marginTop: 6, fontSize: 10, color: isDarkSurface ? T.muted : "#cbd5e1" }}>{item.llmAdjusted ? "KI überarbeitet" : "KI geprüft"}</div>
       )}
 
       {hasTech && (
@@ -740,7 +835,7 @@ function ItemCard({
               cursor: "pointer",
               fontSize: 11,
               fontWeight: 600,
-              color: NP.text.hint,
+              color: P.text.hint,
               listStyle: "none",
               outline: "none",
             }}
@@ -751,18 +846,18 @@ function ItemCard({
             style={{
               marginTop: 8,
               padding: "8px 10px",
-              background: NP.bg.canvas,
-              borderRadius: NP.r.sm,
+              background: P.bg.canvas,
+              borderRadius: P.r.sm,
               fontSize: 10,
-              color: NP.text.muted,
+              color: P.text.muted,
               lineHeight: 1.45,
-              border: NP.border.hairline,
+              border: P.border.hairline,
             }}
           >
             {item.sourceType != null && <div>Quelle: {labelForSourceType(item.sourceType)}</div>}
             {item.sourcePath && <div>Pfad: {sanitize(item.sourcePath)}</div>}
             {item.sourceQuote && (
-              <div style={{ fontFamily: "ui-monospace, monospace", marginTop: 4, wordBreak: "break-word", color: NP.text.hint }}>
+              <div style={{ fontFamily: "ui-monospace, monospace", marginTop: 4, wordBreak: "break-word", color: P.text.hint }}>
                 „{sanitize(String(item.sourceQuote).slice(0, 100))}{item.sourceQuote.length > 100 ? "…" : ""}“
               </div>
             )}
@@ -796,6 +891,7 @@ type LegacyViewProps = {
 };
 
 function LegacyView({ analysis, deduplicatedOpportunities, isExpertMode, sanitize }: LegacyViewProps) {
+  const P = useNachtragPalette();
   return (
     <>
       <div style={{ marginTop: 14 }}>
@@ -806,14 +902,14 @@ function LegacyView({ analysis, deduplicatedOpportunities, isExpertMode, sanitiz
           const level = opps.length === 0 ? "Keine" : hasHigh ? "Hoch" : hasMedium ? "Mittel" : "Gering";
           const levelTone = level === "Hoch" ? "#b00020" : level === "Mittel" ? "#a36b00" : level === "Keine" ? "#0a7a2f" : "#666";
           return (
-            <div style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>
+            <div style={{ fontWeight: 800, fontSize: 16, color: P.text.title }}>
               Nachtragspotenzial: <span style={{ color: levelTone }}>{level}</span>
             </div>
           );
         })()}
       </div>
-      <div style={{ marginTop: 14, fontWeight: 800, color: "#333", fontSize: 14 }}>Mögliche Ursachen:</div>
-      <ul style={{ marginTop: 8, paddingLeft: 20, color: "#333", fontSize: 14, lineHeight: 1.6 }}>
+      <div style={{ marginTop: 14, fontWeight: 800, color: P.text.title, fontSize: 14 }}>Mögliche Ursachen:</div>
+      <ul style={{ marginTop: 8, paddingLeft: 20, color: P.text.body, fontSize: 14, lineHeight: 1.6 }}>
         {deduplicatedOpportunities.map((o) => (
           <li key={o.id} style={{ marginBottom: 4 }}>{sanitize(o.title ?? "")}</li>
         ))}
@@ -831,28 +927,28 @@ function LegacyView({ analysis, deduplicatedOpportunities, isExpertMode, sanitiz
             });
             if (items.length === 0) return null;
             return (
-              <div key={cluster} style={{ border: "1px solid #eee", borderRadius: 12, padding: 14, background: "#fafafa" }}>
-                <div style={{ fontSize: 12, color: "#666", fontWeight: 900, marginBottom: 10 }}>
+              <div key={cluster} style={{ border: P.border.hairline, borderRadius: 12, padding: 14, background: P.bg.canvas }}>
+                <div style={{ fontSize: 12, color: P.text.muted, fontWeight: 900, marginBottom: 10 }}>
                   {CLUSTER_LABELS[cluster] ?? cluster} ({items.length})
                 </div>
                 <div style={{ display: "grid", gap: 10 }}>
                   {items.map((o) => (
-                    <div key={o.id} style={{ border: "1px solid #e5e5e5", borderRadius: 10, padding: 12, background: "#fff" }}>
+                    <div key={o.id} style={{ border: P.border.hairline, borderRadius: 10, padding: 12, background: P.bg.card }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontWeight: 800, color: "#111" }}>{sanitize(o.title ?? "")}</span>
+                        <span style={{ fontWeight: 800, color: P.text.title }}>{sanitize(o.title ?? "")}</span>
                         <div style={{ display: "flex", gap: 8, fontSize: 11, fontWeight: 700 }}>
-                          <span style={{ color: o.potential === "high" ? "#b00020" : o.potential === "medium" ? "#a36b00" : "#666" }}>
+                          <span style={{ color: o.potential === "high" ? "#b00020" : o.potential === "medium" ? "#a36b00" : P.text.muted }}>
                             Potential: {o.potential}
                           </span>
-                          {o.riskLevel && <span style={{ color: "#666" }}>Risiko: {o.riskLevel}</span>}
-                          {o.assertiveness && <span style={{ color: "#666" }}>Assertiv: {o.assertiveness}</span>}
+                          {o.riskLevel && <span style={{ color: P.text.muted }}>Risiko: {o.riskLevel}</span>}
+                          {o.assertiveness && <span style={{ color: P.text.muted }}>Assertiv: {o.assertiveness}</span>}
                         </div>
                       </div>
-                      <div style={{ marginTop: 8, fontSize: 13, color: "#333", whiteSpace: "pre-wrap" }}>
+                      <div style={{ marginTop: 8, fontSize: 13, color: P.text.body, whiteSpace: "pre-wrap" }}>
                         {sanitize(o.reason ?? "")}
                       </div>
                       {o.sourceTextSnippets && o.sourceTextSnippets.length > 0 && (
-                        <div style={{ marginTop: 8, fontSize: 11, color: "#999", fontFamily: "ui-monospace, monospace" }}>
+                        <div style={{ marginTop: 8, fontSize: 11, color: P.text.hint, fontFamily: "ui-monospace, monospace" }}>
                           {o.sourceTextSnippets.slice(0, 2).map((s, i) => (
                             <div key={i} style={{ marginTop: 4 }}>
                               &quot;{sanitize(String(s).slice(0, 100))}{s.length > 100 ? "…" : ""}&quot;
@@ -861,7 +957,7 @@ function LegacyView({ analysis, deduplicatedOpportunities, isExpertMode, sanitiz
                         </div>
                       )}
                       {o.sourceFindingIds && o.sourceFindingIds.length > 0 && (
-                        <div style={{ marginTop: 6, fontSize: 11, color: "#777" }}>
+                        <div style={{ marginTop: 6, fontSize: 11, color: P.text.hint }}>
                           Quellen: {o.sourceFindingIds.join(", ")}
                           {o.sourceType && o.sourceType.length > 0 && ` [${o.sourceType.join(", ")}]`}
                         </div>
@@ -874,7 +970,7 @@ function LegacyView({ analysis, deduplicatedOpportunities, isExpertMode, sanitiz
           })}
         </div>
       )}
-      <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #eee", color: "#666", fontSize: 13, lineHeight: 1.5 }}>
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: P.border.hairline, color: P.text.muted, fontSize: 13, lineHeight: 1.5 }}>
         Unklare oder fehlende Leistungsbeschreibungen, Schnittstellen und Erschwernisse können zu Nachtragsansprüchen führen. (Legacy-Darstellung.)
       </div>
     </>
@@ -890,6 +986,7 @@ function NachtragExecutivePanel({
   analysis: NachtragspotenzialAnalysisResult;
   sanitize: (s: string) => string;
 }) {
+  const P = useNachtragPalette();
   const v2 = (analysis as any)?.changePotentialSummary?.v2Debug;
   const hasV2 = !!v2 && typeof v2.potentialScore === "number" && typeof v2.enforceabilityScore === "number";
 
@@ -904,17 +1001,17 @@ function NachtragExecutivePanel({
       <div
         style={{
           marginBottom: 16,
-          border: NP.border.card,
-          borderRadius: NP.r.md,
+          border: P.border.card,
+          borderRadius: P.r.md,
           padding: "12px 14px",
-          background: NP.bg.card,
-          boxShadow: NP.shadow.card,
+          background: P.bg.card,
+          boxShadow: P.shadow.card,
         }}
       >
-        <div style={{ fontWeight: 700, color: NP.text.title, marginBottom: 4, fontSize: 13, letterSpacing: "-0.02em" }}>Nachtragspotenzial</div>
-        <div style={{ fontSize: 12, color: NP.text.muted, lineHeight: 1.45 }}>
-          Einordnung folgt. Orientierung: <span style={{ fontWeight: 700, color: NP.text.body, fontVariantNumeric: "tabular-nums" }}>{Math.round(Number(index) || 0)}</span>
-          <span style={{ color: NP.text.hint }}>/100</span>
+        <div style={{ fontWeight: 700, color: P.text.title, marginBottom: 4, fontSize: 13, letterSpacing: "-0.02em" }}>Nachtragspotenzial</div>
+        <div style={{ fontSize: 12, color: P.text.muted, lineHeight: 1.45 }}>
+          Einordnung folgt. Orientierung: <span style={{ fontWeight: 700, color: P.text.body, fontVariantNumeric: "tabular-nums" }}>{Math.round(Number(index) || 0)}</span>
+          <span style={{ color: P.text.hint }}>/100</span>
         </div>
       </div>
     );
@@ -923,11 +1020,11 @@ function NachtragExecutivePanel({
   const view = buildNachtragCustomerView({ v2 });
 
   const kpiCard: React.CSSProperties = {
-    border: NP.border.card,
-    borderRadius: NP.r.md,
+    border: P.border.card,
+    borderRadius: P.r.md,
     padding: "12px 14px",
-    background: NP.bg.card,
-    boxShadow: NP.shadow.kpi,
+    background: P.bg.card,
+    boxShadow: P.shadow.kpi,
     minHeight: 92,
     display: "flex",
     flexDirection: "column",
@@ -935,11 +1032,11 @@ function NachtragExecutivePanel({
   };
 
   const insightCard: React.CSSProperties = {
-    border: NP.border.card,
-    borderRadius: NP.r.md,
+    border: P.border.card,
+    borderRadius: P.r.md,
     padding: "12px 14px",
-    background: NP.bg.card,
-    boxShadow: NP.shadow.card,
+    background: P.bg.card,
+    boxShadow: P.shadow.card,
     minHeight: 120,
   };
 
@@ -947,103 +1044,96 @@ function NachtragExecutivePanel({
     <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
         <div style={kpiCard}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: NP.text.muted }}>Potenzial</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: P.text.muted }}>Potenzial</div>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginTop: 4 }}>
-            <span style={{ fontSize: 22, fontWeight: 800, color: NP.text.title, letterSpacing: "-0.03em", lineHeight: 1.1 }}>{view.potentialLabel}</span>
-            <span style={{ fontSize: 20, fontWeight: 800, color: NP.accent.primary, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>{Math.round(view.potentialScore)}</span>
+            <span style={{ fontSize: 22, fontWeight: 800, color: P.text.title, letterSpacing: "-0.03em", lineHeight: 1.1 }}>{view.potentialLabel}</span>
+            <span style={{ fontSize: 20, fontWeight: 800, color: P.accent.primary, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>{Math.round(view.potentialScore)}</span>
           </div>
-          <div style={{ fontSize: 11, color: NP.text.hint, fontWeight: 500 }}>Skala 0–100</div>
+          <div style={{ fontSize: 11, color: P.text.hint, fontWeight: 500 }}>Skala 0–100</div>
         </div>
         <div style={kpiCard}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: NP.text.muted }}>Durchsetzung</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: P.text.muted }}>Durchsetzung</div>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginTop: 4 }}>
-            <span style={{ fontSize: 22, fontWeight: 800, color: NP.text.title, letterSpacing: "-0.03em", lineHeight: 1.1 }}>{view.enforceabilityLabel}</span>
-            <span style={{ fontSize: 20, fontWeight: 800, color: NP.accent.primary, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>{Math.round(view.enforceabilityScore)}</span>
+            <span style={{ fontSize: 22, fontWeight: 800, color: P.text.title, letterSpacing: "-0.03em", lineHeight: 1.1 }}>{view.enforceabilityLabel}</span>
+            <span style={{ fontSize: 20, fontWeight: 800, color: P.accent.primary, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>{Math.round(view.enforceabilityScore)}</span>
           </div>
-          <div style={{ fontSize: 11, color: NP.text.hint, fontWeight: 500 }}>Skala 0–100</div>
+          <div style={{ fontSize: 11, color: P.text.hint, fontWeight: 500 }}>Skala 0–100</div>
         </div>
         <div style={kpiCard}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: NP.text.muted }}>Belastbarkeit</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: NP.text.title, letterSpacing: "-0.03em", marginTop: 4, lineHeight: 1.15 }}>{view.confidenceLabel}</div>
-          <div style={{ fontSize: 11, color: NP.text.muted, lineHeight: 1.35, marginTop: 4 }}>{sanitize(humanizeConfidenceNotes(view.confidenceReason))}</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: P.text.muted }}>Belastbarkeit</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: P.text.title, letterSpacing: "-0.03em", marginTop: 4, lineHeight: 1.15 }}>{view.confidenceLabel}</div>
+          <div style={{ fontSize: 11, color: P.text.muted, lineHeight: 1.35, marginTop: 4 }}>{sanitize(humanizeConfidenceNotes(view.confidenceReason))}</div>
         </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
         <div style={insightCard}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: NP.text.body, marginBottom: 8 }}>Treiber</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: P.text.body, marginBottom: 8 }}>Treiber</div>
           {view.topDrivers.length > 0 ? (
-            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 12, color: NP.text.body, lineHeight: 1.45 }}>
+            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 12, color: P.text.body, lineHeight: 1.45 }}>
               {view.topDrivers.slice(0, 3).map((d, i) => (
                 <li key={i}>{sanitize(d)}</li>
               ))}
             </ul>
           ) : (
-            <div style={{ fontSize: 12, color: NP.text.hint }}>—</div>
+            <div style={{ fontSize: 12, color: P.text.hint }}>—</div>
           )}
         </div>
 
         <div style={insightCard}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: NP.text.body, marginBottom: 8 }}>Schwerpunkte</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: P.text.body, marginBottom: 8 }}>Schwerpunkte</div>
           {view.topLevers.length > 0 ? (
             <div style={{ display: "grid", gap: 8 }}>
               {view.topLevers.slice(0, 3).map((l, i) => (
                 <div key={i} style={{ borderTop: i ? "1px solid #e2e8f0" : "none", paddingTop: i ? 8 : 0 }}>
-                  <div style={{ fontWeight: 600, color: NP.text.title, fontSize: 12 }}>{sanitize(l.title)}</div>
-                  <div style={{ fontSize: 11, color: NP.text.muted, marginTop: 3, lineHeight: 1.4 }}>{sanitize(truncateOneLine(l.explanation, 100))}</div>
+                  <div style={{ fontWeight: 600, color: P.text.title, fontSize: 12 }}>{sanitize(l.title)}</div>
+                  <div style={{ fontSize: 11, color: P.text.muted, marginTop: 3, lineHeight: 1.4 }}>{sanitize(truncateOneLine(l.explanation, 100))}</div>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ fontSize: 12, color: NP.text.hint }}>—</div>
+            <div style={{ fontSize: 12, color: P.text.hint }}>—</div>
           )}
         </div>
 
-        <div
-          style={{
-            ...insightCard,
-            borderLeft: `3px solid ${NP.accent.primary}`,
-            background: NP.bg.action,
-            borderColor: "#bfdbfe",
-          }}
-        >
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#1e40af", marginBottom: 8 }}>Nächste Schritte</div>
+        <div style={insightCard}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: P.text.body, marginBottom: 8 }}>Nächste Schritte</div>
           {view.immediateActions.length > 0 ? (
-            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 5, fontSize: 12, color: "#1e3a8a", lineHeight: 1.45, fontWeight: 500 }}>
+            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 12, color: P.text.body, lineHeight: 1.45 }}>
               {view.immediateActions.slice(0, 3).map((a, i) => (
                 <li key={i}>{sanitize(String(a))}</li>
               ))}
             </ul>
           ) : (
-            <div style={{ fontSize: 12, color: "#93c5fd" }}>—</div>
+            <div style={{ fontSize: 12, color: P.text.hint }}>—</div>
           )}
         </div>
       </div>
 
       <div
         style={{
-          border: NP.border.hairline,
-          borderRadius: NP.r.md,
+          border: P.border.hairline,
+          borderRadius: P.r.md,
           padding: "12px 14px",
-          background: NP.bg.canvas,
+          background: P.bg.canvas,
         }}
       >
-        <div style={{ fontSize: 12, fontWeight: 700, color: NP.text.muted, marginBottom: 6 }}>Kurzfassung</div>
-        <div style={{ fontSize: 12, color: NP.text.body, lineHeight: 1.5 }}>{sanitize(view.managementSummary)}</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: P.text.muted, marginBottom: 6 }}>Kurzfassung</div>
+        <div style={{ fontSize: 12, color: P.text.body, lineHeight: 1.5 }}>{sanitize(view.managementSummary)}</div>
       </div>
 
       <div
         style={{
-          border: NP.border.accent,
-          borderRadius: NP.r.md,
+          border: P.border.accent,
+          borderRadius: P.r.md,
           padding: "12px 14px 12px 16px",
-          background: NP.bg.card,
-          borderLeft: `4px solid ${NP.text.title}`,
+          background: P.bg.card,
+          borderLeft: `4px solid ${P.text.title}`,
         }}
       >
-        <div style={{ fontSize: 12, fontWeight: 700, color: NP.text.muted, marginBottom: 6 }}>Strategie</div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: NP.text.title, marginBottom: 6, letterSpacing: "-0.02em" }}>{sanitize(view.recommendedStrategy.title)}</div>
-        <div style={{ fontSize: 12, color: NP.text.muted, lineHeight: 1.45 }}>{sanitize(view.recommendedStrategy.rationale)}</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: P.text.muted, marginBottom: 6 }}>Strategie</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: P.text.title, marginBottom: 6, letterSpacing: "-0.02em" }}>{sanitize(view.recommendedStrategy.title)}</div>
+        <div style={{ fontSize: 12, color: P.text.muted, lineHeight: 1.45 }}>{sanitize(view.recommendedStrategy.rationale)}</div>
       </div>
     </div>
   );
@@ -1056,11 +1146,22 @@ function getSystemlogikSeverityLabel(severity: string | undefined): string {
   return severity ?? "—";
 }
 
-function getSystemlogikSeverityStyle(severity: string | undefined): { color: string; fontWeight: number; background?: string } {
-  if (severity === "critical" || severity === "high") return { color: "#b91c1c", fontWeight: 700, background: "#fef2f2" };
-  if (severity === "medium") return { color: "#a36b00", fontWeight: 600, background: "#fffbeb" };
-  if (severity === "low") return { color: "#64748b", fontWeight: 500 };
-  return { color: "#64748b", fontWeight: 500 };
+function getSystemlogikSeverityStyle(
+  severity: string | undefined,
+  isDark?: boolean
+): { color: string; fontWeight: number; background?: string } {
+  if (severity === "critical" || severity === "high") {
+    return isDark
+      ? { color: "#fb7185", fontWeight: 700, background: "rgba(248,113,113,0.12)" }
+      : { color: "#b91c1c", fontWeight: 700, background: "#fef2f2" };
+  }
+  if (severity === "medium") {
+    return isDark
+      ? { color: "#fbbf24", fontWeight: 600, background: "rgba(251,191,36,0.1)" }
+      : { color: "#a36b00", fontWeight: 600, background: "#fffbeb" };
+  }
+  if (severity === "low") return { color: isDark ? "rgba(255,255,255,0.55)" : "#64748b", fontWeight: 500 };
+  return { color: isDark ? "rgba(255,255,255,0.55)" : "#64748b", fontWeight: 500 };
 }
 
 type SystemlogikSectionProps = {
@@ -1070,6 +1171,8 @@ type SystemlogikSectionProps = {
 };
 
 function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: SystemlogikSectionProps) {
+  const P = useNachtragPalette();
+  const isDark = P.bg.card !== NP_LIGHT.bg.card;
   const systems = systemLogic?.systemsDetected ?? [];
   const findings = systemLogic?.findings ?? [];
   const querschnitt = systemLogic?.querschnittDetected ?? [];
@@ -1094,11 +1197,11 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
     <div
       style={{
         marginTop: 20,
-        border: "1px solid #e2e8f0",
+        border: P.border.hairline,
         borderRadius: 12,
         padding: 20,
-        background: "#fff",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+        background: P.bg.card,
+        boxShadow: P.shadow.card,
       }}
     >
       <div style={{ marginBottom: 16 }}>
@@ -1132,16 +1235,24 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
                       key={i}
                       style={{
                         padding: 16,
-                        background: "#f8fafc",
+                        background: P.bg.canvas,
                         borderRadius: 10,
-                        border: "1px solid #e2e8f0",
-                        boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                        border: P.border.hairline,
+                        boxShadow: P.shadow.card,
                       }}
                     >
                       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                        <span style={{ fontWeight: 700, fontSize: 15, color: "#334155" }}>{sanitize(sum?.system ?? "")}</span>
+                        <span style={{ fontWeight: 700, fontSize: 15, color: P.text.title }}>{sanitize(sum?.system ?? "")}</span>
                         {sum?.detectionConfidenceLabel != null && sum.detectionConfidenceLabel !== "" && (
-                          <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 9999, background: "#e2e8f0", color: "#475569" }}>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              padding: "3px 8px",
+                              borderRadius: 9999,
+                              background: isDark ? "rgba(255,255,255,0.08)" : "#e2e8f0",
+                              color: P.text.muted,
+                            }}
+                          >
                             Erkennung: {sanitize(sum.detectionConfidenceLabel)}
                           </span>
                         )}
@@ -1151,18 +1262,29 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
                               fontSize: 11,
                               padding: "3px 8px",
                               borderRadius: 9999,
-                              background:
-                                sum?.commercialRelevance === "hoch"
+                              background: isDark
+                                ? sum?.commercialRelevance === "hoch"
+                                  ? "rgba(248,113,113,0.15)"
+                                  : sum?.commercialRelevance === "mittel"
+                                    ? "rgba(251,191,36,0.15)"
+                                    : "rgba(74,222,128,0.12)"
+                                : sum?.commercialRelevance === "hoch"
                                   ? "#fef2f2"
                                   : sum?.commercialRelevance === "mittel"
                                     ? "#fffbeb"
                                     : "#f0fdf4",
                               color:
                                 sum?.commercialRelevance === "hoch"
-                                  ? "#b91c1c"
+                                  ? isDark
+                                    ? "#fb7185"
+                                    : "#b91c1c"
                                   : sum?.commercialRelevance === "mittel"
-                                    ? "#a36b00"
-                                    : "#15803d",
+                                    ? isDark
+                                      ? "#fbbf24"
+                                      : "#a36b00"
+                                    : isDark
+                                      ? "#4ade80"
+                                      : "#15803d",
                             }}
                           >
                             {relevanceLabel}
@@ -1170,28 +1292,28 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
                         )}
                       </div>
                       {sum?.detectionReasonShort != null && sum.detectionReasonShort !== "" && (
-                        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>{sanitize(sum.detectionReasonShort)}</div>
+                        <div style={{ fontSize: 12, color: P.text.muted, marginBottom: 8 }}>{sanitize(sum.detectionReasonShort)}</div>
                       )}
                       {sum?.procurementMeaning != null && sum.procurementMeaning !== "" && (
-                        <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.5, marginBottom: 10 }}>
+                        <div style={{ fontSize: 13, color: P.text.body, lineHeight: 1.5, marginBottom: 10 }}>
                           {sanitize(sum.procurementMeaning)}
                         </div>
                       )}
-                      <div style={{ fontWeight: 600, fontSize: 12, color: "#1e40af", marginBottom: 10 }}>
+                      <div style={{ fontWeight: 600, fontSize: 12, color: isDark ? T.accent : "#1e40af", marginBottom: 10 }}>
                         Empfohlene Aktion: {actionLabel}
                       </div>
                       {(sum?.suggestedQuestion != null && sum.suggestedQuestion !== "") ||
                       (sum?.suggestedOfferNote != null && sum.suggestedOfferNote !== "") ? (
-                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
+                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: P.border.hairline }}>
                           {sum?.suggestedQuestion != null && sum.suggestedQuestion !== "" && (
-                            <div style={{ fontSize: 12, color: "#475569", marginBottom: 6, paddingLeft: 8, borderLeft: "3px solid #94a3b8" }}>
-                              <span style={{ fontWeight: 600, color: "#64748b" }}>Rückfrage: </span>
+                            <div style={{ fontSize: 12, color: P.text.body, marginBottom: 6, paddingLeft: 8, borderLeft: `3px solid ${T.border}` }}>
+                              <span style={{ fontWeight: 600, color: P.text.muted }}>Rückfrage: </span>
                               {sanitize(sum.suggestedQuestion)}
                             </div>
                           )}
                           {sum?.suggestedOfferNote != null && sum.suggestedOfferNote !== "" && (
-                            <div style={{ fontSize: 12, color: "#475569", paddingLeft: 8, borderLeft: "3px solid #94a3b8" }}>
-                              <span style={{ fontWeight: 600, color: "#64748b" }}>Angebotsklarstellung: </span>
+                            <div style={{ fontSize: 12, color: P.text.body, paddingLeft: 8, borderLeft: `3px solid ${T.border}` }}>
+                              <span style={{ fontWeight: 600, color: P.text.muted }}>Angebotsklarstellung: </span>
                               {sanitize(sum.suggestedOfferNote)}
                             </div>
                           )}
@@ -1203,18 +1325,18 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
               </div>
             ) : (
               debugEntries.filter((e) => systems.includes(e?.label ?? "")).length > 0 && (
-                <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5 }}>
+                <div style={{ fontSize: 12, color: P.text.body, lineHeight: 1.5 }}>
                   {debugEntries.filter((e) => systems.includes(e?.label ?? "")).map((e, i) => (
-                    <div key={i} style={{ marginBottom: 6, padding: "6px 8px", background: "#f1f5f9", borderRadius: 6 }}>
-                      <span style={{ fontWeight: 600, color: "#334155" }}>{sanitize(e?.label ?? "")}</span>
+                    <div key={i} style={{ marginBottom: 6, padding: "6px 8px", background: P.bg.canvas, borderRadius: 6, border: P.border.hairline }}>
+                      <span style={{ fontWeight: 600, color: P.text.title }}>{sanitize(e?.label ?? "")}</span>
                       {e?.detectionConfidenceLabel != null && e.detectionConfidenceLabel !== "" && (
-                        <span style={{ marginLeft: 6, color: "#64748b" }}>· Konfidenz: {sanitize(e.detectionConfidenceLabel)}</span>
+                        <span style={{ marginLeft: 6, color: P.text.muted }}>· Konfidenz: {sanitize(e.detectionConfidenceLabel)}</span>
                       )}
                       {e?.detectionReasonShort != null && e.detectionReasonShort !== "" && (
-                        <div style={{ marginTop: 4, color: "#475569" }}>{sanitize(e.detectionReasonShort)}</div>
+                        <div style={{ marginTop: 4, color: P.text.body }}>{sanitize(e.detectionReasonShort)}</div>
                       )}
                       {e?.recommendedHandling != null && e.recommendedHandling !== "" && (
-                        <div style={{ marginTop: 2, fontWeight: 600, color: "#1e40af" }}>Empfohlen: {sanitize(e.recommendedHandling)}</div>
+                        <div style={{ marginTop: 2, fontWeight: 600, fontSize: 11, color: isDark ? T.accent : "#1e40af" }}>Empfohlen: {sanitize(e.recommendedHandling)}</div>
                       )}
                     </div>
                   ))}
@@ -1223,13 +1345,13 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
             )}
           </>
         ) : (
-          <span style={{ fontSize: 13, color: "#64748b" }}>Keine Systeme erkannt</span>
+          <span style={{ fontSize: 13, color: P.text.muted }}>Keine Systeme erkannt</span>
         )}
       </div>
 
       {hasQuerschnitt && (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600, marginBottom: 6 }}>Querschnittsthemen</div>
+          <div style={{ fontSize: 12, color: P.text.muted, fontWeight: 600, marginBottom: 6 }}>Querschnittsthemen</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: hasQuerschnittSummaries ? 8 : 0 }}>
             {querschnitt.map((name, i) => (
               <span
@@ -1238,8 +1360,8 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
                   display: "inline-block",
                   padding: "4px 10px",
                   borderRadius: 9999,
-                  background: "#f1f5f9",
-                  color: "#64748b",
+                  background: isDark ? "rgba(255,255,255,0.08)" : "#f1f5f9",
+                  color: P.text.muted,
                   fontSize: 12,
                   fontWeight: 500,
                 }}
@@ -1251,11 +1373,11 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
           {hasQuerschnittSummaries && (
             <div style={{ display: "grid", gap: 8 }}>
               {summariesForQuerschnitt.map((sum, i) => (
-                <div key={i} style={{ padding: 8, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
-                  <div style={{ fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 4 }}>{sanitize(sum?.system ?? "")}</div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 2 }}>{sanitize(sum?.overallAssessmentShort ?? "")}</div>
+                <div key={i} style={{ padding: 8, background: P.bg.canvas, borderRadius: 8, border: P.border.hairline }}>
+                  <div style={{ fontWeight: 700, fontSize: 12, color: P.text.title, marginBottom: 4 }}>{sanitize(sum?.system ?? "")}</div>
+                  <div style={{ fontSize: 12, color: P.text.muted, marginBottom: 2 }}>{sanitize(sum?.overallAssessmentShort ?? "")}</div>
                   {(sum?.findingCount ?? 0) > 0 && (
-                    <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                    <div style={{ fontSize: 11, color: P.text.hint }}>
                       {sum.findingCount} Findings · Empfohlen: {sanitize(sum?.recommendedHandling ?? "")}
                     </div>
                   )}
@@ -1275,7 +1397,7 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
             alignItems: "center",
             gap: 6,
             fontSize: 12,
-            color: "#64748b",
+            color: P.text.muted,
             fontWeight: 600,
             background: "none",
             border: "none",
@@ -1289,9 +1411,9 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
         {findingsExpanded && (
           <div style={{ marginTop: 8 }}>
             {hasFindings ? (
-              <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 6, fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+              <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 6, fontSize: 12, color: P.text.muted, lineHeight: 1.5 }}>
                 {findings.map((f, i) => {
-                  const style = getSystemlogikSeverityStyle(f?.severity);
+                  const style = getSystemlogikSeverityStyle(f?.severity, isDark);
                   return (
                     <li
                       key={i}
@@ -1300,24 +1422,24 @@ function SystemlogikSection({ systemLogic, sanitize, isExpertMode }: Systemlogik
                         ...(style.background && { padding: "4px 6px", borderRadius: 4, background: style.background }),
                       }}
                     >
-                      <span style={{ fontWeight: 600, color: "#475569" }}>{sanitize(f?.system ?? "")}</span>
+                      <span style={{ fontWeight: 600, color: P.text.body }}>{sanitize(f?.system ?? "")}</span>
                       {" — "}
                       <span style={{ color: style.color, fontWeight: style.fontWeight }}>
                         {getSystemlogikSeverityLabel(f?.severity)}
                       </span>
-                      <div style={{ marginTop: 2, color: "#64748b" }}>{sanitize(f?.message ?? "")}</div>
+                      <div style={{ marginTop: 2, color: P.text.muted }}>{sanitize(f?.message ?? "")}</div>
                       {(f?.reasoningShort != null && f.reasoningShort !== "") && (
-                        <div style={{ marginTop: 2, fontSize: 11, color: "#94a3b8" }}>{sanitize(f.reasoningShort)}</div>
+                        <div style={{ marginTop: 2, fontSize: 11, color: P.text.hint }}>{sanitize(f.reasoningShort)}</div>
                       )}
                       {(f?.recommendedHandling != null && f.recommendedHandling !== "") && (
-                        <div style={{ marginTop: 2, fontWeight: 600, fontSize: 11, color: "#1e40af" }}>Empfohlen: {sanitize(f.recommendedHandling)}</div>
+                        <div style={{ marginTop: 2, fontWeight: 600, fontSize: 11, color: isDark ? T.accent : "#1e40af" }}>Empfohlen: {sanitize(f.recommendedHandling)}</div>
                       )}
                     </li>
                   );
                 })}
               </ul>
             ) : (
-              <span style={{ fontSize: 12, color: "#94a3b8" }}>Keine systemlogischen Auffälligkeiten erkannt</span>
+              <span style={{ fontSize: 12, color: P.text.hint }}>Keine systemlogischen Auffälligkeiten erkannt</span>
             )}
           </div>
         )}
@@ -1376,6 +1498,10 @@ export function NachtragspotenzialBlock({
   designTokens,
 }: Props) {
   const [systemOpen, setSystemOpen] = useState(false);
+  const palette = useMemo(
+    () => (customerRoute && designTokens ? buildDarkPalette(designTokens) : NP_LIGHT),
+    [customerRoute, designTokens]
+  );
   const D = designTokens;
   const cardBorder = D ? `1px solid ${D.cardBorder}` : (customerRoute ? "1px solid #e2e8f0" : "1px solid #e5e5e5");
   const cardBg = D ? D.cardBg : (customerRoute ? "#ffffff" : "#fff");
@@ -1389,6 +1515,7 @@ export function NachtragspotenzialBlock({
   const fontWeightTitle = D?.fontWeightSection ?? 700;
 
   return (
+    <NachtragPaletteContext.Provider value={palette}>
     <div
       style={{
         border: cardBorder,
@@ -1503,8 +1630,11 @@ export function NachtragspotenzialBlock({
             style={{
               marginTop: 24,
               paddingTop: 18,
-              borderTop: "1px solid #cbd5e1",
-              background: "linear-gradient(180deg, #f1f5f9 0%, #f8fafc 32px, transparent 100%)",
+              borderTop: palette.border.hairline,
+              background:
+                customerRoute && designTokens
+                  ? `linear-gradient(180deg, ${T.surface} 0%, ${T.card} 32px, transparent 100%)`
+                  : "linear-gradient(180deg, #f1f5f9 0%, #f8fafc 32px, transparent 100%)",
               marginLeft: -2,
               marginRight: -2,
               paddingLeft: 10,
@@ -1513,7 +1643,7 @@ export function NachtragspotenzialBlock({
               borderRadius: 10,
             }}
           >
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 14, letterSpacing: "-0.01em" }}>Arbeitsansicht</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: palette.text.muted, marginBottom: 14, letterSpacing: "-0.01em" }}>Arbeitsansicht</div>
 
             {(() => {
               const summary = analysis.changePotentialSummary;
@@ -1536,7 +1666,7 @@ export function NachtragspotenzialBlock({
 
               if (deduplicatedOpportunities.length === 0) {
                 return (
-                  <div style={{ marginTop: 14, color: "#666", fontWeight: 700 }}>
+                  <div style={{ marginTop: 14, color: palette.text.muted, fontWeight: 700 }}>
                     {DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noNachtragspotenziale}
                   </div>
                 );
@@ -1557,16 +1687,16 @@ export function NachtragspotenzialBlock({
                           padding: "8px 0",
                           background: "none",
                           border: "none",
-                          borderBottom: "1px solid #e2e8f0",
+                          borderBottom: palette.border.hairline,
                           cursor: "pointer",
                           fontWeight: 600,
-                          color: "#334155",
+                          color: palette.text.title,
                           fontSize: 14,
                           textAlign: "left",
                         }}
                       >
                         <span>Arbeitslage auf einen Blick</span>
-                        <span style={{ fontSize: 12, color: "#64748b" }}>{systemOpen ? "▼" : "▶"}</span>
+                        <span style={{ fontSize: 12, color: palette.text.muted }}>{systemOpen ? "▼" : "▶"}</span>
                       </button>
                       {systemOpen && (
                         <SystemlogikSection
@@ -1590,5 +1720,6 @@ export function NachtragspotenzialBlock({
         </>
       )}
     </div>
+    </NachtragPaletteContext.Provider>
   );
 }

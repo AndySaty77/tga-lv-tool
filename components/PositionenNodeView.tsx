@@ -11,6 +11,11 @@ export type PositionenNodeViewProps = {
     textPrimary?: string;
     textSecondary?: string;
     cardBorder?: string;
+    surfaceBg?: string;
+    groupRowBg?: string;
+    expandedRowBg?: string;
+    groupAccentBorder?: string;
+    controlAccent?: string;
   };
 };
 
@@ -23,6 +28,11 @@ export function PositionenNodeView({ nodes, maxHeight = "420px", searchQuery, th
   const textPrimary = theme?.textPrimary ?? "#0f172a";
   const textSecondary = theme?.textSecondary ?? "#475569";
   const cardBorder = theme?.cardBorder ?? "#e2e8f0";
+  const surfaceBg = theme?.surfaceBg ?? "#fff";
+  const groupRowBg = theme?.groupRowBg ?? "#f8fafc";
+  const expandedRowBg = theme?.expandedRowBg ?? "#f8fafc";
+  const groupAccentBorder = theme?.groupAccentBorder ?? textSecondary;
+  const controlAccent = theme?.controlAccent;
 
   // Nur echte Positionsinhalte anzeigen:
   // - Gruppenüberschriften nur, wenn danach mindestens ein Item folgt
@@ -62,7 +72,8 @@ export function PositionenNodeView({ nodes, maxHeight = "420px", searchQuery, th
         overflow: "auto",
         border: `1px solid ${cardBorder}`,
         borderRadius: 12,
-        background: "#fff",
+        background: surfaceBg,
+        color: textPrimary,
       }}
     >
       {filteredNodes.map((node, i) => {
@@ -73,8 +84,8 @@ export function PositionenNodeView({ nodes, maxHeight = "420px", searchQuery, th
               style={{
                 padding: "10px 14px",
                 marginTop: i === 0 ? 0 : 12,
-                borderLeft: `4px solid ${textSecondary}`,
-                background: "#f8fafc",
+                borderLeft: `4px solid ${groupAccentBorder}`,
+                background: groupRowBg,
                 fontWeight: 800,
                 fontSize: 14,
                 color: textPrimary,
@@ -91,7 +102,7 @@ export function PositionenNodeView({ nodes, maxHeight = "420px", searchQuery, th
               style={{
                 padding: "10px 14px",
                 marginTop: 6,
-                background: "#f1f5f9",
+                background: expandedRowBg,
                 borderRadius: 8,
                 fontSize: 13,
                 color: textPrimary,
@@ -135,6 +146,7 @@ export function PositionenNodeView({ nodes, maxHeight = "420px", searchQuery, th
                         fontWeight: 800,
                         padding: 0,
                         fontSize: 12,
+                        color: controlAccent ?? textPrimary,
                       }}
                     >
                       {isExpanded ? "▼" : "▶"}
@@ -146,7 +158,7 @@ export function PositionenNodeView({ nodes, maxHeight = "420px", searchQuery, th
                 <div
                   style={{
                     padding: "8px 14px 12px",
-                    background: "#f8fafc",
+                    background: expandedRowBg,
                     fontSize: 12,
                     color: textSecondary,
                     whiteSpace: "pre-wrap",
