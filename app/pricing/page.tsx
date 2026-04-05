@@ -55,7 +55,7 @@ function pricingCardCta(
   if (cardId === "free") {
     return { href: "/app", label: "Zur App" };
   }
-  return { href: BILLING_PATH, label: "Pro verwalten" };
+  return { href: BILLING_PATH, label: "Zum Billing" };
 }
 
 function PriceCard({

@@ -25,7 +25,7 @@ const styles: Record<
  * POST /api/billing/portal → Redirect zu Stripe Customer Portal.
  */
 export function BillingPortalButton({
-  label = "Abrechnung verwalten",
+  label = "Abo & Abrechnung verwalten",
   variant = "primary",
 }: {
   label?: string;

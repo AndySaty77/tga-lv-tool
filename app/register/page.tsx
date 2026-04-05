@@ -25,7 +25,6 @@ export default function RegisterPage() {
   const [fieldErrors, setFieldErrors] = React.useState<{
     firstName?: string;
     lastName?: string;
-    company?: string;
     email?: string;
     password?: string;
     passwordConfirm?: string;
@@ -40,9 +39,6 @@ export default function RegisterPage() {
     }
     if (!lastName.trim()) {
       next.lastName = "Bitte Nachnamen angeben.";
-    }
-    if (!company.trim()) {
-      next.company = "Bitte Firmenname angeben.";
     }
     if (!email.trim()) {
       next.email = "Bitte E-Mail-Adresse angeben.";
@@ -86,7 +82,7 @@ export default function RegisterPage() {
           data: {
             first_name: firstName.trim(),
             last_name: lastName.trim(),
-            company: company.trim(),
+            ...(company.trim() ? { company: company.trim() } : {}),
           },
         },
       });
@@ -131,10 +127,19 @@ export default function RegisterPage() {
               }}
             >
             <form onSubmit={handleSubmit}>
+              <p style={{ margin: "0 0 14px", fontSize: 11, color: T.faint }}>
+                <span style={{ color: T.danger, fontWeight: 700 }} aria-hidden="true">
+                  *
+                </span>{" "}
+                Pflichtfelder
+              </p>
               <div style={{ display: "flex", gap: 20, marginBottom: 16 }}>
                 <div style={{ flex: "1 1 0", minWidth: 0 }}>
                   <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
-                    Vorname
+                    Vorname{" "}
+                    <span style={{ color: T.danger, fontWeight: 700 }} title="Pflichtfeld" aria-hidden="true">
+                      *
+                    </span>
                   </label>
                   <input
                     type="text"
@@ -161,7 +166,10 @@ export default function RegisterPage() {
                 </div>
                 <div style={{ flex: "1 1 0", minWidth: 0 }}>
                   <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
-                    Nachname
+                    Nachname{" "}
+                    <span style={{ color: T.danger, fontWeight: 700 }} title="Pflichtfeld" aria-hidden="true">
+                      *
+                    </span>
                   </label>
                   <input
                     type="text"
@@ -190,34 +198,32 @@ export default function RegisterPage() {
 
               <div style={{ marginBottom: 16 }}>
                 <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
-                  Firma
+                  Firma <span style={{ fontWeight: 500, color: T.faint }}>(optional)</span>
                 </label>
                 <input
                   type="text"
-                  required
+                  autoComplete="organization"
                   value={company}
-                  onChange={(e) => {
-                    setCompany(e.target.value);
-                    if (fieldErrors.company) setFieldErrors((prev) => ({ ...prev, company: undefined }));
-                  }}
+                  onChange={(e) => setCompany(e.target.value)}
+                  placeholder="z. B. Firma oder leer lassen"
                   style={{
                     width: "100%",
                     padding: "8px 10px",
                     borderRadius: 8,
-                    border: `1px solid ${fieldErrors.company ? T.danger : T.border}`,
+                    border: `1px solid ${T.border}`,
                     background: "rgba(15,23,42,0.9)",
                     color: T.text,
                     fontSize: 13,
                   }}
                 />
-                {fieldErrors.company && (
-                  <div style={{ marginTop: 4, fontSize: 11, color: T.danger }}>{fieldErrors.company}</div>
-                )}
               </div>
 
               <div style={{ marginBottom: 16 }}>
                 <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
-                  E-Mail
+                  E-Mail{" "}
+                  <span style={{ color: T.danger, fontWeight: 700 }} title="Pflichtfeld" aria-hidden="true">
+                    *
+                  </span>
                 </label>
                 <input
                   type="email"
@@ -243,7 +249,10 @@ export default function RegisterPage() {
               </div>
               <div style={{ marginBottom: 16 }}>
                 <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
-                  Passwort
+                  Passwort{" "}
+                  <span style={{ color: T.danger, fontWeight: 700 }} title="Pflichtfeld" aria-hidden="true">
+                    *
+                  </span>
                 </label>
                 <input
                   type="password"
@@ -272,7 +281,10 @@ export default function RegisterPage() {
               </div>
               <div style={{ marginBottom: 16 }}>
                 <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
-                  Passwort bestätigen
+                  Passwort bestätigen{" "}
+                  <span style={{ color: T.danger, fontWeight: 700 }} title="Pflichtfeld" aria-hidden="true">
+                    *
+                  </span>
                 </label>
                 <input
                   type="password"
@@ -326,6 +338,9 @@ export default function RegisterPage() {
                     style={{ marginTop: 2, flexShrink: 0 }}
                   />
                   <span>
+                    <span style={{ color: T.danger, fontWeight: 700 }} title="Pflichtfeld" aria-hidden="true">
+                      *
+                    </span>{" "}
                     Ich habe die{" "}
                     <Link
                       href="/datenschutz"
