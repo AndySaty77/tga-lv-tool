@@ -31,6 +31,44 @@ function subscriptionIdForProfile(
 }
 
 /**
+ * Kündigung zum Periodenende aus Stripe ableiten.
+ *
+ * Problem: `!!subscription.cancel_at_period_end` setzt bei fehlendem Feld (`undefined`) fälschlich `false`.
+ * Spätere Events (z. B. invoice.paid) können Snapshots liefern, in denen das Flag fehlt – dann wurde ein
+ * zuvor korrekter `true`-Wert überschrieben.
+ *
+ * Fallback: Stripe setzt bei „Cancel at period end“ typischerweise `cancel_at` auf den gleichen Unix-Timestamp
+ * wie `items.data[0].current_period_end` (solange das Abo noch läuft).
+ */
+function deriveCancelAtPeriodEnd(subscription: Stripe.Subscription): boolean {
+  if (subscription.cancel_at_period_end === true) {
+    return true;
+  }
+
+  const item0 = subscription.items?.data?.[0];
+  const periodEndUnix = item0?.current_period_end;
+  const status = subscription.status;
+  const cancelAt = subscription.cancel_at;
+
+  const activeLike =
+    status === "active" ||
+    status === "trialing" ||
+    status === "past_due" ||
+    status === "paused";
+
+  if (
+    activeLike &&
+    typeof cancelAt === "number" &&
+    typeof periodEndUnix === "number" &&
+    cancelAt === periodEndUnix
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Spiegelt eine Stripe-Subscription nach profiles.
  * Admin-E-Mails (ADMIN_EMAILS): nur Billing-Felder, kein Überschreiben von plan (Schutz bestehender Admin-/Kontozuordnung).
  */
@@ -52,13 +90,25 @@ export async function syncProfileFromStripeSubscription(
 
   const item0 = subscription.items?.data?.[0];
   const periodEndUnix = item0?.current_period_end;
-  const periodEnd =
+  let periodEnd =
     typeof periodEndUnix === "number" && Number.isFinite(periodEndUnix)
       ? new Date(periodEndUnix * 1000).toISOString()
       : null;
 
   const rawStatus = subscription.status;
+  const cancelAtPeriodEnd = deriveCancelAtPeriodEnd(subscription);
   const admin = isAdminEmail(profile?.email ?? null);
+
+  const plan = mapStripeStatusToPlan(rawStatus);
+
+  /** Nach Ende des Abos: kein auslaufendes Kündigungsflag; Periodenende i. d. R. leeren. */
+  let billingCancelAtPeriodEnd: boolean | null = cancelAtPeriodEnd;
+  if (plan === "free") {
+    billingCancelAtPeriodEnd = false;
+    if (rawStatus === "canceled" || rawStatus === "incomplete_expired" || rawStatus === "unpaid") {
+      periodEnd = null;
+    }
+  }
 
   if (admin) {
     const { error } = await supabase
@@ -68,13 +118,13 @@ export async function syncProfileFromStripeSubscription(
         stripe_subscription_id: subscriptionIdForProfile(rawStatus, subscription.id),
         billing_status: rawStatus,
         billing_current_period_end: periodEnd,
+        billing_cancel_at_period_end: billingCancelAtPeriodEnd,
       })
       .eq("id", userId);
     if (error) return { ok: false, error: error.message };
     return { ok: true };
   }
 
-  const plan = mapStripeStatusToPlan(rawStatus);
   const { error } = await supabase
     .from("profiles")
     .update({
@@ -83,6 +133,7 @@ export async function syncProfileFromStripeSubscription(
       stripe_subscription_id: subscriptionIdForProfile(rawStatus, subscription.id),
       billing_status: rawStatus,
       billing_current_period_end: periodEnd,
+      billing_cancel_at_period_end: billingCancelAtPeriodEnd,
     })
     .eq("id", userId);
 
