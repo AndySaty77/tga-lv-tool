@@ -15,6 +15,12 @@ import {
 import { FALLBACK_SCORING_CONFIG } from "../../../lib/scoringConfig";
 import { computeNachtragV2FromLegacy, type NachtragResultV2 } from "../../../lib/nachtrag-v2";
 import { buildDetectedTrades, emptyDetectedTrades } from "../../../lib/detectedTrades";
+import {
+  detectLegalSignals,
+  legalSignalsToFindings,
+  LEGAL_SIGNALS_V1_ENABLED,
+  type LegalSignal,
+} from "../../../lib/legal-signals";
 
 type CategoryKey =
   | "vertrags_lv_risiken"
@@ -368,6 +374,17 @@ export async function POST(req: Request) {
     findingsAfterLlm = findings.length;
   }
 
+  /** V1: additive Vertrags-/Vergabesignale (keyword-basiert, kein Ersatz für Trigger). */
+  let legalSignals: LegalSignal[] = [];
+  if (LEGAL_SIGNALS_V1_ENABLED) {
+    const legalSource =
+      hasSplit && vortext.trim().length >= 120 ? vortext : textForAnalysis;
+    legalSignals = detectLegalSignals(legalSource);
+    if (legalSignals.length > 0) {
+      findings = [...findings, ...legalSignalsToFindings(legalSignals)];
+    }
+  }
+
   // 3b) LLM-Validierung V1: nur DB_*, penalty >= 8, max. 8, nur mit raw_excerpt (kein Fallback auf detail)
   let triggerValidationSummary: {
     total: number;
@@ -518,6 +535,7 @@ export async function POST(req: Request) {
     perCategory,
     findingsSorted: findingsMapped,
     detectedTrades,
+    ...(legalSignals.length > 0 ? { legalSignals } : {}),
     // TODO(security): internalScores/nachtragspotenzialV2 ist nur für Admins gedacht.
     // Der aktuelle Guard basiert auf ADMIN_EMAILS + ?debug=1 und ersetzt keine echte, fein granulare Rollen-/Rechteverwaltung.
     ...(nachtragV2

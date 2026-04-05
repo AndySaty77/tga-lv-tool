@@ -22,6 +22,12 @@ export type Finding = {
   severity: Severity;
   // points to deduct inside category weight, 0..weight
   penalty: number;
+  /** Optional: V1 Vertrags-/Vergabesignale (lib/legal-signals) – für Rückfragen/Klarstellungen. */
+  legalMeta?: {
+    signalType: string;
+    suggestedQuestion?: string;
+    suggestedClarification?: string;
+  };
   /** Original-LV-Ausschnitt um den Trigger-Treffer (±250 Zeichen); für LLM-Validierung. */
   raw_excerpt?: string;
   /** LLM-Validierung V1: bestätigt / unsicher / verworfen. */

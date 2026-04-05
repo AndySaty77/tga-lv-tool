@@ -1,4 +1,6 @@
 import React from "react";
+import type { ContactCategory } from "@/lib/contactCategory";
+import { isContactCategory } from "@/lib/contactCategory";
 import { MarketingPageShell } from "@/components/marketing/MarketingPageShell";
 import { MarketingSection } from "@/components/marketing/MarketingSection";
 import { Container } from "@/components/shared/Container";
@@ -10,7 +12,19 @@ export const metadata = {
     "Kontaktieren Sie uns zu Produkt, Demo, Feedback oder allgemeinen Fragen – wir melden uns zeitnah.",
 };
 
-export default function ContactPage() {
+export default async function ContactPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ topic?: string; category?: string }>;
+}) {
+  const sp = await searchParams;
+  let initialCategory: ContactCategory | undefined;
+  if (sp.topic === "team") {
+    initialCategory = "product";
+  } else if (sp.category && isContactCategory(sp.category)) {
+    initialCategory = sp.category;
+  }
+
   return (
     <MarketingPageShell active="/contact">
       <MarketingSection
@@ -30,7 +44,7 @@ export default function ContactPage() {
               boxShadow: "0 16px 40px rgba(15,23,42,0.65)",
             }}
           >
-            <ContactForm />
+            <ContactForm initialCategory={initialCategory} />
           </div>
         </Container>
       </MarketingSection>

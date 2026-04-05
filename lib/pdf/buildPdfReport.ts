@@ -26,6 +26,8 @@ import {
   scoreToTrafficLight,
   stripScoringEngineeringJargon,
 } from "./pdfFormatters";
+import { normalizeLegalSignalsForReport } from "@/lib/legal-signals/presentation";
+import type { PdfLegalSignalItem } from "./pdfTypes";
 
 /** Kategorien-Labels (5er-API und UI); 6er-Kategorien aus scoring.ts werden auf lesbare Labels gemappt. */
 const CATEGORY_LABELS: Record<string, string> = {
@@ -114,6 +116,7 @@ function mergeResultJsonWithTopLevel(raw: Record<string, unknown>): Record<strin
   };
   lift("clarificationQuestions", "clarification_questions");
   lift("offerAssumptions", "offer_assumptions");
+  lift("legalSignals", "legal_signals");
   return out;
 }
 
@@ -137,6 +140,7 @@ export function buildPdfReport(input: unknown): AnalysisPdfReport {
   const questions = buildQuestions(rj);
   const clarifications = buildClarifications(rj);
   const topRisks = buildTopRisksItems(rj);
+  const legalSignals = buildLegalSignalsItems(rj);
   const nextSteps = buildNextSteps(questions, clarifications, claimPotential);
   const disclaimer = buildDisclaimer(raw, rj);
 
@@ -147,6 +151,7 @@ export function buildPdfReport(input: unknown): AnalysisPdfReport {
     ...(keyFacts.length > 0 ? { keyFacts } : {}),
     ...(nextSteps.length > 0 ? { nextSteps } : {}),
     ...(topRisks.length > 0 ? { topRisks } : {}),
+    ...(legalSignals.length > 0 ? { legalSignals } : {}),
     ...(claimPotential && Object.keys(claimPotential).length > 0 ? { claimPotential } : {}),
     ...(questions.length > 0 ? { questions } : {}),
     ...(clarifications.length > 0 ? { clarifications } : {}),
@@ -416,6 +421,16 @@ function clarificationFromOfferAssumptionItem(item: unknown): PdfClarification |
 function buildClarifications(rj: Record<string, unknown>): PdfClarification[] {
   const items = extractOfferAssumptionItems(rj);
   return normalizeList(items, (item) => clarificationFromOfferAssumptionItem(item));
+}
+
+function buildLegalSignalsItems(rj: Record<string, unknown>): PdfLegalSignalItem[] {
+  const rows = normalizeLegalSignalsForReport(rj.legalSignals, 3);
+  return rows.map((r) => ({
+    title: sanitizeText(r.title, { maxLength: 200 }),
+    summary: sanitizeText(r.summary, { maxLength: 420 }),
+    ...(r.severityLabel ? { severityLabel: r.severityLabel } : {}),
+    ...(r.recommendation ? { recommendation: sanitizeText(r.recommendation, { maxLength: 400 }) } : {}),
+  }));
 }
 
 type RawFinding = {

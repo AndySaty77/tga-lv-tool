@@ -374,6 +374,8 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
   const hasMoreFindingsThanTop = Array.isArray(findingsSorted) && findingsSorted.length > (useReportTop ? topFromReport.length : fallbackTopSlice.length);
 
   const nextSteps = report.nextSteps ?? [];
+  const legalSignalsReport = report.legalSignals ?? [];
+  const hasLegalSignals = legalSignalsReport.length > 0;
 
   return (
     <>
@@ -746,6 +748,46 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
                         </div>
                       );
                     })}
+              </div>
+            </div>
+          ) : null}
+
+          {hasLegalSignals ? (
+            <div style={workSurfaceStyle()}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 6 }}>Vertraglich auffällige Punkte</div>
+              <p style={{ margin: `0 0 ${T.space.md}px`, fontSize: 13, color: T.muted, lineHeight: 1.5 }}>
+                Aus dem Vortext erkannte Formulierungen mit praktischer Angebotsrelevanz (keine Rechtsbewertung).
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: T.space.md }}>
+                {legalSignalsReport.map((ls, i) => (
+                  <div
+                    key={`ls-${i}-${ls.title}`}
+                    style={{
+                      padding: T.space.md,
+                      borderRadius: T.radiusSm,
+                      border: `1px solid ${T.border}`,
+                      background: "rgba(0,0,0,0.08)",
+                      borderLeft: `3px solid ${T.muted}`,
+                    }}
+                  >
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: T.text, flex: "1 1 12rem", lineHeight: 1.35 }}>
+                        {ls.title}
+                      </div>
+                      {ls.severityLabel ? (
+                        <span style={{ fontSize: 11, fontWeight: 600, color: T.faint }}>{ls.severityLabel}</span>
+                      ) : null}
+                    </div>
+                    {ls.summary ? (
+                      <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.55 }}>{ls.summary}</p>
+                    ) : null}
+                    {ls.recommendation ? (
+                      <p style={{ margin: `${T.space.sm}px 0 0`, fontSize: 13, fontWeight: 600, color: T.accent, lineHeight: 1.5 }}>
+                        {ls.recommendation}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
               </div>
             </div>
           ) : null}

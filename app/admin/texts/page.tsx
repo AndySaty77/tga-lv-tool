@@ -441,7 +441,10 @@ export default function AdminTextsPage() {
         <div>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700 }}>Texte</h1>
           <p style={{ color: "#666", marginTop: 8, marginBottom: 0, lineHeight: 1.5 }}>
-            Zentrale Pflege von Labels und Erklärungstexten für die Analyse-Oberfläche und interne Bereiche.
+            Pflege zentraler Textbausteine (Merge mit <code style={{ background: "#eee", padding: "1px 4px", borderRadius: 4 }}>lib/textsConfig.ts</code>, Speicherung in <code style={{ background: "#eee", padding: "1px 4px", borderRadius: 4 }}>texts_config</code>).
+          </p>
+          <p style={{ color: "#555", marginTop: 10, marginBottom: 0, lineHeight: 1.5, fontSize: 13 }}>
+            <strong>Hinweis:</strong> Die Live-Analyse lädt diese Texte nicht zur Laufzeit aus der Datenbank – die Oberfläche nutzt aktuell die <strong>fest eingebundenen</strong> Defaults im Code. Änderungen hier sind vorbereitet und dokumentiert; sie erscheinen nicht automatisch überall in der Produkt-UI, bis eine Anbindung erfolgt.
           </p>
           {source && (
             <p style={{ fontSize: 12, color: "#666", marginTop: 6, marginBottom: 0, lineHeight: 1.5 }}>

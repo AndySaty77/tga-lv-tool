@@ -93,7 +93,7 @@ export default function AdminSettingsPage() {
         <div>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700 }}>Analyse-Einstellungen</h1>
           <p style={{ color: "#666", marginTop: 8, marginBottom: 0, lineHeight: 1.5 }}>
-            Zentrale Steuerung für Analyse- und KI-Verhalten. Änderungen wirken als Defaults in der Analyse-Seite (wo angebunden).
+            Browser-Defaults und Statusanzeigen für die Analyse-UI. Nur dort wirksam, wo ausdrücklich ausgelesen (siehe Abschnitte).
           </p>
         </div>
         <a href="/admin" style={{ color: "#111", textDecoration: "underline", fontSize: 14 }}>
@@ -133,7 +133,7 @@ export default function AdminSettingsPage() {
         </div>
 
         <div style={placeholderStyle}>
-          Nutzung in einzelnen Modulen: (Platzhalter – zukünftig pro Modul ein-/ausschaltbar.)
+          Nutzung in einzelnen Modulen: <strong>Geplant</strong> – noch nicht umgesetzt.
         </div>
       </section>
 
@@ -169,10 +169,10 @@ export default function AdminSettingsPage() {
         </div>
 
         <div style={placeholderStyle}>
-          Sichtbarkeit technischer Bereiche: (Platzhalter – zukünftig Steuerung welche Tabs/Bereiche sichtbar sind.)
+          Sichtbarkeit technischer Bereiche: <strong>Geplant</strong> – noch nicht umgesetzt.
         </div>
         <div style={{ ...placeholderStyle, marginTop: 8 }}>
-          Optionale Analysemodule: (Platzhalter – zukünftig Module ein-/auswählbar.)
+          Optionale Analysemodule: <strong>Geplant</strong> – noch nicht umgesetzt.
         </div>
       </section>
 
@@ -183,21 +183,23 @@ export default function AdminSettingsPage() {
         </h2>
 
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "not-allowed", opacity: 0.75 }}>
             <input
               type="checkbox"
               checked={nachtragEnabled}
               onChange={(e) => persistNachtrag(e.target.checked)}
+              disabled
+              title="Nicht angebunden – siehe Hinweis"
             />
             <span style={labelStyle as any}>Nachtragsanalyse aktiviert</span>
           </label>
-          <div style={hintStyle}>
-            Steuert, ob die Nachtragsanalyse in der Analyse-Seite angeboten und standardmäßig genutzt wird. (Aktuell nur Default gespeichert.)
+          <div style={{ ...hintStyle, color: "#8b4513" }}>
+            <strong>Nicht wirksam:</strong> Wert wird nur im Browser gespeichert; die Analyse-Seite liest ihn nicht aus. Checkbox bewusst deaktiviert, bis eine Anbindung erfolgt.
           </div>
         </div>
 
         <div style={placeholderStyle}>
-          Intensität / Modus: (Platzhalter – Logik noch nicht angebunden.)
+          Intensität / Modus: <strong>Geplant</strong> – noch nicht umgesetzt.
         </div>
       </section>
 
@@ -207,7 +209,7 @@ export default function AdminSettingsPage() {
           4. Textanalyse / Split-Verhalten
         </h2>
         <div style={placeholderStyle}>
-          Interne Steueroptionen für automatische Texttrennung (Vortext / Positionen): (Platzhalter – zukünftig Konfiguration für GAEB-Split und Fallbacks.)
+          Interne Steueroptionen für automatische Texttrennung (Vortext / Positionen): <strong>Geplant</strong> – noch nicht umgesetzt.
         </div>
       </section>
 

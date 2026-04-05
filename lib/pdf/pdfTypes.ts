@@ -74,6 +74,14 @@ export type PdfTopRiskItem = {
   severityHint?: string;
 };
 
+/** Vertragsnahe Zusatzsignale (V1), für PDF & konsistente Berichtsdarstellung. */
+export type PdfLegalSignalItem = {
+  title: string;
+  summary: string;
+  severityLabel?: string;
+  recommendation?: string;
+};
+
 export type AnalysisPdfReport = {
   meta: PdfReportMeta;
   summary: PdfSummary;
@@ -84,6 +92,8 @@ export type AnalysisPdfReport = {
   nextSteps?: string[];
   /** Bis zu 8 priorisierte Einzelfindings mit Kurzkontext. */
   topRisks?: PdfTopRiskItem[];
+  /** Max. 3 vertragsnahe Hinweise (heuristisch). */
+  legalSignals?: PdfLegalSignalItem[];
   claimPotential?: PdfClaimPotential;
   questions?: PdfQuestion[];
   clarifications?: PdfClarification[];

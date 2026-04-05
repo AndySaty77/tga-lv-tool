@@ -13,6 +13,8 @@ import { colors, spacing, radius, shadows } from "@/lib/ui/theme";
 import type { ChangeOrderResult } from "@/lib/changeOrderAnalysis";
 import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
 import { formatTradeConfidence, formatTradeConfidencePercent } from "@/lib/detectedTrades";
+import { formatRecommendedLine, severityLabelForUi } from "@/lib/legal-signals/presentation";
+import type { LegalSignalSeverity } from "@/lib/legal-signals/types";
 
 type CategoryKey =
   | "vertrags_lv_risiken"
@@ -88,6 +90,14 @@ export type AnalyseCockpitViewProps = {
   expertMode?: boolean;
   /** Wechsel zu anderem Tab (z. B. "nachtragspotenzial", "rueckfragen") */
   onTabChange?: (tab: string) => void;
+  /** V1: heuristische Vertrags-/Vergabesignale (optional, API: legalSignals) */
+  legalSignals?: Array<{
+    id: string;
+    title: string;
+    summary: string;
+    severity?: string;
+    recommendedAction?: string;
+  }>;
 };
 
 function fmtKB(bytes: number) {
@@ -115,6 +125,7 @@ export function AnalyseCockpitView({
   sanitize,
   expertMode = false,
   onTabChange,
+  legalSignals,
 }: AnalyseCockpitViewProps) {
   const total = clamp0_100(result?.total ?? 0);
   const perCategory = result?.perCategory ?? {};
@@ -277,6 +288,141 @@ export function AnalyseCockpitView({
           </AccentCard>
         </div>
       )}
+
+      {/* Vertraglich auffällige Punkte (V1, optional) */}
+      {legalSignals && legalSignals.length > 0 && (() => {
+        const top = legalSignals.slice(0, 3);
+        const rest = legalSignals.slice(3, 5);
+        const onlyWeak =
+          legalSignals.length === 1 &&
+          (legalSignals[0].severity === "low" || !legalSignals[0].severity);
+        return (
+          <div style={{ marginBottom: spacing[4] }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: colors.text, marginBottom: spacing[2] }}>
+              Vertraglich auffällige Punkte
+            </h2>
+            <p
+              style={{
+                margin: "0 0 " + spacing[3],
+                fontSize: 13,
+                color: colors.textMuted,
+                lineHeight: 1.45,
+                maxWidth: "72ch",
+              }}
+            >
+              Aus dem Vortext erkannte Formulierungen mit praktischer Angebotsrelevanz (keine Rechtsbewertung).
+            </p>
+            <div
+              style={{
+                border: `1px solid ${colors.border}`,
+                borderRadius: radius.lg,
+                boxShadow: shadows.sm,
+                background: colors.card,
+                padding: spacing[4],
+                borderLeftWidth: onlyWeak ? 1 : 3,
+                borderLeftColor: onlyWeak ? colors.border : colors.secondary,
+              }}
+            >
+              <div style={{ display: "grid", gap: spacing[4] }}>
+                {top.map((s, idx) => {
+                  const sev = s.severity as LegalSignalSeverity | undefined;
+                  const sevLabel = severityLabelForUi(sev);
+                  const rec = formatRecommendedLine(s.recommendedAction);
+                  const isLastInTop = idx === top.length - 1;
+                  return (
+                    <div
+                      key={s.id}
+                      style={{
+                        paddingBottom: isLastInTop ? 0 : spacing[3],
+                        borderBottom: isLastInTop ? "none" : `1px solid ${colors.border}`,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          alignItems: "baseline",
+                          gap: spacing[2],
+                          marginBottom: spacing[2],
+                        }}
+                      >
+                        <h3
+                          style={{
+                            margin: 0,
+                            fontSize: 15,
+                            fontWeight: 700,
+                            color: colors.text,
+                            lineHeight: 1.35,
+                            flex: "1 1 12rem",
+                          }}
+                        >
+                          {sanitize(s.title)}
+                        </h3>
+                        {sevLabel && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 500,
+                              color: sev === "high" ? colors.textMuted : colors.textSubtle,
+                              letterSpacing: "0.02em",
+                            }}
+                          >
+                            {sevLabel}
+                          </span>
+                        )}
+                      </div>
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: 14,
+                          lineHeight: 1.55,
+                          color: colors.text,
+                        }}
+                      >
+                        {sanitize(s.summary)}
+                      </p>
+                      {rec && (
+                        <p
+                          style={{
+                            margin: spacing[2] + " 0 0",
+                            fontSize: 13,
+                            lineHeight: 1.5,
+                            color: colors.secondary,
+                            fontWeight: 500,
+                          }}
+                        >
+                          {sanitize(rec)}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {rest.length > 0 && (
+                <div style={{ marginTop: spacing[3], paddingTop: spacing[3], borderTop: `1px dashed ${colors.border}` }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: spacing[2] }}>
+                    Weitere {rest.length} {rest.length === 1 ? "Hinweis" : "Hinweise"}
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: spacing[2] }}>
+                    {rest.map((s) => {
+                      const sev = s.severity as LegalSignalSeverity | undefined;
+                      const sevLabel = severityLabelForUi(sev);
+                      return (
+                        <li key={s.id} style={{ fontSize: 13, color: colors.text, lineHeight: 1.45 }}>
+                          <strong style={{ fontWeight: 600 }}>{sanitize(s.title)}</strong>
+                          {sevLabel && (
+                            <span style={{ marginLeft: 6, fontSize: 11, color: colors.textSubtle }}>{sevLabel}</span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 4 Risiko-Kategorien als Karten-Grid */}
       <div style={{ marginBottom: spacing[4] }}>

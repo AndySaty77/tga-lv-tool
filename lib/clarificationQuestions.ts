@@ -183,9 +183,17 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
   for (const f of input.findings ?? []) {
     const cat = normalizeCategory(f.category);
     const sev = normalizeSeverity(f.severity);
-    const question = `Bitte Klarstellung zu: ${f.title}. ${(f.detail ?? "").split("|")[0]?.trim() ?? ""}`.trim();
+    const legalQ =
+      typeof (f as { legalMeta?: { suggestedQuestion?: string } }).legalMeta?.suggestedQuestion === "string"
+        ? String((f as { legalMeta?: { suggestedQuestion?: string } }).legalMeta?.suggestedQuestion ?? "").trim()
+        : "";
+    const question = legalQ
+      ? legalQ
+      : `Bitte Klarstellung zu: ${f.title}. ${(f.detail ?? "").split("|")[0]?.trim() ?? ""}`.trim();
     if (cpQuestionTexts.length > 0 && isSimilarToExistingQuestion(question, cpQuestionTexts)) continue;
-    const reason = `Trigger-Finding: ${f.title}`;
+    const reason = String(f.id ?? "").startsWith("LEGAL_")
+      ? `Vertrags-/Vergabehinweis: ${f.title}`
+      : `Trigger-Finding: ${f.title}`;
     const q: ClarificationQuestion = {
       id: genId("f"),
       category: cat,

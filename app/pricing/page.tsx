@@ -4,6 +4,8 @@ import { MarketingPageShell } from "@/components/marketing/MarketingPageShell";
 import { MarketingSection } from "@/components/marketing/MarketingSection";
 import { Container } from "@/components/shared/Container";
 import { marketingTheme as T } from "@/components/marketing/MarketingTheme";
+import { getUser } from "@/lib/auth/get-user";
+import type { PlanId } from "@/lib/billing/plans";
 import { getUserPlan } from "@/lib/billing/userPlan";
 
 export const metadata = {
@@ -18,12 +20,43 @@ type PlanDefinition = {
   priceSubline?: string;
   description: string;
   features: string[];
-  ctaLabel: string;
-  ctaHref: string;
   featured?: boolean;
   badge?: string;
   isContactPlan?: boolean;
 };
+
+const BILLING_PATH = "/app/billing";
+const CONTACT_TEAM = "/contact?topic=team";
+const LOGIN_TO_BILLING = `/login?redirectTo=${encodeURIComponent(BILLING_PATH)}`;
+
+function pricingCardCta(
+  cardId: "free" | "pro" | "team",
+  isLoggedIn: boolean,
+  plan: PlanId
+): { href: string; label: string } {
+  if (cardId === "team") {
+    return { href: CONTACT_TEAM, label: "Anfrage senden" };
+  }
+
+  if (!isLoggedIn) {
+    if (cardId === "free") {
+      return { href: "/register", label: "Kostenlos starten" };
+    }
+    return { href: LOGIN_TO_BILLING, label: "Jetzt upgraden" };
+  }
+
+  if (plan === "free") {
+    if (cardId === "free") {
+      return { href: "/app/analyse", label: "Zur Analyse" };
+    }
+    return { href: BILLING_PATH, label: "Upgrade auf Pro" };
+  }
+
+  if (cardId === "free") {
+    return { href: "/app", label: "Zur App" };
+  }
+  return { href: BILLING_PATH, label: "Pro verwalten" };
+}
 
 function PriceCard({
   name,
@@ -36,7 +69,7 @@ function PriceCard({
   featured,
   badge,
   isContactPlan,
-}: Omit<PlanDefinition, "id">) {
+}: Omit<PlanDefinition, "id"> & { ctaHref: string; ctaLabel: string }) {
   return (
     <div
       style={{
@@ -96,6 +129,8 @@ function PriceCard({
 }
 
 export default async function PricingPage() {
+  const user = await getUser().catch(() => null);
+  const isLoggedIn = !!user;
   const plan = await getUserPlan().catch(() => "free" as const);
 
   const plans: PlanDefinition[] = [
@@ -105,8 +140,6 @@ export default async function PricingPage() {
       price: "0 €",
       description: "Für den Einstieg und erste Tests im Arbeitsalltag.",
       features: ["3 Analysen", "Basis-Ergebnisansicht", "Basis-Risikoanalyse", "Management-Zusammenfassung", "Analyse-Archiv"],
-      ctaHref: "/register",
-      ctaLabel: "Kostenlos starten",
       featured: false,
     },
     {
@@ -123,8 +156,6 @@ export default async function PricingPage() {
         "Analyse-Archiv",
         "PDF-Export",
       ],
-      ctaHref: "/register",
-      ctaLabel: "Pro wählen",
       featured: true,
       badge: "Empfohlen",
     },
@@ -141,8 +172,6 @@ export default async function PricingPage() {
         "Priorisierter Support / individuelle Abstimmung",
         "PDF-Export",
       ],
-      ctaHref: "/contact",
-      ctaLabel: "Anfrage senden",
       featured: false,
       isContactPlan: true,
     },
@@ -182,21 +211,24 @@ export default async function PricingPage() {
               gap: 12,
             }}
           >
-            {plans.map((p) => (
-              <PriceCard
-                key={p.id}
-                name={p.name}
-                price={p.price}
-                priceSubline={p.priceSubline}
-                description={p.description}
-                features={p.features}
-                ctaHref={p.ctaHref}
-                ctaLabel={p.ctaLabel}
-                featured={p.featured}
-                badge={p.badge}
-                isContactPlan={p.isContactPlan}
-              />
-            ))}
+            {plans.map((p) => {
+              const { href, label } = pricingCardCta(p.id, isLoggedIn, plan);
+              return (
+                <PriceCard
+                  key={p.id}
+                  name={p.name}
+                  price={p.price}
+                  priceSubline={p.priceSubline}
+                  description={p.description}
+                  features={p.features}
+                  ctaHref={href}
+                  ctaLabel={label}
+                  featured={p.featured}
+                  badge={p.badge}
+                  isContactPlan={p.isContactPlan}
+                />
+              );
+            })}
           </div>
 
           {/* Vergleichsmatrix */}

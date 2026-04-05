@@ -43,6 +43,7 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
   const clarifications = Array.isArray(report.clarifications) ? report.clarifications : [];
   const nextSteps = Array.isArray(report.nextSteps) ? report.nextSteps.filter((s) => opt(s)) : [];
   const topRisksDetailed = Array.isArray(report.topRisks) ? report.topRisks : [];
+  const legalSignalsPdf = Array.isArray(report.legalSignals) ? report.legalSignals : [];
   const disclaimer = report.disclaimer?.text ?? "";
 
   const docTitle = "LV Scope – Analysebericht";
@@ -201,7 +202,32 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
     parts.push("</div></section>");
   }
 
-  // F. Rückfragen (vollständiger Arbeitsblock)
+  // F. Vertraglich auffällige Punkte (V1, optional)
+  if (legalSignalsPdf.length > 0) {
+    parts.push('<section class="section section-context section-legal-signals">');
+    parts.push('<h2 class="section-title">Vertraglich auffällige Punkte</h2>');
+    parts.push(
+      '<p class="section-lead">Kurze Einordnung aus dem Vortext – für Angebotsprüfung und Kalkulation (keine Rechtsbewertung).</p>'
+    );
+    parts.push('<div class="legal-signals-block">');
+    for (const ls of legalSignalsPdf) {
+      const t = escapeHtml(opt(ls.title));
+      const sum = opt(ls.summary) ? escapeHtml(opt(ls.summary)) : "";
+      const sev = opt(ls.severityLabel) ? escapeHtml(opt(ls.severityLabel)) : "";
+      const rec = opt(ls.recommendation) ? escapeHtml(opt(ls.recommendation)) : "";
+      parts.push('<div class="legal-signal-item">');
+      parts.push('<div class="legal-signal-head">');
+      parts.push(`<span class="legal-signal-title">${t}</span>`);
+      if (sev) parts.push(`<span class="legal-signal-sev">${sev}</span>`);
+      parts.push("</div>");
+      if (sum) parts.push(`<div class="legal-signal-body">${sum}</div>`);
+      if (rec) parts.push(`<div class="legal-signal-rec">${rec}</div>`);
+      parts.push("</div>");
+    }
+    parts.push("</div></section>");
+  }
+
+  // G. Rückfragen (vollständiger Arbeitsblock)
   if (questions.length > 0) {
     parts.push('<section class="section section-work section-questions">');
     parts.push('<h2 class="section-title">Rückfragen an Auftraggeber / Planung</h2>');
@@ -229,7 +255,7 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
     parts.push("</ol></section>");
   }
 
-  // G. Angebotsklarstellungen
+  // H. Angebotsklarstellungen
   if (clarifications.length > 0) {
     parts.push('<section class="section section-work section-clarifications">');
     parts.push('<h2 class="section-title">Angebotsklarstellungen</h2>');
@@ -252,7 +278,7 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
     parts.push("</ol></section>");
   }
 
-  // H. Nachtragspotenzial / Strategie
+  // I. Nachtragspotenzial / Strategie
   const hideClaimTopRisksList = topRisksDetailed.length > 0;
   if (claimPotential && Object.keys(claimPotential).length > 0) {
     const cpExec = opt(claimPotential.executiveSummary);
@@ -311,7 +337,7 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
     }
   }
 
-  // I. Score-Kategorien (Anhang / Detail)
+  // J. Score-Kategorien (Anhang / Detail)
   if (categoryScores.length > 0) {
     parts.push('<section class="section section-appendix">');
     parts.push('<h2 class="section-title">Anhang: Score-Kategorien im Detail</h2>');
@@ -345,7 +371,7 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
     parts.push("</section>");
   }
 
-  // J. Hinweis / Disclaimer
+  // K. Hinweis / Disclaimer
   const disclaimerText =
     disclaimer && disclaimer.trim()
       ? disclaimer
@@ -405,6 +431,15 @@ export function renderPdfHtmlFromMock(): string {
         categoryLabel: "Normen und Vertragsgrundlagen",
         severityHint: "Mittleres Einzelrisiko",
         detail: "Formulierung weicht von üblicher Mustervorlage ab.",
+      },
+    ],
+    legalSignals: [
+      {
+        title: "Abhängigkeit von Vorleistungen oder Dritten",
+        summary:
+          "Die Leistung hängt erkennbar von bauseitigen Vorleistungen oder anderen Gewerken ab. Das erhöht das Risiko für Behinderungen und Terminverschiebungen.",
+        severityLabel: "Mittel",
+        recommendation: "Empfehlung: Zuständigkeiten und bauseitige Vorleistungen vor Angebotsabgabe klären.",
       },
     ],
     categoryScores: [

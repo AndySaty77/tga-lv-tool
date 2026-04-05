@@ -189,9 +189,17 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
   for (const f of input.findings ?? []) {
     const cat = normalizeCategory(f.category);
     const sev = normalizeSeverity(f.severity);
-    const assumption = `Wir gehen davon aus, dass die Anforderungen gemäß ${f.title} im Sinne der anerkannten Regeln der Technik ausgeführt werden, sofern keine abweichende Klarstellung erfolgt.`;
+    const legalA =
+      typeof (f as { legalMeta?: { suggestedClarification?: string } }).legalMeta?.suggestedClarification === "string"
+        ? String((f as { legalMeta?: { suggestedClarification?: string } }).legalMeta?.suggestedClarification ?? "").trim()
+        : "";
+    const assumption = legalA
+      ? legalA
+      : `Wir gehen davon aus, dass die Anforderungen gemäß ${f.title} im Sinne der anerkannten Regeln der Technik ausgeführt werden, sofern keine abweichende Klarstellung erfolgt.`;
     if (existingClarificationTexts.length > 0 && isSimilarToExistingClarification(assumption, existingClarificationTexts)) continue;
-    const reason = `Finding: ${f.title}`;
+    const reason = String(f.id ?? "").startsWith("LEGAL_")
+      ? `Vertrags-/Vergabehinweis: ${f.title}`
+      : `Finding: ${f.title}`;
     const q = questionByFindingId.get(f.id);
     const a: OfferAssumption = {
       id: genId("f"),

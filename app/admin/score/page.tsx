@@ -211,6 +211,16 @@ type ScoreResult = {
   llmMode?: boolean;
   findingsBeforeLlm?: number;
   findingsAfterLlm?: number;
+  /** V1: optionale Vertrags-/Vergabesignale (API legalSignals) */
+  legalSignals?: Array<{
+    id: string;
+    signalType: string;
+    title: string;
+    summary: string;
+    severity: string;
+    confidence?: number;
+    recommendedAction?: string;
+  }>;
   internalScores?: {
     nachtragspotenzialV2?: {
       exposureScore: number;
@@ -1051,6 +1061,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               keyFactsDebug: vortextResult?.keyFactsDebug ?? null,
               gaebPreview,
               split,
+              ...(Array.isArray(data.legalSignals) && data.legalSignals.length > 0 ? { legalSignals: data.legalSignals } : {}),
             },
           };
           try {
@@ -2529,6 +2540,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               fileName={fileMeta?.name}
               fileSize={fileMeta?.size ?? undefined}
               result={result}
+              legalSignals={result.legalSignals}
               changeOrderAnalysis={changeOrderAnalysis ?? undefined}
               clarificationQuestions={(clarificationQuestions ?? undefined) as AnalyseCockpitViewProps["clarificationQuestions"]}
               offerAssumptions={(offerAssumptions ?? undefined) as AnalyseCockpitViewProps["offerAssumptions"]}

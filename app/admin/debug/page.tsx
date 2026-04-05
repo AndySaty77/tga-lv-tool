@@ -170,7 +170,7 @@ export default function AdminDebugPage() {
         <div>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700 }}>Debug</h1>
           <p style={{ color: "#666", marginTop: 8, marginBottom: 0, lineHeight: 1.5 }}>
-            Interne Rohdaten und Diagnose. Nicht für Kunden – nur für Entwicklung und Fehlersuche. Keine Fachlogik geändert.
+            Interner Diagnosebereich: Rohdaten aus Score-Antworten (Session oder Paste). Kein Kundenprodukt, keine Endnutzer-Ansicht – nur Entwicklung und Support.
           </p>
         </div>
         <a href="/admin" style={{ color: "#111", textDecoration: "underline", fontSize: 14 }}>
@@ -247,7 +247,7 @@ export default function AdminDebugPage() {
         </a>
         {" · "}
         <a href="/app/analyse" style={{ color: "#111", textDecoration: "underline", fontSize: 14 }}>
-          Kundenbereich (/analyse)
+          Kundenanalyse (/app/analyse)
         </a>
       </div>
     </div>

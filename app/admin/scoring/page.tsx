@@ -109,7 +109,10 @@ export default function AdminScoringPage() {
         setMessage({ type: "error", text: data?.error ?? "Speichern fehlgeschlagen" });
         return;
       }
-      setMessage({ type: "ok", text: "Gespeichert. Werte werden bei der nächsten Analyse verwendet." });
+      setMessage({
+        type: "ok",
+        text: "Gespeichert. Unmittelbar wirksam in /api/score: catMax, LV-Größe, Easing. Andere Felder siehe Hinweise oben.",
+      });
       if (data.config) setConfig(data.config);
     } catch (e) {
       setMessage({ type: "error", text: (e as Error)?.message ?? "Netzwerkfehler" });
@@ -136,16 +139,32 @@ export default function AdminScoringPage() {
     >
       <header style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700 }}>Scoring</h1>
+          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700 }}>Scoring-Konfiguration</h1>
           <p style={{ color: "#666", marginTop: 8, marginBottom: 0, lineHeight: 1.5 }}>
-            Interne Konfiguration der Bewertungslogik. Nur für Admins – keine Kundenoberfläche.
+            Interne Bewertungs-Parameter (Tabelle <code style={{ background: "#eee", padding: "1px 4px", borderRadius: 4 }}>scoring_config</code>). Nur Admins.
           </p>
           {configSource && (
             <p style={{ fontSize: 12, color: "#666", marginTop: 6, marginBottom: 0, lineHeight: 1.5 }}>
-              Quelle: {configSource === "database" ? "Datenbank (scoring_config)" : "Fallback (Code)"}.{" "}
-              <strong>Speicherung:</strong> dauerhaft in der Datenbank (Tabelle scoring_config, key „default“). Zum Speichern <code style={{ background: "#eee", padding: "1px 4px", borderRadius: 4 }}>SUPABASE_SERVICE_ROLE_KEY</code> in .env.local setzen, sonst blockiert RLS – siehe docs/Scoring-Admin-RLS.md. Kategorie- und Komplexitäts-Werte werden von der Bewertung aus der Config geladen; Ampel- und Nachtrag-Schwellen ggf. erst nach Anbindung in der Laufzeitlogik.
+              Quelle: {configSource === "database" ? "Datenbank" : "Fallback (Code)"}. Speichern mit Service-Role, sonst RLS – siehe docs/Scoring-Admin-RLS.md.
             </p>
           )}
+          <div
+            style={{
+              marginTop: 14,
+              padding: 12,
+              borderRadius: 10,
+              border: "1px solid #e0e0e0",
+              background: "#f5f5f5",
+              fontSize: 12,
+              color: "#444",
+              lineHeight: 1.55,
+            }}
+          >
+            <strong style={{ display: "block", marginBottom: 6, color: "#333" }}>Was wirkt heute in /api/score?</strong>
+            Aus dieser Config werden bei einer Analyse <strong>gelesen und angewendet</strong>: Kategorie-Obergrenzen (catMax), LV-Größe (baseDivisor / maxBoost), Easing, Gesamt-Methode (Mittel).<br />
+            <strong>Nicht</strong> aus dieser Config in der Score-API: Ampel-Farbgrenzen (Anzeige nutzt Konstanten in Code), Schwellen für „Weiche Formulierungen“ / Nachtrag-Findings (liegen in <code style={{ background: "#eee", padding: "0 3px", borderRadius: 3 }}>lib/scoringConfig</code> / Analyse), Text-Level (hochriskant …) nach Gesamtpunktzahl.<br />
+            Weitere Felder unten werden <strong>mitgespeichert</strong>, haben aber teils <strong>keine oder nur indirekte</strong> Laufzeitwirkung – siehe Abschnitte.
+          </div>
         </div>
         <a href="/admin" style={{ color: "#111", textDecoration: "underline", fontSize: 14 }}>
           Zurück zum Admin
@@ -178,8 +197,8 @@ export default function AdminScoringPage() {
               1. Ampel-Schwellen
             </h2>
             <p style={helpStyle}>
-              <strong>Was es macht:</strong> Der Gesamt-Score einer LV-Bewertung liegt zwischen 0 und 100. Die Ampel zeigt in der Analyse-UI, ob das Risiko als Grün, Gelb oder Rot eingestuft wird.<br />
-              <strong>So wirkt es:</strong> Liegt der Score <em>unter</em> „Gelb ab“ → Grün (geringes Risiko). Ab „Gelb ab“ bis unter „Rot ab“ → Gelb (mittleres Risiko). Ab „Rot ab“ → Rot (hohes Risiko). Höhere Schwellen = strenger (mehr gilt noch als Grün/Gelb).
+              <strong>Inhalt:</strong> Schwellen für Grün/Gelb/Rot, wie sie Sie hier pflegen und in der DB speichern.<br />
+              <strong>Laufzeit:</strong> Die Analyse-Oberfläche nutzt aktuell die <strong>festen</strong> Ampel-Grenzen aus dem Code (<code style={{ background: "#eee", padding: "0 3px", borderRadius: 3 }}>AMPEL_THRESHOLDS</code>), nicht diese Felder aus der Datenbank. Werte hier sind also vorbereitet / dokumentiert, bis die Anzeige an die Config angebunden wird.
             </p>
             <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginTop: 12 }}>
               <div>
@@ -213,10 +232,13 @@ export default function AdminScoringPage() {
               2. Claim- / Nachtragsschwellen
             </h2>
             <p style={helpStyle}>
-              <strong>Claim-Level:</strong> Erlaubte Stufen für die Bewertung von Triggern (z. B. „Niedrig“, „Mittel“, „Hoch“). Bei jedem Trigger können Sie genau eine dieser Stufen als „Claim-Level“ auswählen; nur Begriffe, die hier eingetragen sind, werden akzeptiert. Kommagetrennt eingeben, exakte Schreibweise verwenden (z. B. „Niedrig, Mittel, Hoch“).
+              <strong>Claim-Level:</strong> Wird in <code style={{ background: "#eee", padding: "0 3px", borderRadius: 3 }}>scoring_config</code> gespeichert. Die Trigger-Verwaltung prüft Claim-Level beim Speichern aktuell gegen die <strong>feste Liste</strong> in <code style={{ background: "#eee", padding: "0 3px", borderRadius: 3 }}>lib/scoringConfig</code> – Abgleich mit Ihrer Eingabe hier ist nicht automatisch dieselbe Quelle. Kommagetrennt, z. B. „Niedrig, Mittel, Hoch“.
             </p>
             <p style={{ ...helpStyle, marginTop: 10 }}>
-              <strong>Nachtrag-Check „Weiche Formulierungen“:</strong> Das System zählt, wie oft die eingetragenen Weichwörter (z. B. „bauseits“, „nach Aufwand“, „optional“) im LV-Text vorkommen. Daraus entsteht höchstens ein Finding in der Kategorie „Nachtrag“. Die vier Schwellen steuern, wann es erscheint und wie stark es ins Scoring eingeht:
+              <strong>Nachtrag / Weiche Formulierungen:</strong> Die echte Erkennung (Treffer, Schwere, Penalty) nutzt <strong>Konstanten im Code</strong>, nicht diese DB-Felder. Was Sie hier speichern, ist für spätere Anbindung / Transparenz gedacht – ändert die laufende Analyse-Engine so <strong>nicht</strong>.
+            </p>
+            <p style={{ ...helpStyle, marginTop: 8, fontStyle: "italic" as const }}>
+              Fachliche Bedeutung der Felder (Referenz; live gelten die Konstanten in Code):
             </p>
             <ul style={{ fontSize: 12, color: "#555", marginTop: 4, marginBottom: 0, paddingLeft: 20, lineHeight: 1.5 }}>
               <li><strong>minFindings:</strong> Ab wie vielen Treffern überhaupt ein Hinweis erzeugt wird. Unter diesem Wert erscheint kein Finding (z. B. 3 = erst ab 3 Vorkommen).</li>

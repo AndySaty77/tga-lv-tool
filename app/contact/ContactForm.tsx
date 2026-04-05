@@ -50,14 +50,19 @@ function emailPlausible(email: string): boolean {
   return domain.length >= 2 && domain.includes(".");
 }
 
-export function ContactForm() {
+type ContactFormProps = {
+  /** z. B. von `/contact?topic=team` (Produkt/Team-Anfrage) oder `?category=demo` */
+  initialCategory?: ContactCategory;
+};
+
+export function ContactForm({ initialCategory }: ContactFormProps = {}) {
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [phone, setPhone] = useState("");
   const [teamSize, setTeamSize] = useState("");
-  const [category, setCategory] = useState<ContactCategory>("general");
+  const [category, setCategory] = useState<ContactCategory>(initialCategory ?? "general");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);

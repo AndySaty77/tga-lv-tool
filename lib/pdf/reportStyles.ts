@@ -297,6 +297,49 @@ export const reportStyles = `
     padding-left: 0;
   }
 
+  .legal-signals-block {
+    margin-top: 4pt;
+  }
+  .legal-signal-item {
+    margin-bottom: 10pt;
+    padding: 8pt 10pt;
+    background: #fafafa;
+    border: 1pt solid #eaeaea;
+    border-radius: 4pt;
+    border-left: 3pt solid #6b7280;
+    page-break-inside: avoid;
+  }
+  .legal-signal-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6pt 10pt;
+    margin-bottom: 4pt;
+  }
+  .legal-signal-title {
+    font-weight: 700;
+    font-size: 10pt;
+    color: #1a1a1a;
+    flex: 1 1 60%;
+  }
+  .legal-signal-sev {
+    font-size: 8.5pt;
+    font-weight: 600;
+    color: #666;
+  }
+  .legal-signal-body {
+    font-size: 9pt;
+    color: #444;
+    line-height: 1.45;
+  }
+  .legal-signal-rec {
+    margin-top: 5pt;
+    font-size: 9pt;
+    font-weight: 600;
+    color: #3d5a40;
+    line-height: 1.45;
+  }
+
   .section-title {
     margin: 0 0 8pt;
     font-size: 11pt;
