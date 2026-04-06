@@ -4,6 +4,10 @@ import { getUser } from "@/lib/auth/get-user";
 import { getSupabaseServiceRole } from "@/lib/billing/stripeProfileSync";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { getAppBaseUrl } from "@/lib/appBaseUrl";
+import {
+  isCheckoutAllowedForEmail,
+  parseStripeCheckoutAllowedEmails,
+} from "@/lib/billing/checkoutAllowlist";
 import { getStripe, getStripePriceProMonthly } from "@/lib/stripe/server";
 
 /**
@@ -27,15 +31,21 @@ export async function POST() {
     );
   }
 
-  /** Öffentlichen Pro-Kauf abschalten (UI + API); Webhook/Stripe bleiben unverändert. */
+  /**
+   * Öffentlicher Pro-Kauf gesperrt, außer E-Mail steht in STRIPE_CHECKOUT_ALLOWED_EMAILS
+   * (kommasepariert, trim/lowercase). Session-Erzeugung unten unverändert.
+   */
   if (process.env.DISABLE_PUBLIC_PRO_CHECKOUT === "true") {
-    return NextResponse.json(
-      {
-        error: "checkout_disabled",
-        message: "Der öffentliche Pro-Kauf ist derzeit nicht verfügbar. Bitte kontaktieren Sie uns für Zugang.",
-      },
-      { status: 403 }
-    );
+    const allowedEmails = parseStripeCheckoutAllowedEmails(process.env.STRIPE_CHECKOUT_ALLOWED_EMAILS);
+    if (!isCheckoutAllowedForEmail(user.email ?? null, allowedEmails)) {
+      return NextResponse.json(
+        {
+          error: "checkout_disabled",
+          message: "Der öffentliche Pro-Kauf ist derzeit nicht verfügbar. Bitte kontaktieren Sie uns für Zugang.",
+        },
+        { status: 403 }
+      );
+    }
   }
 
   let plan;

@@ -2,7 +2,12 @@ import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BillingPortalButton } from "@/components/app/BillingPortalButton";
+import { CheckoutProButton } from "@/components/app/CheckoutProButton";
 import { appTheme as T } from "@/components/app/appTheme";
+import {
+  isCheckoutAllowedForEmail,
+  parseStripeCheckoutAllowedEmails,
+} from "@/lib/billing/checkoutAllowlist";
 import { getBillingProfileFields } from "@/lib/billing/billingProfile";
 import { CONTACT_PRO_INQUIRY_HREF, isManualProPlan } from "@/lib/billing/planSource";
 import type { PlanId } from "@/lib/billing/plans";
@@ -144,7 +149,7 @@ const FREE_PRO_FEATURES = [
   "PDF-Export",
 ] as const;
 
-function FreeUpgradeHero() {
+function FreeUpgradeHero({ showStripeCheckout }: { showStripeCheckout: boolean }) {
   return (
     <div
       style={{
@@ -178,11 +183,12 @@ function FreeUpgradeHero() {
           lineHeight: 1.2,
         }}
       >
-        Pro auf Anfrage
+        {showStripeCheckout ? "Pro freischalten" : "Pro auf Anfrage"}
       </h2>
       <p style={{ margin: "0 0 18px", fontSize: 14, color: T.muted, lineHeight: 1.65, maxWidth: 540 }}>
-        Pro ist derzeit nicht im Selbstservice buchbar. Wir schalten Zugang auf Anfrage oder Einladung frei – für
-        Tests und produktiven Einsatz.
+        {showStripeCheckout
+          ? "Für Ihr Konto ist der direkte Checkout freigeschaltet. Nach erfolgreicher Zahlung aktivieren wir Pro wie gewohnt."
+          : "Pro ist derzeit nicht im Selbstservice buchbar. Wir schalten Zugang auf Anfrage oder Einladung frei – für Tests und produktiven Einsatz."}
       </p>
       <ul
         style={{
@@ -212,43 +218,71 @@ function FreeUpgradeHero() {
           </li>
         ))}
       </ul>
-      <div
-        style={{
-          marginBottom: 20,
-          padding: "14px 16px",
-          borderRadius: T.radiusSm,
-          border: `1px solid ${T.border}`,
-          background: "rgba(255,255,255,0.04)",
-        }}
-      >
-        <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: T.text }}>Früher Zugang auf Einladung</p>
-        <p style={{ margin: "8px 0 0", fontSize: 13, color: T.muted, lineHeight: 1.55 }}>
-          Schreiben Sie uns kurz – wir melden uns mit den nächsten Schritten.
-        </p>
-      </div>
-      <div style={{ marginBottom: 16 }}>
-        <Link
-          href={CONTACT_PRO_INQUIRY_HREF}
+      {!showStripeCheckout ? (
+        <div
           style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            fontSize: 15,
-            fontWeight: 700,
-            color: "#0a0e1a",
-            padding: "14px 28px",
-            borderRadius: T.radius,
-            border: "1px solid rgba(224,124,94,0.95)",
-            background: T.accent,
-            textDecoration: "none",
-            boxShadow: "0 8px 24px rgba(224,124,94,0.25)",
-            minWidth: 260,
+            marginBottom: 20,
+            padding: "14px 16px",
+            borderRadius: T.radiusSm,
+            border: `1px solid ${T.border}`,
+            background: "rgba(255,255,255,0.04)",
           }}
         >
-          Pro-Zugang anfragen
-        </Link>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: T.text }}>Früher Zugang auf Einladung</p>
+          <p style={{ margin: "8px 0 0", fontSize: 13, color: T.muted, lineHeight: 1.55 }}>
+            Schreiben Sie uns kurz – wir melden uns mit den nächsten Schritten.
+          </p>
+        </div>
+      ) : (
+        <div
+          style={{
+            marginBottom: 20,
+            padding: "14px 16px",
+            borderRadius: T.radiusSm,
+            border: `1px solid ${T.border}`,
+            background: "rgba(255,255,255,0.04)",
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: T.text }}>Alternativ ohne Direktkauf</p>
+          <p style={{ margin: "8px 0 0", fontSize: 13, color: T.muted, lineHeight: 1.55 }}>
+            Sie können uns auch weiterhin für eine Einladung oder Demo kontaktieren.
+          </p>
+        </div>
+      )}
+      <div style={{ marginBottom: 16 }}>
+        {showStripeCheckout ? (
+          <CheckoutProButton variant="hero" />
+        ) : (
+          <Link
+            href={CONTACT_PRO_INQUIRY_HREF}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              fontSize: 15,
+              fontWeight: 700,
+              color: "#0a0e1a",
+              padding: "14px 28px",
+              borderRadius: T.radius,
+              border: "1px solid rgba(224,124,94,0.95)",
+              background: T.accent,
+              textDecoration: "none",
+              boxShadow: "0 8px 24px rgba(224,124,94,0.25)",
+              minWidth: 260,
+            }}
+          >
+            Pro-Zugang anfragen
+          </Link>
+        )}
       </div>
+      {showStripeCheckout ? (
+        <p style={{ margin: "0 0 16px", fontSize: 12, color: T.faint, lineHeight: 1.5 }}>
+          <Link href={CONTACT_PRO_INQUIRY_HREF} style={{ color: T.accent, fontWeight: 600, textDecoration: "none" }}>
+            Pro-Zugang anfragen (ohne Checkout)
+          </Link>
+        </p>
+      ) : null}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
         <Link href="/pricing" style={linkButtonStyle("muted")}>
           Preise &amp; Leistungen
@@ -261,7 +295,14 @@ function FreeUpgradeHero() {
   );
 }
 
-export default async function AppBillingPage() {
+export default async function AppBillingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ debug?: string }>;
+}) {
+  const sp = await searchParams;
+  const showBillingDebug = sp.debug === "1";
+
   const user = await getUser().catch(() => null);
   if (!user) {
     redirect("/login?redirectTo=/app/billing");
@@ -302,8 +343,44 @@ export default async function AppBillingPage() {
   const freeUnpaidStripe =
     !isPro && hasStripeCustomer && bs === "unpaid";
 
+  const checkoutAllowlistSet = parseStripeCheckoutAllowedEmails(process.env.STRIPE_CHECKOUT_ALLOWED_EMAILS);
+  const isEmailAllowed = isCheckoutAllowedForEmail(user.email ?? null, checkoutAllowlistSet);
+  const showStripeCheckoutForFree = plan === "free" && isEmailAllowed;
+
+  const debugRow = (label: string, value: string) => (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 200px) 1fr", gap: 8, marginBottom: 4 }}>
+      <span style={{ color: T.faint }}>{label}</span>
+      <code style={{ fontSize: 11, color: T.muted, wordBreak: "break-all" }}>{value}</code>
+    </div>
+  );
+
   return (
     <>
+      {showBillingDebug ? (
+        <div
+          style={{
+            marginBottom: T.space.md,
+            padding: 12,
+            borderRadius: T.radiusSm,
+            border: `1px dashed ${T.border}`,
+            background: "rgba(255,255,255,0.03)",
+            fontSize: 11,
+            fontFamily: "ui-monospace, monospace",
+          }}
+        >
+          <div style={{ fontWeight: 700, color: T.faint, marginBottom: 8, letterSpacing: "0.04em" }}>
+            DEBUG (?debug=1) – Checkout-Allowlist
+          </div>
+          {debugRow("user.email", user.email ?? "(null)")}
+          {debugRow("plan", plan)}
+          {debugRow("DISABLE_PUBLIC_PRO_CHECKOUT", process.env.DISABLE_PUBLIC_PRO_CHECKOUT ?? "(unset)")}
+          {debugRow("STRIPE_CHECKOUT_ALLOWED_EMAILS (raw)", process.env.STRIPE_CHECKOUT_ALLOWED_EMAILS ?? "(unset)")}
+          {debugRow("parsedAllowedEmails", [...checkoutAllowlistSet].join(", ") || "(empty set)")}
+          {debugRow("isEmailAllowed", String(isEmailAllowed))}
+          {debugRow("showStripeCheckoutForFree", String(showStripeCheckoutForFree))}
+        </div>
+      ) : null}
+
       <div style={{ marginBottom: T.space.xl }}>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: T.text }}>
           Billing
@@ -501,7 +578,9 @@ export default async function AppBillingPage() {
 
       {!isPro ? (
         <>
-          {!freeUnpaidStripe ? <FreeUpgradeHero /> : null}
+          {!freeUnpaidStripe ? (
+            <FreeUpgradeHero showStripeCheckout={showStripeCheckoutForFree} />
+          ) : null}
 
           <BillingCard title="Nutzung (kostenlose Analysen)">
             {usage ? (
