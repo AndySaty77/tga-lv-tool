@@ -7,7 +7,7 @@ const inter = Inter({
 });
 
 export const metadata = {
-  title: "TGA LV Tool",
+  title: "LV Scope",
   description: "MVP",
   icons: { icon: "/favicon.png" },
 };

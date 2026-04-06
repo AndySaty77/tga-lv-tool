@@ -2882,29 +2882,6 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                   )}
                 </div>
               )}
-              <div style={{ fontSize: 12, marginBottom: 12, whiteSpace: "pre-wrap" }}>
-                <strong>DEBUG VORBEMERKUNGEN</strong>
-                <div>displayNodes count: {gaebPreview?.normalized?.displayNodes?.length ?? 0}</div>
-                <div>
-                  remark nodes:{" "}
-                  {Array.isArray(gaebPreview?.normalized?.displayNodes)
-                    ? gaebPreview.normalized.displayNodes.filter(
-                        (n: any) => n?.type === "remark"
-                      ).length
-                    : 0}
-                </div>
-                <div>
-                  group-scope remarks:{" "}
-                  {Array.isArray(gaebPreview?.normalized?.displayNodes)
-                    ? gaebPreview.normalized.displayNodes.filter(
-                        (n: any) =>
-                          n?.type === "remark" &&
-                          (n?.scope === "group" || n?.scope === "itemlist-note")
-                      ).length
-                    : 0}
-                </div>
-                <div>vortext length: {vortextForDocumentViewDisplay?.length ?? 0}</div>
-              </div>
               <VorbemerkungenDocumentView
                 content={vortextForDocumentViewDisplay}
                 maxHeight="420px"
