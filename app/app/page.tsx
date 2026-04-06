@@ -6,6 +6,7 @@ import { DashboardStats } from "@/components/app/dashboardStats";
 import { StatusBadge } from "@/components/shared/statusBadge";
 import { getUser } from "@/lib/auth/get-user";
 import type { PlanId } from "@/lib/billing/plans";
+import { CONTACT_PRO_INQUIRY_HREF } from "@/lib/billing/planSource";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { getTotalUsageForPlan, type TotalUsageInfo } from "@/lib/billing/usage";
 
@@ -218,10 +219,10 @@ export default async function AppDashboardPage() {
               Neue Analyse (Limit erreicht)
             </span>
             <p style={{ margin: 0, fontSize: 12, color: T.faint, maxWidth: 360 }}>
-              Sie haben Ihr Kontingent an kostenlosen Analysen verbraucht. Upgraden Sie auf Pro für unbegrenzte Analysen.
+              Sie haben Ihr Kontingent an kostenlosen Analysen verbraucht. Pro ist derzeit auf Anfrage verfügbar.
             </p>
             <Link
-              href="/pricing"
+              href={CONTACT_PRO_INQUIRY_HREF}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -236,7 +237,7 @@ export default async function AppDashboardPage() {
                 alignSelf: "flex-start",
               }}
             >
-              Zu den Plänen →
+              Pro anfragen →
             </Link>
           </div>
         ) : (

@@ -27,7 +27,8 @@ type PlanDefinition = {
 
 const BILLING_PATH = "/app/billing";
 const CONTACT_TEAM = "/contact?topic=team";
-const LOGIN_TO_BILLING = `/login?redirectTo=${encodeURIComponent(BILLING_PATH)}`;
+/** Pro derzeit ohne öffentlichen Sofortkauf – Anfrage/Demo */
+const CONTACT_PRO_INQUIRY = "/contact?category=demo";
 
 function pricingCardCta(
   cardId: "free" | "pro" | "team",
@@ -42,14 +43,14 @@ function pricingCardCta(
     if (cardId === "free") {
       return { href: "/register", label: "Kostenlos starten" };
     }
-    return { href: LOGIN_TO_BILLING, label: "Jetzt upgraden" };
+    return { href: CONTACT_PRO_INQUIRY, label: "Pro auf Anfrage" };
   }
 
   if (plan === "free") {
     if (cardId === "free") {
       return { href: "/app/analyse", label: "Zur Analyse" };
     }
-    return { href: BILLING_PATH, label: "Upgrade auf Pro" };
+    return { href: CONTACT_PRO_INQUIRY, label: "Pro auf Anfrage" };
   }
 
   if (cardId === "free") {
@@ -146,6 +147,7 @@ export default async function PricingPage() {
       id: "pro",
       name: "Pro",
       price: "79 € / Monat",
+      priceSubline: "Zugang aktuell auf Anfrage – kein öffentlicher Sofortkauf",
       description:
         "Für Unternehmen, die Leistungsverzeichnisse regelmäßig fundiert prüfen, Risiken erkennen und Angebote sauber absichern wollen.",
       features: [

@@ -27,6 +27,17 @@ export async function POST() {
     );
   }
 
+  /** Öffentlichen Pro-Kauf abschalten (UI + API); Webhook/Stripe bleiben unverändert. */
+  if (process.env.DISABLE_PUBLIC_PRO_CHECKOUT === "true") {
+    return NextResponse.json(
+      {
+        error: "checkout_disabled",
+        message: "Der öffentliche Pro-Kauf ist derzeit nicht verfügbar. Bitte kontaktieren Sie uns für Zugang.",
+      },
+      { status: 403 }
+    );
+  }
+
   let plan;
   try {
     plan = await getUserPlan();

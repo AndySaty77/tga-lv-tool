@@ -6,6 +6,9 @@ export type BillingProfileRow = {
   billing_status: string | null;
   billing_current_period_end: string | null;
   billing_cancel_at_period_end: boolean | null;
+  plan_source: string | null;
+  trial_ends_at: string | null;
+  plan_notes: string | null;
 };
 
 /**
@@ -17,7 +20,7 @@ export async function getBillingProfileFields(userId: string): Promise<BillingPr
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "stripe_customer_id, stripe_subscription_id, billing_status, billing_current_period_end, billing_cancel_at_period_end"
+      "stripe_customer_id, stripe_subscription_id, billing_status, billing_current_period_end, billing_cancel_at_period_end, plan_source, trial_ends_at, plan_notes"
     )
     .eq("id", userId)
     .maybeSingle();
@@ -30,5 +33,8 @@ export async function getBillingProfileFields(userId: string): Promise<BillingPr
       typeof data.billing_current_period_end === "string" ? data.billing_current_period_end : null,
     billing_cancel_at_period_end:
       typeof data.billing_cancel_at_period_end === "boolean" ? data.billing_cancel_at_period_end : null,
+    plan_source: typeof data.plan_source === "string" ? data.plan_source : null,
+    trial_ends_at: typeof data.trial_ends_at === "string" ? data.trial_ends_at : null,
+    plan_notes: typeof data.plan_notes === "string" ? data.plan_notes : null,
   };
 }

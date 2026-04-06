@@ -8,6 +8,7 @@ import {
   planAboShellStyle,
 } from "@/components/app/subscriptionStatusUi";
 import { getBillingProfileFields } from "@/lib/billing/billingProfile";
+import { CONTACT_PRO_INQUIRY_HREF, isManualProPlan } from "@/lib/billing/planSource";
 import { getUser } from "@/lib/auth/get-user";
 import type { PlanId } from "@/lib/billing/plans";
 import { getUserPlan } from "@/lib/billing/userPlan";
@@ -115,17 +116,21 @@ export default async function AppSettingsPage() {
   const bs = billing?.billing_status ?? null;
   const periodEndLabel = formatPeriodEnd(billing?.billing_current_period_end ?? null);
   const cancelAtPeriodEnd = billing?.billing_cancel_at_period_end === true;
+  const planSource = billing?.plan_source ?? null;
+  const trialEndsManualLabel = formatPeriodEnd(billing?.trial_ends_at ?? null);
 
   const isPro = plan === "pro";
+  const isManualPro = isPro && !billingLoadFailed && isManualProPlan(plan, planSource);
   const paymentIssuePro =
-    isPro && hasStripeCustomer && (bs === "past_due" || bs === "unpaid");
+    isPro && !isManualPro && hasStripeCustomer && (bs === "past_due" || bs === "unpaid");
   const proCanceling =
     isPro &&
+    !isManualPro &&
     hasStripeCustomer &&
     !paymentIssuePro &&
     cancelAtPeriodEnd &&
     (bs === "active" || bs === "trialing");
-  const proActiveStripe = isPro && hasStripeCustomer && !paymentIssuePro && !proCanceling;
+  const proActiveStripe = isPro && !isManualPro && hasStripeCustomer && !paymentIssuePro && !proCanceling;
   const freeUnpaidStripe = !isPro && hasStripeCustomer && bs === "unpaid";
 
   return (
@@ -164,6 +169,33 @@ export default async function AppSettingsPage() {
             </div>
             <p style={{ margin: 0, fontSize: 13, color: "#fecaca", lineHeight: 1.55 }}>
               Zahlungsproblem beim Abo – bitte unter Billing im Kundenportal klären.
+            </p>
+            <PlanAboFooter />
+          </>
+        ) : isPro && !billingLoadFailed && isManualPro ? (
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              <span style={{ fontSize: 18, fontWeight: 800, color: T.text }}>Pro</span>
+              <SubscriptionBadge tone="active">Manuell</SubscriptionBadge>
+            </div>
+            <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: T.faint }}>
+              ABO
+            </p>
+            {trialEndsManualLabel ? (
+              <SubscriptionMetaRow label="Gültig bis" value={trialEndsManualLabel} isLast />
+            ) : null}
+            <p style={{ margin: trialEndsManualLabel ? "10px 0 0" : "0", fontSize: 13, color: T.muted, lineHeight: 1.55 }}>
+              Manuell freigeschaltet – kein Stripe-Abo in dieser Oberfläche.
+            </p>
+            <p style={{ margin: "12px 0 0", fontSize: 12, color: T.faint, lineHeight: 1.45 }}>
+              Fragen:{" "}
+              <a href="mailto:support@lvscope.de" style={{ color: T.accent, fontWeight: 600 }}>
+                support@lvscope.de
+              </a>{" "}
+              ·{" "}
+              <Link href={CONTACT_PRO_INQUIRY_HREF} style={{ color: T.accent, fontWeight: 600, textDecoration: "none" }}>
+                Kontakt
+              </Link>
             </p>
             <PlanAboFooter />
           </>
@@ -234,7 +266,7 @@ export default async function AppSettingsPage() {
               <SubscriptionBadge tone="neutral">Begrenztes Kontingent</SubscriptionBadge>
             </div>
             <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.55 }}>
-              Upgrade auf Pro für unbegrenzte Analysen und erweiterte Funktionen.
+              Pro ist derzeit nur auf Anfrage oder Einladung verfügbar – nicht im Selbstservice buchbar.
             </p>
             <PlanAboFooter />
           </>

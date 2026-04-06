@@ -2,9 +2,9 @@ import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BillingPortalButton } from "@/components/app/BillingPortalButton";
-import { CheckoutProButton } from "@/components/app/CheckoutProButton";
 import { appTheme as T } from "@/components/app/appTheme";
 import { getBillingProfileFields } from "@/lib/billing/billingProfile";
+import { CONTACT_PRO_INQUIRY_HREF, isManualProPlan } from "@/lib/billing/planSource";
 import type { PlanId } from "@/lib/billing/plans";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { getTotalUsageForPlan, type TotalUsageInfo } from "@/lib/billing/usage";
@@ -178,11 +178,11 @@ function FreeUpgradeHero() {
           lineHeight: 1.2,
         }}
       >
-        Pro freischalten
+        Pro auf Anfrage
       </h2>
       <p style={{ margin: "0 0 18px", fontSize: 14, color: T.muted, lineHeight: 1.65, maxWidth: 540 }}>
-        Voller Funktionsumfang mit monatlichem Abo – ohne Jahresbindung. Sie können zum Ende des laufenden
-        Abrechnungszeitraums kündigen.
+        Pro ist derzeit nicht im Selbstservice buchbar. Wir schalten Zugang auf Anfrage oder Einladung frei – für
+        Tests und produktiven Einsatz.
       </p>
       <ul
         style={{
@@ -221,14 +221,33 @@ function FreeUpgradeHero() {
           background: "rgba(255,255,255,0.04)",
         }}
       >
-        <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: T.text }}>Monatlich kündbar zum Periodenende</p>
+        <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: T.text }}>Früher Zugang auf Einladung</p>
         <p style={{ margin: "8px 0 0", fontSize: 13, color: T.muted, lineHeight: 1.55 }}>
-          Die Kündigung wird zum Ende des bezahlten Monats wirksam – Sie nutzen den Zeitraum, den Sie bereits gebucht
-          haben, voll aus.
+          Schreiben Sie uns kurz – wir melden uns mit den nächsten Schritten.
         </p>
       </div>
       <div style={{ marginBottom: 16 }}>
-        <CheckoutProButton variant="hero" />
+        <Link
+          href={CONTACT_PRO_INQUIRY_HREF}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            fontSize: 15,
+            fontWeight: 700,
+            color: "#0a0e1a",
+            padding: "14px 28px",
+            borderRadius: T.radius,
+            border: "1px solid rgba(224,124,94,0.95)",
+            background: T.accent,
+            textDecoration: "none",
+            boxShadow: "0 8px 24px rgba(224,124,94,0.25)",
+            minWidth: 260,
+          }}
+        >
+          Pro-Zugang anfragen
+        </Link>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
         <Link href="/pricing" style={linkButtonStyle("muted")}>
@@ -264,17 +283,21 @@ export default async function AppBillingPage() {
   const bs = billing?.billing_status ?? null;
   const periodEndLabel = formatPeriodEnd(billing?.billing_current_period_end ?? null);
   const cancelAtPeriodEnd = billing?.billing_cancel_at_period_end === true;
+  const planSource = billing?.plan_source ?? null;
+  const trialEndsManualLabel = formatPeriodEnd(billing?.trial_ends_at ?? null);
 
   const isPro = plan === "pro";
+  const isManualPro = isPro && !billingLoadFailed && isManualProPlan(plan, planSource);
   const paymentIssuePro =
-    isPro && hasStripeCustomer && (bs === "past_due" || bs === "unpaid");
+    isPro && !isManualPro && hasStripeCustomer && (bs === "past_due" || bs === "unpaid");
   const proCanceling =
     isPro &&
+    !isManualPro &&
     hasStripeCustomer &&
     !paymentIssuePro &&
     cancelAtPeriodEnd &&
     (bs === "active" || bs === "trialing");
-  const proActiveStripe = isPro && hasStripeCustomer && !paymentIssuePro && !proCanceling;
+  const proActiveStripe = isPro && !isManualPro && hasStripeCustomer && !paymentIssuePro && !proCanceling;
 
   const freeUnpaidStripe =
     !isPro && hasStripeCustomer && bs === "unpaid";
@@ -286,8 +309,9 @@ export default async function AppBillingPage() {
           Billing
         </h1>
         <p style={{ margin: "8px 0 0", fontSize: 14, color: T.muted, lineHeight: 1.5 }}>
-          Monatliches Abo, Kündigung zum Ende des Abrechnungszeitraums. Rechnungen und Zahlungsdaten verwalten Sie im
-          Kundenportal.
+          {isManualPro
+            ? "Ihr Pro-Zugang ist unten beschrieben. Ein über diese Seite gebuchtes kostenpflichtiges Online-Abo besteht dafür nicht."
+            : "Monatliches Abo, Kündigung zum Ende des Abrechnungszeitraums. Rechnungen und Zahlungsdaten verwalten Sie im Kundenportal."}
         </p>
       </div>
 
@@ -310,7 +334,44 @@ export default async function AppBillingPage() {
         </BillingCard>
       ) : null}
 
-      {isPro && !billingLoadFailed && !hasStripeCustomer ? (
+      {isPro && !billingLoadFailed && isManualPro ? (
+        <div
+          style={{
+            borderRadius: T.radius,
+            padding: T.space.xl,
+            marginBottom: T.space.lg,
+            ...proShellStyle("neutral"),
+          }}
+        >
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            <span style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", color: T.text }}>Pro</span>
+            <SubscriptionBadge tone="active">Manuell freigeschaltet</SubscriptionBadge>
+          </div>
+          <p style={{ margin: "0 0 12px", fontSize: 13, color: T.muted, lineHeight: 1.55 }}>
+            Ihr Pro-Zugang wurde manuell freigeschaltet (Einladung oder Testzugang). Ein selbst gebuchtes kostenpflichtiges
+            Online-Abo über diese Oberfläche liegt nicht vor.
+          </p>
+          {trialEndsManualLabel ? (
+            <SubscriptionMetaRow label="Gültig bis" value={trialEndsManualLabel} isLast />
+          ) : null}
+          <p style={{ margin: trialEndsManualLabel ? "14px 0 0" : "0", fontSize: 13, color: T.muted, lineHeight: 1.55 }}>
+            Bei Fragen:{" "}
+            <a href="mailto:support@lvscope.de" style={{ color: T.accent, fontWeight: 600 }}>
+              support@lvscope.de
+            </a>
+          </p>
+          <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 10 }}>
+            <Link href="/app" style={linkButtonStyle("primary")}>
+              Zur App
+            </Link>
+            <Link href={CONTACT_PRO_INQUIRY_HREF} style={linkButtonStyle("muted")}>
+              Kontakt
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
+      {isPro && !billingLoadFailed && !isManualPro && !hasStripeCustomer ? (
         <div
           style={{
             borderRadius: T.radius,

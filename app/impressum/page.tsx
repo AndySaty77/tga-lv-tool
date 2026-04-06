@@ -27,7 +27,6 @@ const blockHead = {
 } as const;
 
 const paragraph = { fontSize: 14, lineHeight: 1.75, color: T.muted, marginBottom: 6 };
-const placeholder = { fontSize: 14, lineHeight: 1.75, color: T.faint, fontStyle: "italic" as const };
 
 export default function ImpressumPage() {
   return (
@@ -39,37 +38,28 @@ export default function ImpressumPage() {
       >
         <Container>
           <div style={{ maxWidth: 720, marginBottom: 48 }}>
-            <p style={{ ...paragraph, marginBottom: 20, fontSize: 13, color: T.faint }}>
-              Die folgenden Angaben sind Platzhalter – bitte durch Ihre Firmendaten ersetzen.
-            </p>
             <h2 style={{ ...sectionTitle, marginTop: 0 }}>Angaben gemäß § 5 DDG</h2>
-            <p style={placeholder}>[Firmenname / vollständige Firmierung]</p>
-            <p style={{ ...placeholder, marginBottom: 14 }}>
-              [Rechtsform, z. B. GmbH / UG (haftungsbeschränkt) / Einzelunternehmen / e.K.]
+            <p style={{ ...paragraph, marginBottom: 4 }}>Tanja Sauer</p>
+            <p style={{ ...paragraph, marginBottom: 4 }}>Hofwiesen 31</p>
+            <p style={{ ...paragraph, marginBottom: 4 }}>72348 Rosenfeld</p>
+            <p style={{ ...paragraph, marginBottom: 14 }}>Deutschland</p>
+
+            <h3 style={blockHead}>Kontakt</h3>
+            <p style={paragraph}>
+              Telefon:{" "}
+              <a href="tel:+491606798271" style={{ color: T.brand, textDecoration: "none", fontWeight: 600 }}>
+                01606798271
+              </a>
+            </p>
+            <p style={{ ...paragraph, marginBottom: 14 }}>
+              E-Mail:{" "}
+              <a href="mailto:support@lvscope.de" style={{ color: T.brand, textDecoration: "none", fontWeight: 600 }}>
+                support@lvscope.de
+              </a>
             </p>
 
-            <h3 style={blockHead}>Vertreten durch:</h3>
-            <p style={placeholder}>[Vorname Nachname]</p>
-            <p style={{ ...placeholder, marginBottom: 14 }}>
-              [Funktion, z. B. Geschäftsführer / Inhaber]
-            </p>
-
-            <h3 style={blockHead}>Anschrift:</h3>
-            <p style={placeholder}>[Straße Hausnummer]</p>
-            <p style={placeholder}>[PLZ Ort]</p>
-            <p style={{ ...placeholder, marginBottom: 14 }}>[Land]</p>
-
-            <h3 style={blockHead}>Kontakt:</h3>
-            <p style={placeholder}>Telefon: [Telefonnummer]</p>
-            <p style={{ ...placeholder, marginBottom: 14 }}>E-Mail: [E-Mail-Adresse]</p>
-
-            <h3 style={blockHead}>Registereintrag</h3>
-            <p style={{ ...paragraph, marginBottom: 6 }}>
-              <span style={{ color: T.muted }}>Nur falls vorhanden – sonst diesen Abschnitt entfernen oder anpassen:</span>
-            </p>
-            <p style={{ ...placeholder, marginBottom: 0 }}>
-              [Registergericht, Registernummer, USt-IdNr. – je nach Erfordernis]
-            </p>
+            <h2 style={sectionTitle}>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV</h2>
+            <p style={{ ...paragraph, marginBottom: 0 }}>Tanja Sauer</p>
 
             <p style={{ marginTop: 32, fontSize: 13, color: T.faint, textAlign: "center" }}>
               LV Scope | lvscope.de
