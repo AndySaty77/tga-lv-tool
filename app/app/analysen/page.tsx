@@ -3,10 +3,12 @@
 import React from "react";
 import Link from "next/link";
 import { appTheme as T } from "@/components/app/appTheme";
-import { getAnalysisDisplayTitle } from "@/lib/analysisDisplayTitle";
 import { StatusBadge } from "@/components/shared/statusBadge";
+import { Star } from "lucide-react";
 
 const PAGE_SIZE = 10;
+
+type DeadlineWarnBadge = "overdue" | "today" | "d1to3" | "d4to7";
 
 type AnalyseRun = {
   id: string;
@@ -15,7 +17,41 @@ type AnalyseRun = {
   file_name: string | null;
   score: number | null;
   status: string | null;
+  listTitle: string;
+  metaSegments: string[];
+  deadlineWarnBadge: DeadlineWarnBadge | null;
+  isFavorite: boolean;
 };
+
+const DEADLINE_WARN_LABEL: Record<DeadlineWarnBadge, string> = {
+  overdue: "Überfällig",
+  today: "Heute",
+  d1to3: "1–3 Tage",
+  d4to7: "4–7 Tage",
+};
+
+function deadlineWarnChipStyle(level: DeadlineWarnBadge): React.CSSProperties {
+  const base: React.CSSProperties = {
+    display: "inline-block",
+    fontSize: 10,
+    fontWeight: 600,
+    letterSpacing: "0.02em",
+    padding: "2px 7px",
+    borderRadius: 4,
+    border: "1px solid",
+    flexShrink: 0,
+  };
+  switch (level) {
+    case "overdue":
+      return { ...base, background: "rgba(200, 72, 60, 0.1)", color: "#b54a42", borderColor: "rgba(200, 72, 60, 0.28)" };
+    case "today":
+      return { ...base, background: "rgba(212, 140, 52, 0.12)", color: "#9a6a22", borderColor: "rgba(212, 140, 52, 0.3)" };
+    case "d1to3":
+      return { ...base, background: "rgba(175, 150, 65, 0.1)", color: "#6d6228", borderColor: "rgba(175, 150, 65, 0.28)" };
+    case "d4to7":
+      return { ...base, background: "rgba(88, 108, 145, 0.1)", color: "#4d5c78", borderColor: "rgba(88, 108, 145, 0.26)" };
+  }
+}
 
 function DeleteButton({ rowId, onDeleted }: { rowId: string; onDeleted: () => void }) {
   const [loading, setLoading] = React.useState(false);
@@ -60,36 +96,86 @@ export default function AppAnalysenPage() {
   const [page, setPage] = React.useState(1);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [listTruncated, setListTruncated] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = React.useState(false);
   const skipNextLoadRef = React.useRef(false);
+
+  const [searchQ, setSearchQ] = React.useState("");
+  const [filterGewerk, setFilterGewerk] = React.useState("");
+  const [filterProjektart, setFilterProjektart] = React.useState("");
+  const [filterFrist, setFilterFrist] = React.useState<
+    "" | "present" | "none" | "overdue" | "today" | "d1to3" | "d4to7" | "within7"
+  >("");
+  const [filterFavorite, setFilterFavorite] = React.useState<"" | "only">("");
+  const [sortOrder, setSortOrder] = React.useState<"newest" | "oldest" | "deadline" | "favorites_first">("newest");
+  const [favoriteBusyId, setFavoriteBusyId] = React.useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const effectivePage = Math.max(1, Math.min(page, totalPages));
   const from = total === 0 ? 0 : (effectivePage - 1) * PAGE_SIZE + 1;
   const to = Math.min(effectivePage * PAGE_SIZE, total);
 
-  const loadPage = React.useCallback(async (pageNum: number) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/analyse/list?page=${pageNum}&pageSize=${PAGE_SIZE}`);
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || "Laden der Analysen fehlgeschlagen");
+  const loadPage = React.useCallback(
+    async (pageNum: number) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({
+          page: String(pageNum),
+          pageSize: String(PAGE_SIZE),
+          q: searchQ.trim(),
+          gewerk: filterGewerk.trim(),
+          projektart: filterProjektart.trim(),
+          frist: filterFrist,
+          sort: sortOrder,
+          ...(filterFavorite === "only" ? { favorite: "only" } : {}),
+        });
+        const res = await fetch(`/api/analyse/list?${params.toString()}`);
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.error || "Laden der Analysen fehlgeschlagen");
+        }
+        const newTotal = Number(data?.total) ?? 0;
+        setItems((data?.items ?? []) as AnalyseRun[]);
+        setTotal(newTotal);
+        setListTruncated(Boolean(data?.truncated));
+        setSelectedIds(new Set());
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Unbekannter Fehler");
+        setItems([]);
+        setTotal(0);
+        setListTruncated(false);
+      } finally {
+        setLoading(false);
       }
-      const newTotal = Number(data?.total) ?? 0;
-      setItems((data?.items ?? []) as AnalyseRun[]);
-      setTotal(newTotal);
-      setSelectedIds(new Set());
+    },
+    [searchQ, filterGewerk, filterProjektart, filterFrist, filterFavorite, sortOrder],
+  );
+
+  const toggleFavorite = React.useCallback(async (id: string, currently: boolean) => {
+    setFavoriteBusyId(id);
+    try {
+      const res = await fetch(`/api/analyse/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isFavorite: !currently }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof data?.error === "string" ? data.error : "Speichern fehlgeschlagen.");
+      }
+      setItems((prev) => prev?.map((row) => (row.id === id ? { ...row, isFavorite: !currently } : row)) ?? null);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unbekannter Fehler");
-      setItems([]);
-      setTotal(0);
+      window.alert(e instanceof Error ? e.message : "Favorit konnte nicht gespeichert werden.");
     } finally {
-      setLoading(false);
+      setFavoriteBusyId(null);
     }
   }, []);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [searchQ, filterGewerk, filterProjektart, filterFrist, filterFavorite, sortOrder]);
 
   React.useEffect(() => {
     if (skipNextLoadRef.current) {
@@ -222,6 +308,164 @@ export default function AppAnalysenPage() {
         </Link>
       </div>
 
+      <div
+        style={{
+          marginBottom: T.space.md,
+          padding: T.space.md,
+          borderRadius: T.radius,
+          border: `1px solid ${T.border}`,
+          background: T.surface,
+        }}
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: T.space.md, alignItems: "flex-end" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200, flex: "1 1 180px" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Suche
+            </span>
+            <input
+              type="search"
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              placeholder="Projekt, Datei, Bauherr …"
+              autoComplete="off"
+              style={{
+                padding: "8px 10px",
+                fontSize: 13,
+                borderRadius: T.radiusSm,
+                border: `1px solid ${T.border}`,
+                background: T.card,
+                color: T.text,
+                width: "100%",
+                boxSizing: "border-box",
+              }}
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 120, flex: "0 1 120px" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Gewerk
+            </span>
+            <input
+              type="text"
+              value={filterGewerk}
+              onChange={(e) => setFilterGewerk(e.target.value)}
+              placeholder="Gewerk filtern"
+              autoComplete="off"
+              style={{
+                padding: "8px 10px",
+                fontSize: 13,
+                borderRadius: T.radiusSm,
+                border: `1px solid ${T.border}`,
+                background: T.card,
+                color: T.text,
+                width: "100%",
+                boxSizing: "border-box",
+              }}
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 120, flex: "0 1 120px" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Projektart
+            </span>
+            <input
+              type="text"
+              value={filterProjektart}
+              onChange={(e) => setFilterProjektart(e.target.value)}
+              placeholder="Projektart filtern"
+              autoComplete="off"
+              style={{
+                padding: "8px 10px",
+                fontSize: 13,
+                borderRadius: T.radiusSm,
+                border: `1px solid ${T.border}`,
+                background: T.card,
+                color: T.text,
+                width: "100%",
+                boxSizing: "border-box",
+              }}
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 160, flex: "0 1 160px" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Abgabefrist
+            </span>
+            <select
+              value={filterFrist}
+              onChange={(e) => setFilterFrist(e.target.value as typeof filterFrist)}
+              style={{
+                padding: "8px 10px",
+                fontSize: 13,
+                borderRadius: T.radiusSm,
+                border: `1px solid ${T.border}`,
+                background: T.card,
+                color: T.text,
+                width: "100%",
+                cursor: "pointer",
+              }}
+            >
+              <option value="">alle</option>
+              <option value="present">vorhanden</option>
+              <option value="none">nicht erkennbar</option>
+              <option value="overdue">überfällig</option>
+              <option value="today">heute</option>
+              <option value="d1to3">in 1–3 Tagen</option>
+              <option value="d4to7">in 4–7 Tagen</option>
+              <option value="within7">innerhalb 7 Tage</option>
+            </select>
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 140, flex: "0 1 140px" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Favoriten
+            </span>
+            <select
+              value={filterFavorite}
+              onChange={(e) => setFilterFavorite(e.target.value as typeof filterFavorite)}
+              style={{
+                padding: "8px 10px",
+                fontSize: 13,
+                borderRadius: T.radiusSm,
+                border: `1px solid ${T.border}`,
+                background: T.card,
+                color: T.text,
+                width: "100%",
+                cursor: "pointer",
+              }}
+            >
+              <option value="">alle</option>
+              <option value="only">nur Favoriten</option>
+            </select>
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 180, flex: "0 1 180px" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Sortierung
+            </span>
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as typeof sortOrder)}
+              style={{
+                padding: "8px 10px",
+                fontSize: 13,
+                borderRadius: T.radiusSm,
+                border: `1px solid ${T.border}`,
+                background: T.card,
+                color: T.text,
+                width: "100%",
+                cursor: "pointer",
+              }}
+            >
+              <option value="newest">Neueste zuerst</option>
+              <option value="oldest">Älteste zuerst</option>
+              <option value="deadline">Abgabefrist zuerst</option>
+              <option value="favorites_first">Favoriten zuerst</option>
+            </select>
+          </label>
+        </div>
+        {listTruncated ? (
+          <p style={{ margin: "10px 0 0", fontSize: 12, color: T.muted, lineHeight: 1.45 }}>
+            Hinweis: Es werden nur die ersten vielen gespeicherten Analysen für Filter/Sortierung berücksichtigt. Bei sehr großen Beständen ggf. später verfeinern.
+          </p>
+        ) : null}
+      </div>
+
       {someSelected && (
         <div
           style={{
@@ -348,9 +592,10 @@ export default function AppAnalysenPage() {
                 </thead>
                 <tbody>
                   {(items ?? []).map((row) => {
-                    const displayTitle = getAnalysisDisplayTitle(row.project_name, row.file_name);
-                    const fileTrim = row.file_name?.trim() ?? "";
-                    const showFileSecondary = fileTrim.length > 0 && displayTitle !== fileTrim;
+                    const displayTitle = row.listTitle;
+                    const metaLine = row.metaSegments.length > 0 ? row.metaSegments.join(" · ") : "";
+                    const warn = row.deadlineWarnBadge;
+                    const showMetaRow = metaLine.length > 0 || warn != null;
                     return (
                     <tr key={row.id} className="app-table-row" style={{ borderBottom: `1px solid ${T.border}` }}>
                       <td style={{ padding: T.space.md, verticalAlign: "middle" }}>
@@ -365,26 +610,75 @@ export default function AppAnalysenPage() {
                         </label>
                       </td>
                       <td style={{ padding: T.space.md, color: T.text, minWidth: 0 }}>
-                        <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320, fontWeight: 600 }} title={displayTitle}>
-                          {displayTitle}
-                        </span>
-                        {showFileSecondary ? (
-                          <span
+                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                          <button
+                            type="button"
+                            aria-label={row.isFavorite ? "Favorit entfernen" : "Als Favorit merken"}
+                            title={row.isFavorite ? "Favorit entfernen" : "Als Favorit merken"}
+                            disabled={favoriteBusyId === row.id}
+                            onClick={() => void toggleFavorite(row.id, row.isFavorite)}
                             style={{
-                              display: "block",
-                              marginTop: 4,
-                              fontSize: 12,
-                              color: T.muted,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                              maxWidth: 320,
+                              marginTop: 1,
+                              padding: 4,
+                              lineHeight: 0,
+                              border: "none",
+                              background: "transparent",
+                              cursor: favoriteBusyId === row.id ? "wait" : "pointer",
+                              color: row.isFavorite ? T.accent : T.faint,
+                              opacity: favoriteBusyId === row.id ? 0.55 : 1,
+                              flexShrink: 0,
                             }}
-                            title={fileTrim}
                           >
-                            {fileTrim}
-                          </span>
-                        ) : null}
+                            <Star size={18} strokeWidth={1.65} fill={row.isFavorite ? "currentColor" : "none"} />
+                          </button>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <span
+                              style={{
+                                display: "block",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                maxWidth: 360,
+                                fontWeight: 600,
+                              }}
+                              title={displayTitle}
+                            >
+                              {displayTitle}
+                            </span>
+                            {showMetaRow ? (
+                              <div
+                                style={{
+                                  marginTop: 5,
+                                  display: "flex",
+                                  flexWrap: "wrap",
+                                  alignItems: "center",
+                                  gap: "6px 8px",
+                                  maxWidth: 420,
+                                }}
+                              >
+                                {metaLine ? (
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      color: T.muted,
+                                      lineHeight: 1.45,
+                                      minWidth: 0,
+                                      flex: "1 1 120px",
+                                    }}
+                                    title={metaLine}
+                                  >
+                                    {metaLine}
+                                  </span>
+                                ) : null}
+                                {warn ? (
+                                  <span style={deadlineWarnChipStyle(warn)} title="Abgabefrist">
+                                    {DEADLINE_WARN_LABEL[warn]}
+                                  </span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
                       </td>
                       <td style={{ padding: T.space.md, color: T.muted, whiteSpace: "nowrap", fontSize: 12 }}>
                         {formatDate(row.created_at)}

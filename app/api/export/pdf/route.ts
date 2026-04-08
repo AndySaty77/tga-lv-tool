@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getUser } from "@/lib/auth/get-user";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { hasFeature } from "@/lib/billing/plans";
-import { buildPdfReport } from "@/lib/pdf/buildPdfReport";
+import { buildPdfReport, type BuildPdfReportOptions } from "@/lib/pdf/buildPdfReport";
 import { renderPdfHtml } from "@/lib/pdf/renderPdfHtml";
 import { htmlToPdfBuffer } from "@/lib/pdf/pdfEngine";
 import { sanitizeFilename } from "@/lib/pdf/sanitizeFilename";
@@ -26,12 +26,18 @@ function errJson(stage: string, message: string, status: number) {
   );
 }
 
+/** Nur explizites `true` im JSON-Body – Standard: interne Team-Notizen nicht ins PDF. */
+function readPdfBuildOptions(body: object): BuildPdfReportOptions {
+  const flag = (body as { includeInternalTeamNotes?: unknown }).includeInternalTeamNotes;
+  return { includeInternalTeamNotes: flag === true };
+}
+
 /**
  * POST /api/export/pdf
  *
  * Erwartet JSON-Body:
- * - Entweder: { analysisId: string } – lädt die Analyse aus der DB (Auth erforderlich)
- * - Oder: Analysedaten direkt (z. B. result_json, management_summary, created_at, project_name, file_name, score, …)
+ * - Entweder: { analysisId: string, includeInternalTeamNotes?: boolean } – lädt die Analyse aus der DB (Auth erforderlich)
+ * - Oder: Analysedaten direkt (z. B. result_json, …) optional mit `includeInternalTeamNotes: true` für interne Notizen im PDF
  *
  * Antwort: application/pdf mit Content-Disposition, Dateiname z. B. analysebericht-[projektname]-[datum].pdf
  */
@@ -99,9 +105,11 @@ export async function POST(request: NextRequest) {
       payload = body;
     }
 
+    const pdfOpts = readPdfBuildOptions(body as object);
+
     let report: ReturnType<typeof buildPdfReport>;
     try {
-      report = buildPdfReport(payload);
+      report = buildPdfReport(payload, pdfOpts);
       console.error("[PDF export] build-report ok");
     } catch (buildErr) {
       const msg = buildErr instanceof Error ? buildErr.message : String(buildErr);

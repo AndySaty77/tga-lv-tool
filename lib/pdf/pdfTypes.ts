@@ -97,5 +97,10 @@ export type AnalysisPdfReport = {
   claimPotential?: PdfClaimPotential;
   questions?: PdfQuestion[];
   clarifications?: PdfClarification[];
+  /**
+   * Optionale interne Team-Notiz aus `manualProjectData.interne_notizen.manualValue`.
+   * Nur gesetzt, wenn Export mit `includeInternalTeamNotes: true` gebaut wurde und Notiztext existiert.
+   */
+  internalTeamNotes?: string;
   disclaimer: PdfDisclaimer;
 };

@@ -6,6 +6,7 @@
  */
 
 import type { AnalysisPdfReport } from "./pdfTypes";
+import { getPdfLogoInlineSvg } from "./pdfLogoInline";
 import { reportStyles } from "./reportStyles";
 
 function escapeHtml(s: string): string {
@@ -45,6 +46,7 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
   const topRisksDetailed = Array.isArray(report.topRisks) ? report.topRisks : [];
   const legalSignalsPdf = Array.isArray(report.legalSignals) ? report.legalSignals : [];
   const disclaimer = report.disclaimer?.text ?? "";
+  const internalTeamNotes = opt(report.internalTeamNotes);
 
   const docTitle = "LV Scope – Analysebericht";
   const title = escapeHtml(opt(meta.projectName) || opt(meta.sourceFileName) || "Projekt");
@@ -67,6 +69,10 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
 
   // A. Berichtskopf
   parts.push('<header class="report-header report-header-main">');
+  const logoSvg = getPdfLogoInlineSvg();
+  if (logoSvg) {
+    parts.push(`<div class="report-header-brand" role="img" aria-label="LV Scope">${logoSvg}</div>`);
+  }
   parts.push(`<p class="report-doc-label">${escapeHtml(docTitle)}</p>`);
   parts.push(`<h1>${title}</h1>`);
   parts.push('<div class="report-meta">');
@@ -79,6 +85,17 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
   if (opt(meta.projectType)) parts.push(`<span>Projektart / Gewerk: ${escapeHtml(opt(meta.projectType))}</span>`);
   if (opt(meta.companyName)) parts.push(`<span>Bauherr / Planung: ${escapeHtml(opt(meta.companyName))}</span>`);
   parts.push("</div></header>");
+
+  // Interne Team-Notizen (nur wenn im Report-Modell gesetzt — typisch nach explizitem Export-Flag + vorhandenem Text)
+  if (internalTeamNotes) {
+    parts.push('<section class="section section-internal-notes section-internal-notes-after-header">');
+    parts.push('<h2 class="section-title section-title-internal-notes">Interne Team-Notizen</h2>');
+    parts.push(
+      '<p class="section-lead section-lead-internal-notes">Nicht Teil der eigentlichen LV-Auswertung.</p>'
+    );
+    parts.push('<div class="internal-notes-body">' + escapeHtml(internalTeamNotes) + "</div>");
+    parts.push("</section>");
+  }
 
   // B. Executive Summary (Management / Entscheidung)
   if (executiveSummary) {
@@ -495,6 +512,8 @@ export function renderPdfHtmlFromMock(): string {
     disclaimer: {
       text: "Dieser Bericht wurde automatisch aus der LV-Analyse erzeugt. Er dient der Unterstützung und ersetzt keine fachliche Prüfung.",
     },
+    internalTeamNotes:
+      "Kurzer interner Hinweis (Mock): Termin mit AG vor KW 12 abstimmen.\nZweite Zeile nur zur Layout-Prüfung.",
   };
   return renderPdfHtml(mockReport);
 }

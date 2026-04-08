@@ -6,6 +6,15 @@
 
 import { getAnalysisDisplayTitle } from "@/lib/analysisDisplayTitle";
 import { KEYFACT_LABELS } from "@/lib/keyFactsDefinition";
+import { buildKeyFactsDisplayListQuick } from "@/lib/keyFactsDisplayQuick";
+import {
+  getInternalTeamNotesTextForPdf,
+  parseManualProjectData,
+  READONLY_PROJECT_KEYFACT_KEYS,
+  resolveDisplayProjectName,
+  resolveFinalKeyFactDisplay,
+  type ManualProjectData,
+} from "@/lib/manualProjectData";
 import type {
   AnalysisPdfReport,
   PdfCategoryScore,
@@ -22,6 +31,7 @@ import {
   formatDateDE,
   normalizeList,
   normalizeStringList,
+  sanitizeMultilineNoteForPdf,
   sanitizeText,
   scoreToTrafficLight,
   stripScoringEngineeringJargon,
@@ -47,6 +57,40 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const DEFAULT_DISCLAIMER =
   "Dieser Bericht wurde automatisch aus der LV-Analyse erzeugt. Er dient der Unterstützung und ersetzt keine fachliche Prüfung.";
+
+/** PDF-Export: nur gesetzte Flags wirken; interne Notizen nur bei explizitem `includeInternalTeamNotes: true`. */
+export type BuildPdfReportOptions = {
+  /** Nur bei `true`: `internalTeamNotes` ins Report-Modell (sonst kein Feld, auch wenn Notiztext existiert). Standard: ausgelassen = nicht anzeigen. */
+  includeInternalTeamNotes?: boolean;
+};
+
+/** Nur LV-Strukturgröße / Vorbemerkungsumfang – keine manuelle Schicht (gleiche Regel wie UI). */
+const READONLY_KF_SET = new Set<string>(READONLY_PROJECT_KEYFACT_KEYS);
+
+function keyFactsUnknownToStringRecord(kf: Record<string, unknown>): Record<string, string> {
+  const o: Record<string, string> = {};
+  for (const [k, v] of Object.entries(kf)) {
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (s) o[k] = s;
+  }
+  return o;
+}
+
+/** Gemeinsame Finale mit UI: Helper aus manualProjectData + Basiszeilen wie keyFactsDisplayQuick. */
+function finalKeyFactValueForPdf(
+  key: string,
+  row: { value: string; isFallback: boolean },
+  manualData: ManualProjectData,
+): string {
+  if (READONLY_KF_SET.has(key)) return row.value;
+  return resolveFinalKeyFactDisplay({
+    keyFactKey: key,
+    baseDisplay: row.value,
+    isFallback: row.isFallback,
+    manualData,
+  }).final;
+}
 
 function flattenByGroup(byGroup: Record<string, unknown[]> | undefined): unknown[] {
   if (!byGroup || typeof byGroup !== "object") return [];
@@ -124,7 +168,7 @@ function mergeResultJsonWithTopLevel(raw: Record<string, unknown>): Record<strin
  * Roh-Input: entweder komplette Analyse-Zeile (inkl. result_json, management_summary, created_at, project_name, file_name, score)
  * oder ein Objekt mit result_json/resultJson und optional meta-Feldern.
  */
-export function buildPdfReport(input: unknown): AnalysisPdfReport {
+export function buildPdfReport(input: unknown, options?: BuildPdfReportOptions): AnalysisPdfReport {
   if (input == null || typeof input !== "object") {
     return getEmptyReport();
   }
@@ -143,6 +187,7 @@ export function buildPdfReport(input: unknown): AnalysisPdfReport {
   const legalSignals = buildLegalSignalsItems(rj);
   const nextSteps = buildNextSteps(questions, clarifications, claimPotential);
   const disclaimer = buildDisclaimer(raw, rj);
+  const internalTeamNotes = buildInternalTeamNotes(rj, options);
 
   return {
     meta,
@@ -155,8 +200,21 @@ export function buildPdfReport(input: unknown): AnalysisPdfReport {
     ...(claimPotential && Object.keys(claimPotential).length > 0 ? { claimPotential } : {}),
     ...(questions.length > 0 ? { questions } : {}),
     ...(clarifications.length > 0 ? { clarifications } : {}),
+    ...(internalTeamNotes ? { internalTeamNotes } : {}),
     disclaimer,
   };
+}
+
+function buildInternalTeamNotes(
+  rj: Record<string, unknown>,
+  options?: BuildPdfReportOptions,
+): string | undefined {
+  if (options?.includeInternalTeamNotes !== true) return undefined;
+  const manualData = parseManualProjectData(rj.manualProjectData);
+  const raw = getInternalTeamNotesTextForPdf(manualData);
+  if (!raw) return undefined;
+  const sanitized = sanitizeMultilineNoteForPdf(raw);
+  return sanitized.length > 0 ? sanitized : undefined;
 }
 
 function getEmptyReport(): AnalysisPdfReport {
@@ -177,11 +235,30 @@ function buildMeta(raw: Record<string, unknown>, rj: Record<string, unknown>): P
 
   const pn = safeString(raw.project_name ?? raw.projectName);
   const fn = safeString(raw.file_name ?? raw.fileName);
-  const projectName = getAnalysisDisplayTitle(pn || null, fn || null);
   const sourceFileName = safeString(raw.file_name ?? raw.fileName);
   const keyFacts = rj.keyFacts != null && typeof rj.keyFacts === "object" ? (rj.keyFacts as Record<string, unknown>) : {};
-  const projectType = safeString(keyFacts.projektart ?? keyFacts.gewerk ?? keyFacts.bauvorhaben);
-  const companyName = safeString(keyFacts.bauherr_ag ?? keyFacts.planer);
+  const kfStr = keyFactsUnknownToStringRecord(keyFacts);
+  const manualData = parseManualProjectData(rj.manualProjectData);
+  const quick = buildKeyFactsDisplayListQuick(rj);
+  const byKey = Object.fromEntries(quick.map((r) => [r.key, r])) as Record<
+    string,
+    { value: string; isFallback: boolean }
+  >;
+
+  const resolvedTitle = resolveDisplayProjectName(manualData, kfStr).trim();
+  const projectName = resolvedTitle || getAnalysisDisplayTitle(pn || null, fn || null);
+
+  const ft = (k: string) =>
+    finalKeyFactValueForPdf(k, byKey[k] ?? { value: "", isFallback: true }, manualData);
+
+  const projectTypeCombined = ft("projektart") || ft("gewerk") || ft("bauvorhaben");
+  const projectType = projectTypeCombined.trim() ? projectTypeCombined.trim() : undefined;
+
+  const bauherrFinal = ft("bauherr_ag").trim();
+  const companyName =
+    bauherrFinal ||
+    safeString(keyFacts.planer) ||
+    undefined;
 
   return {
     projectName,
@@ -324,17 +401,6 @@ function buildClaimPotential(rj: Record<string, unknown>): PdfClaimPotential | u
   };
 }
 
-function isMeaningfulKeyFactValue(v: unknown): boolean {
-  if (typeof v !== "string") return false;
-  const t = v.trim();
-  if (!t) return false;
-  if (/^nicht erkannt/i.test(t)) return false;
-  if (/^(n\/a|k\.a\.)$/i.test(t)) return false;
-  if (/^\[debug\]/i.test(t)) return false;
-  if (t === "-") return false;
-  return true;
-}
-
 function prettyKeyFactLabel(k: string): string {
   const fromMap = KEYFACT_LABELS[k];
   if (fromMap) return fromMap;
@@ -342,16 +408,16 @@ function prettyKeyFactLabel(k: string): string {
 }
 
 function buildKeyFactRows(rj: Record<string, unknown>): PdfKeyFactRow[] {
-  const keyFacts = rj.keyFacts != null && typeof rj.keyFacts === "object" ? (rj.keyFacts as Record<string, unknown>) : {};
+  const manualData = parseManualProjectData(rj.manualProjectData);
+  const quick = buildKeyFactsDisplayListQuick(rj);
   const rows: PdfKeyFactRow[] = [];
-  for (const [k, v] of Object.entries(keyFacts)) {
-    if (!isMeaningfulKeyFactValue(v)) continue;
+  for (const q of quick) {
+    const value = finalKeyFactValueForPdf(q.key, { value: q.value, isFallback: q.isFallback }, manualData);
     rows.push({
-      label: prettyKeyFactLabel(k),
-      value: String(v).trim(),
+      label: KEYFACT_LABELS[q.key] ?? prettyKeyFactLabel(q.key),
+      value,
     });
   }
-  rows.sort((a, b) => a.label.localeCompare(b.label, "de"));
   return rows;
 }
 

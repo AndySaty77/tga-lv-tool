@@ -264,7 +264,7 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
         bauzeit: "Bauzeit entspricht den vertraglichen Vorgaben.",
         fertigstellung: "Fertigstellung/Abnahme erfolgt gemäß VOB.",
         ausfuehrungsfrist: "Ausführungsfristen entnehmen wir dem beigefügten Terminplan.",
-        fristAngebot: "Angebotsfrist wird eingehalten.",
+        fristAngebot: "Abgabefrist wird eingehalten.",
         vertragsgrundlagen: "VOB, Teile A, B und C gelten als Vertragsgrundlage.",
         gewaerhleistung: "Gewährleistung gemäß VOB/B.",
         zahlungsbedingungen: "Zahlungsbedingungen gemäß VOB/B.",

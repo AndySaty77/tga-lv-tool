@@ -18,7 +18,7 @@ export const KEYFACTS_CORE_12: readonly KeyFactCoreEntry[] = [
   { key: "projektart", label: "Projektart" },
   { key: "vertragsgrundlagen", label: "Vertragsgrundlage" },
   { key: "zusatzvertragsbedingungen", label: "Zusätzliche Vertragsbedingungen" },
-  { key: "fristAngebot", label: "Angebotsfrist" },
+  { key: "fristAngebot", label: "Abgabefrist" },
   { key: "bindefrist", label: "Bindefrist" },
   { key: "ausfuehrungszeitraum", label: "Ausführungszeitraum" },
   { key: "lv_strukturgroesse", label: "LV-Strukturgröße" },

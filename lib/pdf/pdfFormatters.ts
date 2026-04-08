@@ -112,6 +112,21 @@ export function sanitizeText(
   return s;
 }
 
+const MAX_INTERNAL_TEAM_NOTE_CHARS = 12000;
+
+/**
+ * Freitext für PDF-Abschnitt „Interne Team-Notizen“: Zeilenumbrüche bleiben erhalten, Länge begrenzt.
+ * Kein stripTechnical – Nutzertext, keine Engine-Formulierung.
+ */
+export function sanitizeMultilineNoteForPdf(raw: string): string {
+  let s = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (!s) return "";
+  if (s.length > MAX_INTERNAL_TEAM_NOTE_CHARS) {
+    s = s.slice(0, MAX_INTERNAL_TEAM_NOTE_CHARS).trimEnd() + "…";
+  }
+  return s;
+}
+
 /**
  * Liste normalisieren: aus beliebigem Input ein Array von Strings oder Objekten mit text-ähnlichen Feldern.
  */

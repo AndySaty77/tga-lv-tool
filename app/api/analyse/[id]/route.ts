@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getUser } from "@/lib/auth/get-user";
 import { normalizeEditableTitleInput } from "@/lib/analysisDisplayTitle";
+import { mergeManualProjectDataPatch } from "@/lib/manualProjectData";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -30,7 +31,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
 
   const { data, error } = await supabase
     .from("analyse_runs")
-    .select("id, created_at, project_name, file_name, score, status, management_summary, result_json, user_id")
+    .select("id, created_at, project_name, file_name, score, status, management_summary, result_json, user_id, is_favorite")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -69,9 +70,13 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     return NextResponse.json({ error: "id erforderlich" }, { status: 400 });
   }
 
-  let body: { resultJsonMerge?: Record<string, unknown>; projectName?: string | null };
+  let body: { resultJsonMerge?: Record<string, unknown>; projectName?: string | null; isFavorite?: boolean };
   try {
-    body = (await req.json()) as { resultJsonMerge?: Record<string, unknown>; projectName?: string | null };
+    body = (await req.json()) as {
+      resultJsonMerge?: Record<string, unknown>;
+      projectName?: string | null;
+      isFavorite?: boolean;
+    };
   } catch {
     return NextResponse.json({ error: "Ungültiges JSON" }, { status: 400 });
   }
@@ -79,9 +84,10 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
   const hasMerge =
     body.resultJsonMerge != null && typeof body.resultJsonMerge === "object" && !Array.isArray(body.resultJsonMerge);
   const hasTitle = body.projectName !== undefined;
+  const hasFavorite = typeof body.isFavorite === "boolean";
 
-  if (!hasMerge && !hasTitle) {
-    return NextResponse.json({ error: "resultJsonMerge und/oder projectName erforderlich" }, { status: 400 });
+  if (!hasMerge && !hasTitle && !hasFavorite) {
+    return NextResponse.json({ error: "resultJsonMerge, projectName und/oder isFavorite erforderlich" }, { status: 400 });
   }
 
   const { data: existing, error: fetchErr } = await supabase
@@ -110,7 +116,12 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       existing.result_json != null && typeof existing.result_json === "object" && !Array.isArray(existing.result_json)
         ? (existing.result_json as Record<string, unknown>)
         : {};
-    const merged: Record<string, unknown> = { ...prev, ...body.resultJsonMerge! };
+    const incoming = body.resultJsonMerge! as Record<string, unknown>;
+    const { manualProjectData: manualPatch, ...restIncoming } = incoming;
+    const merged: Record<string, unknown> = { ...prev, ...restIncoming };
+    if (manualPatch != null && typeof manualPatch === "object" && !Array.isArray(manualPatch)) {
+      merged.manualProjectData = mergeManualProjectDataPatch(prev.manualProjectData, manualPatch);
+    }
     updates.result_json = merged;
   }
 
@@ -118,12 +129,16 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     updates.project_name = normalizeEditableTitleInput(body.projectName, existing.file_name);
   }
 
+  if (hasFavorite) {
+    updates.is_favorite = body.isFavorite;
+  }
+
   const { data: updated, error: updateErr } = await supabase
     .from("analyse_runs")
     .update(updates)
     .eq("id", id)
     .eq("user_id", user.id)
-    .select("id, created_at, project_name, file_name, score, status, management_summary, result_json")
+    .select("id, created_at, project_name, file_name, score, status, management_summary, result_json, is_favorite")
     .maybeSingle();
 
   if (updateErr) {

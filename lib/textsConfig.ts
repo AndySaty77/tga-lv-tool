@@ -162,7 +162,7 @@ export const DEFAULT_TEXTS_CONFIG: TextsConfig = {
       baubeginn: "Baubeginn",
       bauzeit: "Bauzeit / Dauer",
       fertigstellung: "Fertigstellung / Abnahme",
-      fristAngebot: "Angebotsfrist",
+      fristAngebot: "Abgabefrist",
       vertragsgrundlagen: "Vertragsgrundlagen",
       zahlungsbedingungen: "Zahlungsbedingungen",
       preisgleitung: "Preisgleitklausel / Rohstoffpreise",

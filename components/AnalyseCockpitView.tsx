@@ -15,6 +15,8 @@ import { DEFAULT_TEXTS_CONFIG } from "@/lib/textsConfig";
 import { formatTradeConfidence, formatTradeConfidencePercent } from "@/lib/detectedTrades";
 import { formatRecommendedLine, severityLabelForUi } from "@/lib/legal-signals/presentation";
 import type { LegalSignalSeverity } from "@/lib/legal-signals/types";
+import { ProjectInfoManualLayer } from "@/components/ProjectInfoManualLayer";
+import type { ManualProjectFieldKey, ProjectInfoRowModel } from "@/lib/manualProjectData";
 
 type CategoryKey =
   | "vertrags_lv_risiken"
@@ -98,6 +100,13 @@ export type AnalyseCockpitViewProps = {
     severity?: string;
     recommendedAction?: string;
   }>;
+  /** Optionale manuelle Projektdaten-Schicht (result_json.manualProjectData) – getrennt von erkannten KeyFacts */
+  manualProject?: {
+    rows: ProjectInfoRowModel[];
+    notesRow: ProjectInfoRowModel;
+    canPersist: boolean;
+    onSaveField: (key: ManualProjectFieldKey, value: string) => Promise<void>;
+  } | null;
 };
 
 function fmtKB(bytes: number) {
@@ -126,6 +135,7 @@ export function AnalyseCockpitView({
   expertMode = false,
   onTabChange,
   legalSignals,
+  manualProject = null,
 }: AnalyseCockpitViewProps) {
   const total = clamp0_100(result?.total ?? 0);
   const perCategory = result?.perCategory ?? {};
@@ -216,6 +226,15 @@ export function AnalyseCockpitView({
             <p style={{ margin: 0, fontSize: 14, color: colors.textMuted, lineHeight: 1.5 }}>
               Keine Key Facts geladen.
             </p>
+          ) : manualProject ? (
+            <ProjectInfoManualLayer
+              rows={manualProject.rows}
+              notesRow={manualProject.notesRow}
+              sanitize={sanitize}
+              canPersist={manualProject.canPersist}
+              onSaveField={manualProject.onSaveField}
+              expertMode={expertMode}
+            />
           ) : (
             <InsightList
               items={keyFactsDisplayList.map((item) => {

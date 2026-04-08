@@ -32,6 +32,16 @@ export const reportStyles = `
     border-bottom: 1pt solid #333;
     page-break-after: avoid;
   }
+  .report-header-brand {
+    margin: 0 0 12pt;
+    page-break-after: avoid;
+  }
+  .report-header-brand > svg {
+    display: block;
+    width: 120pt;
+    max-width: 135pt;
+    height: auto;
+  }
   .report-header-main h1 {
     margin: 4pt 0 6pt;
     font-size: 17pt;
@@ -221,6 +231,45 @@ export const reportStyles = `
   }
   .section-nachtrag .section-title {
     border-bottom-color: #cbd5e0;
+  }
+
+  .section-internal-notes {
+    margin-top: 8pt;
+    margin-bottom: 4pt;
+    padding: 10pt 12pt 12pt;
+    border: 1pt solid #e8e8e8;
+    border-radius: 4pt;
+    background: #f9f9f9;
+    page-break-inside: avoid;
+  }
+  /* Direkt unter Berichtskopf, vor Executive Summary */
+  .section-internal-notes-after-header {
+    margin-top: 6pt;
+    margin-bottom: 12pt;
+  }
+  .section-internal-notes .section-title-internal-notes {
+    margin: 0 0 6pt;
+    font-size: 10pt;
+    font-weight: 700;
+    text-transform: none;
+    letter-spacing: 0.01em;
+    color: #5a5a5a;
+    padding-bottom: 3pt;
+    border-bottom: 1pt solid #e0e0e0;
+  }
+  .section-internal-notes .section-lead-internal-notes {
+    margin: 0 0 8pt;
+    font-size: 8.5pt;
+    color: #888;
+    line-height: 1.4;
+  }
+  .internal-notes-body {
+    font-size: 9.5pt;
+    color: #444;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
   }
 
   .section-appendix {

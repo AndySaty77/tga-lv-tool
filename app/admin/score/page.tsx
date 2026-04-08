@@ -29,6 +29,13 @@ import { appTheme as T } from "@/components/app/appTheme";
 import { getAnalysisDisplayTitle } from "@/lib/analysisDisplayTitle";
 import { computeSavedReportCompleteness } from "@/lib/savedReportCompleteness";
 import type { PlanId } from "@/lib/billing/plans";
+import {
+  parseManualProjectData,
+  buildProjectInfoManualBundle,
+  resolveDisplayProjectName,
+  type ManualProjectData,
+  type ManualProjectFieldKey,
+} from "@/lib/manualProjectData";
 
 /** Einheitliches Design für alle Tabs (Rückfragen, Risiken, Angebotsklarstellungen, Admin). */
 const D = PAGE_DESIGN;
@@ -465,10 +472,33 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
   const savedAnalyseIdRef = useRef<string | null>(null);
   /** Kundenroute: nach erfolgreichem Save — UI für CTA „Bericht öffnen“ (nur bei gültiger ID). */
   const [savedReportBanner, setSavedReportBanner] = useState<{ id: string; titleHint: string } | null>(null);
+  /** Manuelle Projektdaten (result_json.manualProjectData) – getrennt von erkannten KeyFacts */
+  const [manualProjectData, setManualProjectData] = useState<ManualProjectData>({});
   const clearSavedReportBanner = React.useCallback(() => {
     savedAnalyseIdRef.current = null;
     setSavedReportBanner(null);
+    setManualProjectData({});
   }, []);
+
+  useEffect(() => {
+    const id = savedReportBanner?.id;
+    if (!id || !customerRoute) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/analyse/${id}`);
+        const j = (await res.json().catch(() => ({}))) as { item?: { result_json?: unknown } };
+        if (!res.ok || cancelled) return;
+        const rj = j?.item?.result_json as Record<string, unknown> | undefined;
+        setManualProjectData(parseManualProjectData(rj?.manualProjectData));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [savedReportBanner?.id, customerRoute]);
 
   const patchSavedAnalysisResultJson = React.useCallback(async (resultJsonMerge: Record<string, unknown>) => {
     if (!customerRoute) return;
@@ -1304,6 +1334,32 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
       };
     });
   }, [keyFactsValidated, keyFacts, keyFactConfidence, result]);
+
+  const manualProjectBundle = useMemo(() => {
+    if (!customerRoute) return null;
+    return buildProjectInfoManualBundle(keyFactsDisplayList, manualProjectData);
+  }, [customerRoute, keyFactsDisplayList, manualProjectData]);
+
+  const saveManualProjectField = React.useCallback(
+    async (key: ManualProjectFieldKey, value: string) => {
+      const id = savedAnalyseIdRef.current;
+      if (!id) return;
+      const trimmed = value.trim();
+      const updatedAt = new Date().toISOString();
+      setManualProjectData((prev) => {
+        const next = { ...prev };
+        if (trimmed) next[key] = { manualValue: trimmed, updatedAt };
+        else delete next[key];
+        return next;
+      });
+      const patch =
+        trimmed.length > 0
+          ? { [key]: { manualValue: trimmed, updatedAt } }
+          : { [key]: { manualValue: "", updatedAt } };
+      await patchSavedAnalysisResultJson({ manualProjectData: patch });
+    },
+    [patchSavedAnalysisResultJson],
+  );
 
   // Vertrags- und Abrechnungsrahmen: Abschlagszahlung, Schlussrechnung, Gewährleistung, Vertragsstrafe
   const keyFactsVertragsrahmen = useMemo((): [string, string][] => {
@@ -2536,7 +2592,12 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
           {resultTab === "uebersicht" && (
           customerRoute && result ? (
             <AnalyseCockpitView
-              projectName={(keyFacts as Record<string, string> | undefined)?.objektbezeichnung ?? (keyFacts as Record<string, string> | undefined)?.projektbezeichnung ?? (keyFacts as Record<string, string> | undefined)?.bauvorhaben}
+              projectName={
+                resolveDisplayProjectName(manualProjectData, keyFacts as Record<string, string> | undefined) ||
+                (keyFacts as Record<string, string> | undefined)?.objektbezeichnung ||
+                (keyFacts as Record<string, string> | undefined)?.projektbezeichnung ||
+                (keyFacts as Record<string, string> | undefined)?.bauvorhaben
+              }
               fileName={fileMeta?.name}
               fileSize={fileMeta?.size ?? undefined}
               result={result}
@@ -2549,6 +2610,16 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               sanitize={sanitizeForDisplay}
               expertMode={isExpertMode}
               onTabChange={(tab) => setResultTab(tab as ResultTabId)}
+              manualProject={
+                manualProjectBundle
+                  ? {
+                      rows: manualProjectBundle.rows,
+                      notesRow: manualProjectBundle.notesRow,
+                      canPersist: !!savedReportBanner?.id,
+                      onSaveField: saveManualProjectField,
+                    }
+                  : null
+              }
             />
           ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: customerRoute ? D.spacingCard : 12, maxHeight: "calc(100vh - 220px)", minHeight: 0 }}>

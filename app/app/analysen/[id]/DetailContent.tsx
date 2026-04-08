@@ -7,6 +7,15 @@ import { appTheme as T } from "@/components/app/appTheme";
 import { getAnalysisDisplayTitle, normalizeEditableTitleInput } from "@/lib/analysisDisplayTitle";
 import { buildPdfReport } from "@/lib/pdf/buildPdfReport";
 import { stripScoringEngineeringJargon } from "@/lib/pdf/pdfFormatters";
+import { sanitizeForDisplay } from "@/lib/displayText";
+import { ProjectInfoManualLayer } from "@/components/ProjectInfoManualLayer";
+import {
+  parseManualProjectData,
+  buildProjectInfoManualBundle,
+  type ManualProjectData,
+  type ManualProjectFieldKey,
+} from "@/lib/manualProjectData";
+import { buildKeyFactsDisplayListQuick } from "@/lib/keyFactsDisplayQuick";
 import type { PdfTopRiskItem, PdfCategoryScore, PdfQuestion } from "@/lib/pdf/pdfTypes";
 
 type AnalyseItem = {
@@ -183,10 +192,13 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
   const [depthOpen, setDepthOpen] = React.useState(false);
   const [exportLoading, setExportLoading] = React.useState(false);
   const [exportError, setExportError] = React.useState<string | null>(null);
+  /** PDF: nur bei aktivem Haken werden interne Team-Notizen mit exportiert (Default: aus). */
+  const [pdfIncludeInternalNotes, setPdfIncludeInternalNotes] = React.useState(false);
   const [deleteLoading, setDeleteLoading] = React.useState(false);
   const [titleDraft, setTitleDraft] = React.useState("");
   const [titleSaving, setTitleSaving] = React.useState(false);
   const [titleError, setTitleError] = React.useState<string | null>(null);
+  const [manualProjectData, setManualProjectData] = React.useState<ManualProjectData>({});
   const router = useRouter();
 
   React.useEffect(() => {
@@ -213,11 +225,53 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
   }, [id]);
 
   React.useEffect(() => {
+    if (!item) return;
+    const rj = (item.result_json ?? {}) as Record<string, unknown>;
+    setManualProjectData(parseManualProjectData(rj.manualProjectData));
+  }, [item?.id, item?.result_json]);
+
+  React.useEffect(() => {
     if (item) {
       setTitleDraft(item.project_name?.trim() ?? "");
       setTitleError(null);
     }
   }, [item?.id, item?.project_name]);
+
+  const handleSaveManualField = React.useCallback(
+    async (key: ManualProjectFieldKey, value: string) => {
+      const trimmed = value.trim();
+      const updatedAt = new Date().toISOString();
+      setManualProjectData((prev) => {
+        const next = { ...prev };
+        if (trimmed) next[key] = { manualValue: trimmed, updatedAt };
+        else delete next[key];
+        return next;
+      });
+      const patch =
+        trimmed.length > 0
+          ? { [key]: { manualValue: trimmed, updatedAt } }
+          : { [key]: { manualValue: "", updatedAt } };
+      try {
+        const res = await fetch(`/api/analyse/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resultJsonMerge: { manualProjectData: patch } }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Speichern fehlgeschlagen.");
+        if (data?.item) setItem(data.item as AnalyseItem);
+      } catch {
+        try {
+          const res = await fetch(`/api/analyse/${id}`);
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data?.item) setItem(data.item as AnalyseItem);
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+    [id],
+  );
 
   const titleDirty = React.useMemo(() => {
     if (!item) return false;
@@ -255,7 +309,10 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
       const res = await fetch("/api/export/pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ analysisId: item.id }),
+        body: JSON.stringify({
+          analysisId: item.id,
+          includeInternalTeamNotes: pdfIncludeInternalNotes,
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -279,7 +336,7 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
     } finally {
       setExportLoading(false);
     }
-  }, [item, id, canPdfExport]);
+  }, [item, id, canPdfExport, pdfIncludeInternalNotes]);
 
   const handleDelete = React.useCallback(async () => {
     if (!item || !window.confirm("Diese Analyse unwiderruflich löschen? Alle zugehörigen Daten (Ergebnis, Score, Rückfragen etc.) werden entfernt.")) return;
@@ -325,14 +382,17 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
 
   const rj = (item.result_json ?? {}) as Record<string, unknown>;
 
-  const report = buildPdfReport({
-    result_json: item.result_json,
-    management_summary: item.management_summary,
-    score: item.score,
-    project_name: item.project_name,
-    file_name: item.file_name,
-    created_at: item.created_at,
-  });
+  const report = buildPdfReport(
+    {
+      result_json: item.result_json,
+      management_summary: item.management_summary,
+      score: item.score,
+      project_name: item.project_name,
+      file_name: item.file_name,
+      created_at: item.created_at,
+    },
+    { includeInternalTeamNotes: false },
+  );
 
   const scoreResult = rj.scoreResult as { total?: number; level?: string; findingsSorted?: RiskFinding[] } | undefined;
   const changeOrder = rj.changeOrderAnalysis as {
@@ -346,8 +406,7 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
 
   const mappedStatus = mapStatus(item.status);
 
-  const keyFactRows = report.keyFacts ?? [];
-  const hasKeyFacts = keyFactRows.length > 0;
+  const detailManualBundle = buildProjectInfoManualBundle(buildKeyFactsDisplayListQuick(rj), manualProjectData);
   const questions = sortQuestions(report.questions ?? []);
   const offerClarifications = report.clarifications ?? [];
   const hasQuestions = questions.length > 0;
@@ -457,51 +516,80 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
               ) : null}
             </p>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            {!canPdfExport && (
-              <>
-                <span style={{ fontSize: 12, fontWeight: 600, color: T.muted }}>PDF nur in Pro</span>
-                <Link href="/pricing" style={{ fontSize: 12, fontWeight: 600, color: T.accent, textDecoration: "none" }}>
-                  → Pro
-                </Link>
-              </>
-            )}
-            <button
-              type="button"
-              onClick={handlePdfExport}
-              disabled={exportLoading || !canPdfExport}
-              style={{
-                padding: "9px 16px",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#0c1222",
-                background: T.accent,
-                border: "none",
-                borderRadius: T.radiusSm,
-                cursor: exportLoading || !canPdfExport ? "not-allowed" : "pointer",
-                opacity: exportLoading || !canPdfExport ? 0.7 : 1,
-              }}
-            >
-              {exportLoading ? "PDF …" : "PDF exportieren"}
-            </button>
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleteLoading}
-              style={{
-                padding: "9px 14px",
-                fontSize: 13,
-                fontWeight: 600,
-                color: T.danger ?? "#f87171",
-                background: "transparent",
-                border: `1px solid ${T.border}`,
-                borderRadius: T.radiusSm,
-                cursor: deleteLoading ? "not-allowed" : "pointer",
-                opacity: deleteLoading ? 0.7 : 1,
-              }}
-            >
-              {deleteLoading ? "Löschen …" : "Löschen"}
-            </button>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10 }}>
+            {canPdfExport ? (
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  margin: 0,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: T.muted,
+                  cursor: exportLoading ? "default" : "pointer",
+                  userSelect: "none",
+                  maxWidth: 280,
+                  textAlign: "right",
+                  lineHeight: 1.35,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={pdfIncludeInternalNotes}
+                  onChange={(e) => setPdfIncludeInternalNotes(e.target.checked)}
+                  disabled={exportLoading}
+                  style={{ width: 16, height: 16, flexShrink: 0, cursor: exportLoading ? "not-allowed" : "pointer" }}
+                />
+                Interne Notizen einbeziehen
+              </label>
+            ) : null}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {!canPdfExport && (
+                <>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: T.muted }}>PDF nur in Pro</span>
+                  <Link href="/pricing" style={{ fontSize: 12, fontWeight: 600, color: T.accent, textDecoration: "none" }}>
+                    → Pro
+                  </Link>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={handlePdfExport}
+                disabled={exportLoading || !canPdfExport}
+                style={{
+                  padding: "9px 16px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#0c1222",
+                  background: T.accent,
+                  border: "none",
+                  borderRadius: T.radiusSm,
+                  cursor: exportLoading || !canPdfExport ? "not-allowed" : "pointer",
+                  opacity: exportLoading || !canPdfExport ? 0.7 : 1,
+                }}
+              >
+                {exportLoading ? "PDF …" : "PDF exportieren"}
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleteLoading}
+                style={{
+                  padding: "9px 14px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: T.danger ?? "#f87171",
+                  background: "transparent",
+                  border: `1px solid ${T.border}`,
+                  borderRadius: T.radiusSm,
+                  cursor: deleteLoading ? "not-allowed" : "pointer",
+                  opacity: deleteLoading ? 0.7 : 1,
+                }}
+              >
+                {deleteLoading ? "Löschen …" : "Löschen"}
+              </button>
+            </div>
           </div>
         </div>
         {exportError ? <p style={{ margin: "12px 0 0", fontSize: 13, color: T.danger }}>{exportError}</p> : null}
@@ -583,33 +671,19 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
             </div>
           ) : null}
 
-          {hasKeyFacts ? (
-            <div style={workSurfaceStyle()}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: T.space.md }}>Eckdaten</div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                  gap: T.space.md,
-                }}
-              >
-                {keyFactRows.map((row) => (
-                  <div
-                    key={row.label + row.value}
-                    style={{
-                      padding: T.space.sm,
-                      borderRadius: T.radiusSm,
-                      border: `1px solid ${T.border}`,
-                      background: "rgba(0,0,0,0.15)",
-                    }}
-                  >
-                    <div style={{ fontSize: 11, color: T.faint, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{row.label}</div>
-                    <div style={{ fontSize: 14, color: T.text, lineHeight: 1.45 }}>{row.value}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          <div style={workSurfaceStyle()}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: T.space.md }}>Projektinformationen aus dem Leistungsverzeichnis</div>
+            <p style={{ margin: `0 0 ${T.space.md}px`, fontSize: 13, color: T.muted, lineHeight: 1.5, maxWidth: 640 }}>
+              Erkannte Eckdaten und manuelle Ergänzungen (getrennt gekennzeichnet).
+            </p>
+            <ProjectInfoManualLayer
+              rows={detailManualBundle.rows}
+              notesRow={detailManualBundle.notesRow}
+              sanitize={sanitizeForDisplay}
+              canPersist
+              onSaveField={handleSaveManualField}
+            />
+          </div>
 
           {hasTopRisksBlock ? (
             <div style={workSurfaceStyle()}>
