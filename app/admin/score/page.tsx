@@ -982,6 +982,20 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
         payload.positions = (splitUsed?.positions ?? structurePositions ?? "").trim();
       }
 
+      // Gewerkserkennung in /api/score: disciplineText nutzt fileName/projectName (Route) – vorher oft leer.
+      const effectiveSourceFileNameForScore =
+        (typeof options?.sourceFileName === "string" && options.sourceFileName.trim() ? options.sourceFileName.trim() : null) ??
+        (typeof fileMeta?.name === "string" && fileMeta.name.trim() ? fileMeta.name.trim() : null) ??
+        (typeof lastFile?.name === "string" && lastFile.name.trim() ? lastFile.name.trim() : null);
+      if (effectiveSourceFileNameForScore) {
+        payload.fileName = effectiveSourceFileNameForScore;
+      }
+      // Nur manueller Projektname: keyFacts sind im gleichen Takt nach resetVortext noch nicht zuverlässig befüllt.
+      const projectNameForScore = resolveDisplayProjectName(manualProjectData, {}).trim();
+      if (projectNameForScore) {
+        payload.projectName = projectNameForScore;
+      }
+
       const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

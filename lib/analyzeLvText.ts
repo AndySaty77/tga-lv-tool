@@ -1,4 +1,5 @@
 import { PRESET_FINDINGS } from "./findingsPresets";
+import { stripEmbeddedBinaryAndBase64Artifacts } from "./sanitizeAnalysisText";
 import { Finding, Severity, ScoreCategory } from "./scoring";
 import { NACHTRAG_SCHWELLEN, NACHTRAG_WEICHWOERTER } from "./scoringConfig";
 
@@ -47,6 +48,7 @@ export type TriggerEvaluation = {
  */
 function preprocessLvText(input: string): string {
   let t = input ?? "";
+  t = stripEmbeddedBinaryAndBase64Artifacts(t);
 
   // Kommentare raus
   t = t.replace(/<!--[\s\S]*?-->/g, " ");

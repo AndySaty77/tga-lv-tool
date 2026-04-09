@@ -9,6 +9,7 @@ import {
   toLegacyKeyFacts,
   toLegacyKeyFactConfidence,
 } from "@/lib/keyFactsValidation";
+import { stripEmbeddedBinaryAndBase64Artifacts } from "@/lib/sanitizeAnalysisText";
 
 // ================= Types =================
 type RiskLevel = "low" | "medium" | "high";
@@ -139,7 +140,7 @@ function stripHtml(input: string) {
 }
 
 function sanitizeVortext(raw: string) {
-  const s = stripHtml(hardCut(raw ?? ""));
+  const s = stripEmbeddedBinaryAndBase64Artifacts(stripHtml(hardCut(raw ?? "")));
   // super-häufiges GAEB-Müll raus (isolierte "No", "Yes", reine Zahlenzeilen)
   const lines = s
     .split("\n")

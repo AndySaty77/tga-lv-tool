@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 import { getUser } from "@/lib/auth/get-user";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { hasFeature } from "@/lib/billing/plans";
+import { stripEmbeddedBinaryAndBase64Artifacts } from "@/lib/sanitizeAnalysisText";
 import { runChangeOrderAnalysis } from "../../../lib/changeOrderAnalysis";
 
 export async function POST(req: Request) {
@@ -28,8 +29,8 @@ export async function POST(req: Request) {
     const findings = Array.isArray(body.findings) ? body.findings : [];
     const riskClauses = Array.isArray(body.riskClauses) ? body.riskClauses : [];
     const keyFacts = body.keyFacts && typeof body.keyFacts === "object" ? body.keyFacts : {};
-    const vortext = String(body.vortext ?? "").trim();
-    const lvPositions = String(body.lvPositions ?? "").trim();
+    const vortext = stripEmbeddedBinaryAndBase64Artifacts(String(body.vortext ?? "")).trim();
+    const lvPositions = stripEmbeddedBinaryAndBase64Artifacts(String(body.lvPositions ?? "")).trim();
     const rawUseLlm = body.useLlm === true;
     // Neue, sprechende Steuerung für ChangePotential-LLM; für Alt-Clients fällt auf useLlm zurück.
     const useChangePotentialLlm = body.useChangePotentialLlm === true || (body.useChangePotentialLlm == null && rawUseLlm);

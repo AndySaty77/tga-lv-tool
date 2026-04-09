@@ -13,6 +13,7 @@ import {
   type TriggerFindingValidationInput,
 } from "../../../lib/triggerValidationLlm";
 import { FALLBACK_SCORING_CONFIG } from "../../../lib/scoringConfig";
+import { stripEmbeddedBinaryAndBase64Artifacts } from "../../../lib/sanitizeAnalysisText";
 import { computeNachtragV2FromLegacy, type NachtragResultV2 } from "../../../lib/nachtrag-v2";
 import { buildDetectedTrades, emptyDetectedTrades } from "../../../lib/detectedTrades";
 import {
@@ -208,6 +209,15 @@ function detectDisciplines(lvText: string): DisciplineDetect {
 
   const MIN_HITS = 3;
 
+  // Zusammengesetzte Heizungs-Begriffe (z. B. „Heizungsarbeiten“ im Dateinamen): \bheizung\b trifft
+  // innerhalb des Wortes nicht. Kurze Positivliste – ein Treffer zählt für die Gewerkwahl wie MIN_HITS.
+  const HEIZUNG_DECISIVE_COMPOUND =
+    /\bheizungsarbeiten\b|\bheizungstechnik\b|\bheizungsanlage\b|\bheizungsinstallateur\b|\bheizungsmontage\b/gi;
+  const decisiveHeizungMatches = (t.match(HEIZUNG_DECISIVE_COMPOUND) ?? []).length;
+  if (decisiveHeizungMatches > 0) {
+    scores.heizung = Math.max(scores.heizung + decisiveHeizungMatches, MIN_HITS);
+  }
+
   const ordered = (Object.keys(scores) as Array<Exclude<DisciplineKey, "global">>)
     .filter((k) => scores[k] >= MIN_HITS)
     .sort((a, b) => scores[b] - scores[a]);
@@ -268,15 +278,39 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({} as any));
 
   // Backward compatible: lvText bleibt Pflichtfeld wie bisher
-  const lvText = String((body as any)?.lvText ?? "");
+  let lvText = String((body as any)?.lvText ?? "");
 
   // Neu: getrennt, kommt vom LLM-Split
-  const vortext = String((body as any)?.vortext ?? "");
-  const positions = String((body as any)?.positions ?? "");
+  let vortext = String((body as any)?.vortext ?? "");
+  let positions = String((body as any)?.positions ?? "");
+
+  lvText = stripEmbeddedBinaryAndBase64Artifacts(lvText);
+  vortext = stripEmbeddedBinaryAndBase64Artifacts(vortext);
+  positions = stripEmbeddedBinaryAndBase64Artifacts(positions);
 
   // Wichtiger Fix: für Trigger/Scoring NICHT mehr "guessen" – wenn Split da ist:
   const hasSplit = (vortext.trim().length > 0 || positions.trim().length > 0);
-  const textForAnalysis = hasSplit ? [vortext, positions].filter((s) => String(s).trim().length > 0).join("\n\n") : lvText;
+  const splitCombinedLen = vortext.trim().length + positions.trim().length;
+  const lvLen = lvText.trim().length;
+
+  /**
+   * GAEB-Fälle: Split liefert nur wenige hundert Zeichen, das LV ist aber sehr groß →
+   * Trigger/Regex matchen praktisch nichts. Dann auf bereinigtes Gesamt-`lvText` zurückfallen.
+   * Schutz: greift nur bei großem LV; Verhältnis + Obergrenze vermeiden False Positives bei kleinen echten LV.
+   */
+  const MIN_LV_CHARS_FOR_SPLIT_FALLBACK = 20_000;
+  const SPLIT_FALLBACK_MAX_EXPECTED_SHARE = 0.04;
+  const SPLIT_FALLBACK_ABS_CEILING = 12_000;
+  const splitTooSmallForScore =
+    hasSplit &&
+    lvLen >= MIN_LV_CHARS_FOR_SPLIT_FALLBACK &&
+    splitCombinedLen < Math.min(SPLIT_FALLBACK_ABS_CEILING, lvLen * SPLIT_FALLBACK_MAX_EXPECTED_SHARE);
+
+  const textForAnalysis = hasSplit
+    ? splitTooSmallForScore
+      ? lvText
+      : [vortext, positions].filter((s) => String(s).trim().length > 0).join("\n\n")
+    : lvText;
 
   const supabase = supabaseServer();
   const cfg = await getScoringConfig(supabase);
@@ -355,7 +389,8 @@ export async function POST(req: Request) {
   let triggerEvaluations: TriggerEvaluation[] = [];
   const runTriggerValidation = !(body as any)?.useLlmRelevance && !!process.env.OPENAI_API_KEY;
   const analyzeOpts = {
-    vortext: hasSplit ? vortext : undefined,
+    // Bei Fallback: kein Mini-Vortext für vortext_only — sonst würde nur der künstlich kurze Split durchsucht.
+    vortext: hasSplit && !splitTooSmallForScore ? vortext : undefined,
     allowDisciplines: allowDisciplines,
     ...(debug || runTriggerValidation ? { collectTriggerEvaluations: triggerEvaluations } : {}),
   };
@@ -378,7 +413,7 @@ export async function POST(req: Request) {
   let legalSignals: LegalSignal[] = [];
   if (LEGAL_SIGNALS_V1_ENABLED) {
     const legalSource =
-      hasSplit && vortext.trim().length >= 120 ? vortext : textForAnalysis;
+      hasSplit && !splitTooSmallForScore && vortext.trim().length >= 120 ? vortext : textForAnalysis;
     legalSignals = detectLegalSignals(legalSource);
     if (legalSignals.length > 0) {
       findings = [...findings, ...legalSignalsToFindings(legalSignals)];
@@ -550,7 +585,13 @@ export async function POST(req: Request) {
       ? {
           debug: {
             splitUsed: hasSplit,
-            lens: { lvText: lvText.length, vortext: vortext.length, positions: positions.length },
+            splitFallbackToFullLv: splitTooSmallForScore,
+            lens: {
+              lvText: lvText.length,
+              vortext: vortext.length,
+              positions: positions.length,
+              textForAnalysis: textForAnalysis.length,
+            },
             disciplineScores: det.scores,
             detectedDisciplines: det.all,
             primaryDiscipline: det.primary,

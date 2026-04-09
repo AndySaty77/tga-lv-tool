@@ -1,6 +1,7 @@
 // app/api/gaeb-split-llm/route.ts
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { stripEmbeddedBinaryAndBase64Artifacts } from "@/lib/sanitizeAnalysisText";
 
 export const runtime = "nodejs";
 
@@ -75,7 +76,7 @@ export async function POST(req: Request) {
     const rawPreview = hardCut(raw, HARD_MAX_CHARS);
 
     // Cleaned Text ans LLM (weil viele Exporte HTML/komische Breaks haben)
-    const clean = stripHtml(rawPreview);
+    const clean = stripEmbeddedBinaryAndBase64Artifacts(stripHtml(rawPreview));
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
