@@ -345,6 +345,19 @@ export const reportStyles = `
     line-height: 1.45;
     padding-left: 0;
   }
+  .top-risk-pruef {
+    margin-top: 6pt;
+    font-size: 8.5pt;
+    color: #1a3a4a;
+    line-height: 1.4;
+  }
+  .top-risk-pruef-list {
+    margin: 4pt 0 0 0;
+    padding-left: 14pt;
+  }
+  .top-risk-pruef-list li {
+    margin-bottom: 3pt;
+  }
 
   .legal-signals-block {
     margin-top: 4pt;

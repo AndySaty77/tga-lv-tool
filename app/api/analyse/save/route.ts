@@ -6,6 +6,7 @@ import type { PlanId } from "@/lib/billing/plans";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { canCreateAnalysis, incrementAnalysisUsedTotal } from "@/lib/billing/usage";
 import { resolveAnalysisTitleForInsert } from "@/lib/analysisDisplayTitle";
+import { logTriggerFiresAfterAnalyseSave } from "@/lib/triggerFiresLog";
 
 type Payload = {
   projectName?: string | null;
@@ -119,6 +120,12 @@ export async function POST(req: Request) {
       : error.message;
     return NextResponse.json({ error: msg }, { status: 500 });
   }
+
+  void logTriggerFiresAfterAnalyseSave({
+    resultJson: body.resultJson,
+    analyseRunId: data.id,
+    supabase,
+  });
 
   const analyseGespeichert = true;
   // Temporäres Logging (Debug: warum wird analysis_used_total nicht erhöht?)

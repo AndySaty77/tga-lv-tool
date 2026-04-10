@@ -72,6 +72,8 @@ export type PdfTopRiskItem = {
   detail?: string;
   /** Lesbare Risiko-Stufe, z. B. „Hohes Risiko“. */
   severityHint?: string;
+  /** Nutzertaugliche Prüfhinweise (aus Finding.user_hint / user_hints), max. wenige Einträge. */
+  pruefHinweise?: string[];
 };
 
 /** Vertragsnahe Zusatzsignale (V1), für PDF & konsistente Berichtsdarstellung. */

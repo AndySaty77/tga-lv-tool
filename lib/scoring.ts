@@ -38,6 +38,13 @@ export type Finding = {
   validation_penalty_assessment?: "keep" | "lower";
   /** true = für Score ignorieren, Finding bleibt in der Liste. */
   score_excluded?: boolean;
+  /**
+   * Optional: `triggers.user_hint` – nutzertauglicher Prüfhinweis, nur Anzeige.
+   * Durchreichen ohne Auswirkung auf penalty/Score (siehe applyDbTriggers in analyzeLvText).
+   */
+  user_hint?: string | null;
+  /** Optional: bis zu 3 deduplizierte Prüfhinweise (z. B. nach Zusammenführung mehrerer Trigger). */
+  user_hints?: string[];
 };
 
 export type ScoreInput = {

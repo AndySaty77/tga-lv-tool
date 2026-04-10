@@ -327,6 +327,7 @@ export async function POST(req: Request) {
       weight,
       claim_level,
       risk_interpretation,
+      user_hint,
       question_template,
       offer_text_template,
       is_active,

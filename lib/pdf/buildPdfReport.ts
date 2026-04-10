@@ -15,6 +15,7 @@ import {
   resolveFinalKeyFactDisplay,
   type ManualProjectData,
 } from "@/lib/manualProjectData";
+import { collectPruefHinweiseFromFinding } from "@/lib/userHintsForFinding";
 import type {
   AnalysisPdfReport,
   PdfCategoryScore,
@@ -505,6 +506,8 @@ type RawFinding = {
   detail?: string;
   severity?: string;
   penalty?: number;
+  user_hint?: string | null;
+  user_hints?: string[];
 };
 
 function severityRankSeverity(sev: string | undefined): number {
@@ -553,11 +556,13 @@ function buildTopRisksItems(rj: Record<string, unknown>): PdfTopRiskItem[] {
       ? sanitizeText(detailSanRaw, { maxLength: 400, stripTechnical: false }).trim()
       : undefined;
     const sevHint = severityLabelDe(f.severity);
+    const pruefHinweise = collectPruefHinweiseFromFinding(f);
     out.push({
       title,
       ...(cat ? { categoryLabel: cat } : {}),
       ...(detailSan && detailSan.length > 0 ? { detail: detailSan } : {}),
       ...(sevHint ? { severityHint: sevHint } : {}),
+      ...(pruefHinweise.length > 0 ? { pruefHinweise } : {}),
     });
   }
   return out;

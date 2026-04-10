@@ -81,6 +81,9 @@ export const DEFAULT_TEXTS_CONFIG: TextsConfig = {
       projektdatenSub: "Wichtige Angaben aus der Einleitung (z. B. Objekt, Vergabeart), automatisch erkannt.",
       risikenVortext: "Risiken im Einleitungstext",
       risikenVortextSub: "Künstliche Intelligenz analysiert den Vortext des Leistungsverzeichnisses und erkennt mögliche Risiken oder unklare Leistungsbeschreibungen.",
+      risikenTopFindings: "Top-Risiken aus dem Leistungsverzeichnis",
+      risikenTopFindingsSub:
+        "Die wichtigsten automatisch erkannten Treffer mit nutzertauglichen Prüfhinweisen zur fachlichen Nacharbeit.",
       rueckfragenBlock: "RÜCKFRAGEN / KLARSTELLUNGEN",
       angebotsBlock: "ANGEBOTS-ANNAHMEN",
       scoreErklaerung: "Erklärung der Score-Berechnung",

@@ -40,6 +40,12 @@ export default function AdminPage() {
             <strong style={{ fontSize: 15 }}>Trigger</strong>
             <div style={{ color: "#666", marginTop: 4, fontSize: 13 }}>Live-Regeln in der DB: pflegen, CSV, Test gegen LV-Text</div>
           </a>
+          <a href="/admin/triggers/insights" style={cardStyle}>
+            <strong style={{ fontSize: 15 }}>Trigger-Insights</strong>
+            <div style={{ color: "#666", marginTop: 4, fontSize: 13 }}>
+              Auswertung gespeicherter Trigger-Fires (Lesen) – KPIs und Tabellen
+            </div>
+          </a>
           <a href="/admin/score" style={cardStyle}>
             <strong style={{ fontSize: 15 }}>Analyse (intern)</strong>
             <div style={{ color: "#666", marginTop: 4, fontSize: 13 }}>

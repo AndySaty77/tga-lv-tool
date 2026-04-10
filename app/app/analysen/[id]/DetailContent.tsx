@@ -17,6 +17,7 @@ import {
 } from "@/lib/manualProjectData";
 import { buildKeyFactsDisplayListQuick } from "@/lib/keyFactsDisplayQuick";
 import type { PdfTopRiskItem, PdfCategoryScore, PdfQuestion } from "@/lib/pdf/pdfTypes";
+import { collectPruefHinweiseFromFinding, MAX_PRUEF_HINWEISE_STANDARD } from "@/lib/userHintsForFinding";
 
 type AnalyseItem = {
   id: string;
@@ -36,6 +37,8 @@ type RiskFinding = {
   detail?: string;
   severity?: string;
   penalty?: number;
+  user_hint?: string | null;
+  user_hints?: string[];
 };
 
 const RISK_CATEGORY_LABELS: Record<string, string> = {
@@ -721,6 +724,26 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
                           {tr.detail ? (
                             <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.6 }}>{cleanRiskProse(tr.detail)}</p>
                           ) : null}
+                          {Array.isArray(tr.pruefHinweise) && tr.pruefHinweise.length > 0 ? (
+                            <div
+                              style={{
+                                marginTop: 10,
+                                padding: "10px 12px",
+                                borderRadius: T.radiusSm,
+                                border: `1px solid ${T.border}`,
+                                background: "rgba(96, 165, 250, 0.08)",
+                              }}
+                            >
+                              <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 6 }}>Prüfhinweise</div>
+                              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: T.muted, lineHeight: 1.55 }}>
+                                {tr.pruefHinweise.map((line, hi) => (
+                                  <li key={hi} style={{ marginBottom: 4 }}>
+                                    {sanitizeForDisplay(line)}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })
@@ -780,6 +803,30 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
                               {isOpen ? "Weniger" : "Vollständige Einordnung"}
                             </button>
                           ) : null}
+                          {(() => {
+                            const ph = collectPruefHinweiseFromFinding(f, MAX_PRUEF_HINWEISE_STANDARD);
+                            if (ph.length === 0) return null;
+                            return (
+                              <div
+                                style={{
+                                  marginTop: 12,
+                                  padding: "10px 12px",
+                                  borderRadius: T.radiusSm,
+                                  border: `1px solid ${T.border}`,
+                                  background: "rgba(96, 165, 250, 0.08)",
+                                }}
+                              >
+                                <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 6 }}>Prüfhinweise</div>
+                                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: T.muted, lineHeight: 1.55 }}>
+                                  {ph.map((line, hi) => (
+                                    <li key={hi} style={{ marginBottom: 4 }}>
+                                      {sanitizeForDisplay(line)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            );
+                          })()}
                           {(typeof f.penalty === "number" || rawDetail.length > 0) ? (
                             <div style={{ marginTop: 10 }}>
                               <button

@@ -1,6 +1,7 @@
 import { PRESET_FINDINGS } from "./findingsPresets";
 import { stripEmbeddedBinaryAndBase64Artifacts } from "./sanitizeAnalysisText";
 import { Finding, Severity, ScoreCategory } from "./scoring";
+import { dedupeUserHints, MAX_PRUEF_HINWEISE_STANDARD } from "./userHintsForFinding";
 import { NACHTRAG_SCHWELLEN, NACHTRAG_WEICHWOERTER } from "./scoringConfig";
 
 // ===== DB Trigger Typ (entspricht deiner Supabase-Tabelle) =====
@@ -16,6 +17,8 @@ export type DbTrigger = {
   weight: number;
   claim_level: string | null;
   risk_interpretation: string | null;
+  /** Optional: kurzer Prüfhinweis für die Analyse-UI (read-only), ohne Engine-Logik. */
+  user_hint?: string | null;
   question_template: string | null;
   offer_text_template: string | null;
   is_active: boolean;
@@ -427,6 +430,7 @@ function applyDbTriggers(
         ? getTextWindow(textToUse, evalResult.firstMatchIndex, evalResult.firstMatchLength)
         : undefined;
 
+    const hints = dedupeUserHints([t.user_hint], MAX_PRUEF_HINWEISE_STANDARD);
     findings.push({
       id,
       category: mapSupabaseCategoryToScore(t.category),
@@ -435,6 +439,9 @@ function applyDbTriggers(
       penalty: finalPenalty,
       detail: detailParts.join(" | "),
       ...(raw_excerpt != null && raw_excerpt.length > 0 ? { raw_excerpt } : {}),
+      ...(hints.length
+        ? { user_hint: hints[0], user_hints: hints }
+        : {}),
     });
   }
 
@@ -490,6 +497,12 @@ function mergeSimilarFindings(findings: Finding[]): Finding[] {
     const maxPenalty = Math.max(...group.map((g) => g.penalty));
     const penalty = clamp(maxPenalty + Math.floor((group.length - 1) * 2), 0, 20);
     const ids = group.map((g) => g.id.replace(/^DB_/, "")).slice(0, 5);
+    const hintPool: string[] = [];
+    for (const g of group) {
+      if (g.user_hints?.length) hintPool.push(...g.user_hints);
+      else if (g.user_hint?.trim()) hintPool.push(g.user_hint.trim());
+    }
+    const mergedHints = dedupeUserHints(hintPool, MAX_PRUEF_HINWEISE_STANDARD);
     merged.push({
       id: first.id,
       category: first.category,
@@ -504,6 +517,7 @@ function mergeSimilarFindings(findings: Finding[]): Finding[] {
         .filter(Boolean)
         .join(" | "),
       ...(first.raw_excerpt != null && { raw_excerpt: first.raw_excerpt }),
+      ...(mergedHints.length ? { user_hint: mergedHints[0], user_hints: mergedHints } : {}),
     });
   }
 

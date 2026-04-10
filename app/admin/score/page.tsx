@@ -36,6 +36,9 @@ import {
   type ManualProjectData,
   type ManualProjectFieldKey,
 } from "@/lib/manualProjectData";
+import { countPositionenMatchesInDisplayNodes } from "@/lib/positionenSearch";
+import type { GaebPreviewDisplayNode } from "@/lib/gaebPreviewModel";
+import { collectPruefHinweiseFromFinding, MAX_PRUEF_HINWEISE_STANDARD } from "@/lib/userHintsForFinding";
 
 /** Einheitliches Design für alle Tabs (Rückfragen, Risiken, Angebotsklarstellungen, Admin). */
 const D = PAGE_DESIGN;
@@ -186,6 +189,9 @@ type Finding = {
   detail?: string;
   severity: "low" | "medium" | "high" | string;
   penalty: number;
+  /** Optional: `triggers.user_hint` (API/Score-Response), nur Anzeige. */
+  user_hint?: string | null;
+  user_hints?: string[] | null;
 };
 
 type DebugBlock = {
@@ -1280,6 +1286,14 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
     return list;
   }, [result, sourceFilter, severityFilter, categoryFilter, search, sortMode, top10]);
 
+  /** Tab „Risiken“, Standardmodus: Top-Treffer nach Score-Penalty, unabhängig von Trigger-Filtern der Expertenansicht. */
+  const risikenTabStandardFindings = useMemo(() => {
+    const all = result?.findingsSorted ?? [];
+    return [...all]
+      .sort((a, b) => (b.penalty ?? 0) - (a.penalty ?? 0))
+      .slice(0, 8);
+  }, [result]);
+
   const dbFindings = useMemo(() => filteredFindings.filter(isDbFinding), [filteredFindings]);
   const sysFindings = useMemo(() => filteredFindings.filter(isSysFinding), [filteredFindings]);
   const llmFindings = useMemo(() => filteredFindings.filter(isLlmFinding), [filteredFindings]);
@@ -1678,13 +1692,19 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
   const positionenMatchCount = useMemo(() => {
     const q = positionenSearchQuery.trim();
     if (!q) return 0;
+    if (isGaebXml && (gaebPreview?.normalized?.displayNodes?.length ?? 0) > 0) {
+      return countPositionenMatchesInDisplayNodes(
+        gaebPreview!.normalized!.displayNodes as GaebPreviewDisplayNode[],
+        q
+      );
+    }
     const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const regex = new RegExp(escaped, "gi");
     let count = 0;
     let m: RegExpExecArray | null;
     while ((m = regex.exec(positionsForDocumentViewDisplay)) !== null) count++;
     return count;
-  }, [positionenSearchQuery, positionsForDocumentViewDisplay]);
+  }, [positionenSearchQuery, positionsForDocumentViewDisplay, isGaebXml, gaebPreview?.normalized?.displayNodes]);
 
   useEffect(() => {
     if (vorbemerkungenMatchCount > 0) {
@@ -1706,9 +1726,11 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
 
   useEffect(() => {
     if (resultTab !== "positionen" || positionenMatchCount === 0) return;
+    // displayNodes: Scroll + Aufklappen übernimmt PositionenNodeView (Treffer im Langtext)
+    if (isGaebXml && (gaebPreview?.normalized?.displayNodes?.length ?? 0) > 0) return;
     const el = document.getElementById(`positionen-hit-${positionenCurrentHitIndex}`);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [resultTab, positionenCurrentHitIndex, positionenMatchCount]);
+  }, [resultTab, positionenCurrentHitIndex, positionenMatchCount, isGaebXml, gaebPreview?.normalized?.displayNodes?.length]);
 
   const analysisStatus = loading ? "Analysiere…" : result ? "Abgeschlossen" : "Bereit";
 
@@ -2734,9 +2756,46 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                     <div style={{ color: customerRoute ? CX.faint : "#9ca3af", fontSize: 13 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noTreffer}</div>
                   ) : (
                     filteredFindings.slice(0, 8).map((f) => (
-                      <div key={f.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0", borderBottom: customerRoute ? `1px solid ${CX.rowHairline}` : "1px solid #f3f4f6" }}>
+                      <div key={f.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderBottom: customerRoute ? `1px solid ${CX.rowHairline}` : "1px solid #f3f4f6" }}>
                         <span style={{ flexShrink: 0 }}>{severityDot(f.severity)}</span>
-                        <span style={{ fontSize: 13, color: customerRoute ? CX.text : "#111", fontWeight: 500, lineHeight: 1.35 }}>{sanitizeForDisplay(f.title ?? "")}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, color: customerRoute ? CX.text : "#111", fontWeight: 600, lineHeight: 1.35 }}>{sanitizeForDisplay(f.title ?? "")}</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginTop: 6 }}>
+                            <StatusBadge variant="info" small>
+                              {catLabel(f.category)}
+                            </StatusBadge>
+                            <StatusBadge variant={f.severity === "high" ? "danger" : f.severity === "medium" ? "warning" : "info"} small>
+                              {severityLabel(f.severity)}
+                            </StatusBadge>
+                          </div>
+                          {(() => {
+                            const ph = collectPruefHinweiseFromFinding(f, 2);
+                            if (ph.length === 0) return null;
+                            return (
+                              <div
+                                style={{
+                                  marginTop: 8,
+                                  padding: "8px 10px",
+                                  borderRadius: 8,
+                                  background: customerRoute ? CX.intro : "#f0f9ff",
+                                  border: customerRoute ? `1px solid ${CX.border}` : "1px solid #bae6fd",
+                                  fontSize: 12,
+                                  lineHeight: 1.45,
+                                  color: customerRoute ? CX.text : "#0c4a6e",
+                                }}
+                              >
+                                <div style={{ fontWeight: 700, marginBottom: 4 }}>Prüfhinweise</div>
+                                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                  {ph.map((line, i) => (
+                                    <li key={i} style={{ marginBottom: 4 }}>
+                                      {sanitizeForDisplay(line)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            );
+                          })()}
+                        </div>
                       </div>
                     ))
                   )}
@@ -2755,6 +2814,69 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               <strong>{DEFAULT_TEXTS_CONFIG.customerUI.tabLabels.risiken}</strong> — {DEFAULT_TEXTS_CONFIG.explanation.risiken}
             </p>
           </SectionCard>
+
+          {/* Top-Risiken / Prüfhinweise (Standardmodus): gleiche Darstellung wie KPI „Top Findings“ in der Admin-Übersicht */}
+          {!isExpertMode && result && (
+            <SectionCard accent="primary" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 14, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 700 }}>
+                  {DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenTopFindings}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 12, color: customerRoute ? CX.faint : D.textMuted, fontWeight: 500 }}>
+                  {DEFAULT_TEXTS_CONFIG.customerUI.sectionHeaders.risikenTopFindingsSub}
+                </div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {risikenTabStandardFindings.length === 0 ? (
+                  <div style={{ color: customerRoute ? CX.faint : "#9ca3af", fontSize: 13 }}>{DEFAULT_TEXTS_CONFIG.customerUI.emptyStates.noTreffer}</div>
+                ) : (
+                  risikenTabStandardFindings.map((f) => (
+                    <div key={f.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderBottom: customerRoute ? `1px solid ${CX.rowHairline}` : "1px solid #f3f4f6" }}>
+                      <span style={{ flexShrink: 0 }}>{severityDot(f.severity)}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: customerRoute ? CX.text : "#111", fontWeight: 600, lineHeight: 1.35 }}>{sanitizeForDisplay(f.title ?? "")}</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginTop: 6 }}>
+                          <StatusBadge variant="info" small>
+                            {catLabel(f.category)}
+                          </StatusBadge>
+                          <StatusBadge variant={f.severity === "high" ? "danger" : f.severity === "medium" ? "warning" : "info"} small>
+                            {severityLabel(f.severity)}
+                          </StatusBadge>
+                        </div>
+                        {(() => {
+                          const ph = collectPruefHinweiseFromFinding(f, MAX_PRUEF_HINWEISE_STANDARD);
+                          if (ph.length === 0) return null;
+                          return (
+                            <div
+                              style={{
+                                marginTop: 8,
+                                padding: "8px 10px",
+                                borderRadius: 8,
+                                background: customerRoute ? CX.intro : "#f0f9ff",
+                                border: customerRoute ? `1px solid ${CX.border}` : "1px solid #bae6fd",
+                                fontSize: 12,
+                                lineHeight: 1.45,
+                                color: customerRoute ? CX.text : "#0c4a6e",
+                              }}
+                            >
+                              <div style={{ fontWeight: 700, marginBottom: 4 }}>Prüfhinweise</div>
+                              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                {ph.map((line, i) => (
+                                  <li key={i} style={{ marginBottom: 4 }}>
+                                    {sanitizeForDisplay(line)}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </SectionCard>
+          )}
 
           {/* ===== Risiken im Einleitungstext ===== */}
           <SectionCard accent="warning" style={{ background: customerRoute ? CX.card : D.cardBg, borderColor: customerRoute ? CX.border : D.cardBorder, boxShadow: customerRoute ? CX.shadow : D.cardShadow }}>
@@ -3099,8 +3221,10 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               )}
               {isGaebXml && (gaebPreview?.normalized?.displayNodes?.length ?? 0) > 0 ? (
                 <PositionenNodeView
-                  nodes={gaebPreview.normalized.displayNodes as import("@/lib/gaebPreviewModel").GaebPreviewDisplayNode[]}
+                  nodes={gaebPreview.normalized.displayNodes as GaebPreviewDisplayNode[]}
                   maxHeight="420px"
+                  searchQuery={positionenSearchQuery.trim() || undefined}
+                  activeHitIndex={positionenCurrentHitIndex}
                   theme={{
                     textPrimary: customerRoute ? CX.text : D.textPrimary,
                     textSecondary: customerRoute ? CX.muted : D.textSecondary,
@@ -3112,6 +3236,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                           expandedRowBg: CX.inputBg,
                           groupAccentBorder: CX.muted,
                           controlAccent: T.accent,
+                          searchHighlightBg: "rgba(251, 191, 36, 0.22)",
+                          searchHighlightActiveOutline: T.accent,
                         }
                       : {}),
                   }}
@@ -3698,8 +3824,41 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                 filteredFindings.map((f) => (
                   <div key={f.id} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
                     <div style={{ fontWeight: D.fontWeightCardTitle, color: customerRoute ? CX.text : D.textPrimary, marginBottom: 6, fontSize: D.fontSizeBody }}>{sanitizeForDisplay(f.title ?? "")}</div>
-                    <div style={{ fontSize: D.fontSizeBody, color: customerRoute ? CX.muted : D.textSecondary }}>Kategorie: {catLabel(f.category)}</div>
-                    <div style={{ fontSize: D.fontSizeBody, color: customerRoute ? CX.muted : D.textSecondary, marginTop: 2 }}>Risiko: {severityLabel(f.severity)}</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                      <StatusBadge variant="info" small>
+                        {catLabel(f.category)}
+                      </StatusBadge>
+                      <StatusBadge variant={f.severity === "high" ? "danger" : f.severity === "medium" ? "warning" : "info"} small>
+                        {severityLabel(f.severity)}
+                      </StatusBadge>
+                    </div>
+                    {(() => {
+                      const ph = collectPruefHinweiseFromFinding(f, MAX_PRUEF_HINWEISE_STANDARD);
+                      if (ph.length === 0) return null;
+                      return (
+                        <div
+                          style={{
+                            marginBottom: 8,
+                            padding: "10px 12px",
+                            borderRadius: 8,
+                            background: customerRoute ? CX.intro : "#f0f9ff",
+                            border: customerRoute ? `1px solid ${CX.border}` : "1px solid #bae6fd",
+                            fontSize: 13,
+                            lineHeight: 1.45,
+                            color: customerRoute ? CX.text : "#0c4a6e",
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, marginBottom: 6 }}>Prüfhinweise</div>
+                          <ul style={{ margin: 0, paddingLeft: 18 }}>
+                            {ph.map((line, i) => (
+                              <li key={i} style={{ marginBottom: 4 }}>
+                                {sanitizeForDisplay(line)}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))
               )}
@@ -3732,7 +3891,45 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: D.fontSizeCaption }}><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Regex:</span> {(f as any).regex}</div>}
                         {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Keywords:</span> {(f as any).keywords}</div>}
                         <div style={{ marginTop: 4, fontWeight: D.fontWeightCardTitle, color: customerRoute ? CX.text : D.textPrimary }}>{sanitizeForDisplay(f.title ?? "")}</div>
-                        {f.detail && <div style={{ color: customerRoute ? CX.muted : D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(f.detail)}</div>}
+                        {(() => {
+                          const ph = collectPruefHinweiseFromFinding(f, MAX_PRUEF_HINWEISE_STANDARD);
+                          if (ph.length === 0) return null;
+                          return (
+                            <div
+                              style={{
+                                marginTop: 8,
+                                padding: "8px 10px",
+                                borderRadius: 8,
+                                background: customerRoute ? "rgba(224, 124, 94, 0.08)" : "#f0f9ff",
+                                border: `1px solid ${customerRoute ? CX.border : "#bae6fd"}`,
+                                fontSize: 13,
+                                lineHeight: 1.45,
+                                color: customerRoute ? CX.text : "#0c4a6e",
+                              }}
+                            >
+                              <div style={{ fontWeight: 700, marginBottom: 4 }}>Prüfhinweise (nutzertauglich)</div>
+                              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                {ph.map((line, i) => (
+                                  <li key={i} style={{ marginBottom: 4 }}>
+                                    {sanitizeForDisplay(line)}
+                                  </li>
+                                ))}
+                              </ul>
+                              <div style={{ fontSize: 11, color: customerRoute ? CX.faint : D.textMuted, marginTop: 6 }}>
+                                Aus <code>triggers.user_hint</code> (Anzeige im Ergebnis ggf. mehrzeilig nach Zusammenführung). Kein Ersatz für die
+                                technische Regelbewertung.
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        {f.detail && (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: customerRoute ? CX.faint : D.textMuted, marginBottom: 4 }}>
+                              Technische Details (Regel-Metadaten)
+                            </div>
+                            <div style={{ color: customerRoute ? CX.muted : D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(f.detail)}</div>
+                          </div>
+                        )}
                         <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Risiko:</span> {severityLabel(f.severity)} {severityDot(f.severity)}</div>
                       </div>
                     </div>

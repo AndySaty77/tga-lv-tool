@@ -214,6 +214,14 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
       if (sev) parts.push(`<span class="top-risk-sev">${sev}</span>`);
       parts.push("</div>");
       if (det) parts.push(`<div class="top-risk-detail">${det}</div>`);
+      const ph = Array.isArray(tr.pruefHinweise) ? tr.pruefHinweise.filter((x) => opt(x)) : [];
+      if (ph.length > 0) {
+        parts.push('<div class="top-risk-pruef"><strong>Prüfhinweise</strong><ul class="top-risk-pruef-list">');
+        for (const line of ph) {
+          parts.push(`<li>${escapeHtml(opt(line))}</li>`);
+        }
+        parts.push("</ul></div>");
+      }
       parts.push("</div>");
     }
     parts.push("</div></section>");
