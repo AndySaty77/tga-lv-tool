@@ -18,19 +18,24 @@ async function llmRefineAssumptions(assumptions: OfferAssumption[]): Promise<Off
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
   const maxItems = Math.min(assumptions.length, 20);
 
-  const prompt = `Du optimierst Angebotsannahmen aus einem Ausschreibungs-Kontext.
+  const prompt = `Du optimierst Angebotsklarstellungen aus einem Ausschreibungs-Kontext.
 
 REGELN:
-- Jede Annahme soll klar, prägnant und rechtssicher formuliert sein.
-- Formulierung: "Wir gehen davon aus, dass..." oder "Es wird angenommen, dass..."
-- Keine Spekulationen, nur plausible Annahmen bei Unklarheiten.
-- Länge: 1-2 Sätze pro Annahme.
-- Gib das JSON-Array unverändert zurück, nur das Feld "assumption" pro Eintrag optimiert.
+- Nüchtern, absichernd, nicht aggressiv; typisch: "Unsere Kalkulation berücksichtigt ... nur insoweit, wie ..." oder ähnlich.
+- Keine rohen Trigger-/Regelnamen als Hauptinhalt; keine Debug-Formulierungen.
+- Hauptfeld "clarification": 1–2 Sätze; optional "scopeNote": ein kurzer zweiter absichernder Satz (kann leer sein).
+- Keine Spekulationen über nicht beschriebene Leistungen.
 
-Annahmen (JSON):
-${JSON.stringify(assumptions.slice(0, maxItems).map((a) => ({ id: a.id, assumption: a.assumption })))}
+Einträge (JSON):
+${JSON.stringify(
+    assumptions.slice(0, maxItems).map((a) => ({
+      id: a.id,
+      clarification: a.clarification ?? a.assumption,
+      scopeNote: a.scopeNote ?? "",
+    }))
+  )}
 
-Gib ein JSON-Objekt zurück: { "assumptions": [ { "id": "...", "assumption": "optimierter Text" }, ... ] }`;
+Gib ein JSON-Objekt zurück: { "assumptions": [ { "id": "...", "clarification": "...", "scopeNote": "..." }, ... ] }`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -53,15 +58,26 @@ Gib ein JSON-Objekt zurück: { "assumptions": [ { "id": "...", "assumption": "op
     const parsed = JSON.parse(cleaned);
     const refined = Array.isArray(parsed?.assumptions) ? parsed.assumptions : Array.isArray(parsed) ? parsed : [];
 
-    const idToText = new Map<string, string>();
+    const idToClar = new Map<string, string>();
+    const idToScope = new Map<string, string>();
     for (const r of refined) {
-      if (r?.id && typeof r?.assumption === "string") idToText.set(String(r.id), r.assumption.trim());
+      if (!r?.id) continue;
+      const id = String(r.id);
+      if (typeof r?.clarification === "string" && r.clarification.trim()) idToClar.set(id, r.clarification.trim());
+      else if (typeof r?.assumption === "string" && r.assumption.trim()) idToClar.set(id, r.assumption.trim());
+      if (typeof r?.scopeNote === "string" && r.scopeNote.trim()) idToScope.set(id, r.scopeNote.trim());
     }
 
-    return assumptions.map((a) => ({
-      ...a,
-      assumption: idToText.get(a.id) || a.assumption,
-    }));
+    return assumptions.map((a) => {
+      const clarification = idToClar.get(a.id) ?? a.clarification ?? a.assumption;
+      const scopeNote = idToScope.has(a.id) ? idToScope.get(a.id)! : a.scopeNote;
+      return {
+        ...a,
+        clarification,
+        assumption: clarification,
+        scopeNote,
+      };
+    });
   } catch {
     return assumptions;
   }

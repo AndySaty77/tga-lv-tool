@@ -4,11 +4,14 @@ import { getUser } from "@/lib/auth/get-user";
 import {
   deriveAnalyseListRow,
   filterAndSortAnalyseList,
+  type AnalyseListBidFilter,
   type AnalyseListDeadlineWarnBadge,
   type AnalyseListDerived,
   type AnalyseListFristFilter,
+  type AnalyseListLvStatusFilter,
   type AnalyseListSort,
 } from "@/lib/analyseListDerivation";
+import { LV_STATUS_KEYS, normalizeLvStatus, formatBidAmountNetEur, type LvStatusKey } from "@/lib/analyseRunLvStatus";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -49,6 +52,18 @@ function parseFavorite(s: string | null): "" | "only" {
   return (s ?? "").trim().toLowerCase() === "only" ? "only" : "";
 }
 
+function parseLvStatusFilter(s: string | null): AnalyseListLvStatusFilter {
+  const v = (s ?? "").trim().toLowerCase();
+  if ((LV_STATUS_KEYS as readonly string[]).includes(v)) return v as LvStatusKey;
+  return "";
+}
+
+function parseBidFilter(s: string | null): AnalyseListBidFilter {
+  const v = (s ?? "").trim().toLowerCase();
+  if (v === "with" || v === "without") return v;
+  return "";
+}
+
 export type AnalyseListItemDto = {
   id: string;
   created_at: string;
@@ -61,6 +76,12 @@ export type AnalyseListItemDto = {
   /** Nur Abgabefrist, nur bei parsebarem Datum und relevanter Fristlage. */
   deadlineWarnBadge: AnalyseListDeadlineWarnBadge | null;
   isFavorite: boolean;
+  /** Bearbeitungsstatus (analyse_runs.lv_status), normalisiert. */
+  lvStatus: LvStatusKey;
+  /** Angebotsbetrag netto oder null. */
+  bidAmountNet: number | null;
+  /** Für UI: formatierter Euro-String oder "—". */
+  bidAmountNetLabel: string;
 };
 
 function toDto(d: AnalyseListDerived): AnalyseListItemDto {
@@ -75,6 +96,9 @@ function toDto(d: AnalyseListDerived): AnalyseListItemDto {
     metaSegments: d.metaSegments,
     deadlineWarnBadge: d.deadlineWarnBadge,
     isFavorite: d.isFavorite,
+    lvStatus: d.lvStatus,
+    bidAmountNet: d.bidAmountNet,
+    bidAmountNetLabel: formatBidAmountNetEur(d.bidAmountNet),
   };
 }
 
@@ -99,6 +123,8 @@ export async function GET(req: NextRequest) {
   const frist = parseFrist(searchParams.get("frist"));
   const sort = parseSort(searchParams.get("sort"));
   const favorite = parseFavorite(searchParams.get("favorite"));
+  const lvStatus = parseLvStatusFilter(searchParams.get("lvStatus"));
+  const bid = parseBidFilter(searchParams.get("bid"));
 
   const rawRows: {
     id: string;
@@ -109,6 +135,8 @@ export async function GET(req: NextRequest) {
     status: string | null;
     result_json: unknown;
     is_favorite: boolean | null;
+    lv_status: string | null;
+    bid_amount_net: unknown;
   }[] = [];
 
   let from = 0;
@@ -116,7 +144,7 @@ export async function GET(req: NextRequest) {
     const to = from + FETCH_BATCH - 1;
     const { data, error } = await supabase
       .from("analyse_runs")
-      .select("id, created_at, project_name, file_name, score, status, result_json, is_favorite")
+      .select("id, created_at, project_name, file_name, score, status, result_json, is_favorite, lv_status, bid_amount_net")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .range(from, to);
@@ -135,7 +163,7 @@ export async function GET(req: NextRequest) {
   }
 
   const derived = rawRows.map((row) => deriveAnalyseListRow(row));
-  const filtered = filterAndSortAnalyseList(derived, { q, gewerk, projektart, frist, sort, favorite });
+  const filtered = filterAndSortAnalyseList(derived, { q, gewerk, projektart, frist, sort, favorite, lvStatus, bid });
   const total = filtered.length;
   const sliceFrom = (page - 1) * pageSize;
   const pageItems = filtered.slice(sliceFrom, sliceFrom + pageSize).map(toDto);

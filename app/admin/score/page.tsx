@@ -38,10 +38,25 @@ import {
 } from "@/lib/manualProjectData";
 import { countPositionenMatchesInDisplayNodes } from "@/lib/positionenSearch";
 import type { GaebPreviewDisplayNode } from "@/lib/gaebPreviewModel";
-import { collectPruefHinweiseFromFinding, MAX_PRUEF_HINWEISE_STANDARD } from "@/lib/userHintsForFinding";
+import { riskTabFindingPresentation } from "@/lib/userHintsForFinding";
+import {
+  compactOfferClarificationBody,
+  compactOfferScopeNote,
+  compactQuestionForDisplay,
+  compactWhy,
+  normalizeClarifyPoints,
+  shortenClarificationTitle,
+} from "@/lib/commercialQuestionsDisplay";
 
 /** Einheitliches Design für alle Tabs (Rückfragen, Risiken, Angebotsklarstellungen, Admin). */
 const D = PAGE_DESIGN;
+
+/** Rotierende Zusatzzeilen im letzten Fortschrittsschritt (nur UI; Länge muss zum Interval-Modulo passen). */
+const ANALYSIS_LOADING_LAST_SUBS = [
+  "Rückfragen werden formuliert",
+  "Angebotsklarstellungen werden erstellt",
+  "Ergebnisansicht wird vorbereitet",
+] as const;
 
 /** Kundenroute (/app/analyse): Dark-Oberflächen wie Header und gespeicherte Berichte (appTheme). */
 const CX = {
@@ -193,6 +208,97 @@ type Finding = {
   user_hint?: string | null;
   user_hints?: string[] | null;
 };
+
+/** Risiko-Tab / KPI: Finding-Titel + user_hint (originalnah) + Relevanz – ohne Rückfragen-/Angebots-Headlines. */
+function RiskFindingTabLayout(props: {
+  f: Finding;
+  customerRoute: boolean;
+  titleFontSize?: number;
+  expertFootnote?: boolean;
+  children?: React.ReactNode;
+}) {
+  const { f, customerRoute, children } = props;
+  const p = riskTabFindingPresentation(f);
+  const titleSize = props.titleFontSize ?? 13;
+  const showRegel =
+    p.triggerLabel.trim().length > 0 && p.kurztitel.trim() !== p.triggerLabel.trim();
+  const hasNarrative = p.pruefhinweise.length > 0 || !!p.mehrwert;
+
+  return (
+    <>
+      <div
+        style={{
+          fontSize: titleSize,
+          color: customerRoute ? CX.text : D.textPrimary,
+          fontWeight: 600,
+          lineHeight: 1.35,
+        }}
+      >
+        {sanitizeForDisplay(p.kurztitel || p.triggerLabel)}
+      </div>
+      {showRegel ? (
+        <div
+          style={{
+            fontSize: 11,
+            color: customerRoute ? CX.muted : D.textSecondary,
+            marginTop: 4,
+            fontWeight: 500,
+            lineHeight: 1.35,
+          }}
+        >
+          Regelbezeichnung: {sanitizeForDisplay(p.triggerLabel)}
+        </div>
+      ) : null}
+      {children}
+      {hasNarrative ? (
+        <div
+          style={{
+            marginTop: 8,
+            padding: "8px 10px",
+            borderRadius: 8,
+            background: customerRoute ? CX.intro : "#f0f9ff",
+            border: customerRoute ? `1px solid ${CX.border}` : "1px solid #bae6fd",
+            fontSize: 12,
+            lineHeight: 1.45,
+            color: customerRoute ? CX.text : "#0c4a6e",
+          }}
+        >
+          {p.pruefhinweise.length > 0 ? (
+            <>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Prüfhinweis</div>
+              <ul style={{ margin: 0, paddingLeft: 18, marginBottom: p.mehrwert ? 8 : 0 }}>
+                {p.pruefhinweise.map((line, i) => (
+                  <li key={i} style={{ marginBottom: 6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                    {sanitizeForDisplay(line)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {p.mehrwert ? (
+            <div style={{ fontSize: 12, color: customerRoute ? CX.muted : "#334155" }}>
+              <span style={{ fontWeight: 700 }}>Relevanz: </span>
+              {sanitizeForDisplay(p.mehrwert)}
+            </div>
+          ) : null}
+          {props.expertFootnote ? (
+            <div
+              style={{
+                fontSize: 10,
+                color: customerRoute ? CX.faint : D.textMuted,
+                marginTop: 8,
+                lineHeight: 1.35,
+              }}
+            >
+              Prüfhinweise: leicht bereinigt (führende Aufzählzeichen / typische LV-Floskeln am Anfang); bei sehr langen Texten
+              Darstellungskürzung. Volltext in Rohdaten/Export.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
 
 type DebugBlock = {
   detectedDisciplines?: string[];
@@ -609,8 +715,14 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
       id: string;
       category: string;
       severity: string;
+      title?: string;
       question: string;
+      why?: string;
       reason: string;
+      clarifyPoints?: string[];
+      sourceLabel?: string;
+      sourceType?: string;
+      expert?: { findingId?: string; snippet?: string; keyword?: string; context?: string };
       sourceFindingId?: string;
       sourceTextSnippet?: string;
     }>;
@@ -632,8 +744,15 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
       id: string;
       category: string;
       severity: string;
+      title?: string;
+      clarification?: string;
+      scopeNote?: string;
       assumption: string;
+      why?: string;
       reason: string;
+      sourceLabel?: string;
+      sourceType?: string;
+      expert?: { findingId?: string; snippet?: string; keyword?: string; context?: string };
       sourceFindingId?: string;
       sourceQuestionId?: string;
     }>;
@@ -1171,7 +1290,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
       return;
     }
     const subInterval = setInterval(() => {
-      setLastStepSubIndex((i) => (i + 1) % 4);
+      setLastStepSubIndex((i) => (i + 1) % ANALYSIS_LOADING_LAST_SUBS.length);
     }, 3000);
     return () => clearInterval(subInterval);
   }, [isLastStep]);
@@ -1732,22 +1851,15 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [resultTab, positionenCurrentHitIndex, positionenMatchCount, isGaebXml, gaebPreview?.normalized?.displayNodes?.length]);
 
-  const analysisStatus = loading ? "Analysiere…" : result ? "Abgeschlossen" : "Bereit";
+  const analysisStatus = loading ? "Analyse wird ausgeführt …" : result ? "Abgeschlossen" : "Bereit";
 
   const analysisSteps = [
     "Leistungsverzeichnis wird verarbeitet",
     "Vorbemerkungen werden analysiert",
     "Risiken werden erkannt",
-    "Score wird berechnet",
+    "Bewertung wird berechnet",
     "Nachtragspotenziale werden ermittelt",
-    "KI erstellt Zusammenfassung",
-  ];
-
-  const lastStepSubStatuses = [
-    "Rückfragen werden formuliert …",
-    "Angebotsklarstellungen werden erstellt …",
-    "Zusammenfassung wird aufbereitet …",
-    "Ergebnisansicht wird vorbereitet …",
+    "Zusammenfassung wird erstellt",
   ];
 
   const hasResult = Boolean(result && !loading);
@@ -1822,12 +1934,12 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             }}
           >
             <div style={{ fontSize: 18, fontWeight: 800, color: customerRoute ? T.text : "#111", marginBottom: 20 }}>
-              {loadingPhase === "file" ? "Datei wird vorbereitet" : "Analyse läuft"}
+              {loadingPhase === "file" ? "Datei wird vorbereitet" : "Analyse wird ausgeführt"}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {analysisSteps.map((label, i) => {
                 const effectiveStep = loadingPhase === "file" ? 0 : analysisStep;
-                const stepLabel = loadingPhase === "file" && i === 0 ? "Datei wird geladen und vorbereitet" : label;
+                const stepLabel = loadingPhase === "file" && i === 0 ? "Datei wird eingelesen und vorbereitet" : label;
                 return (
                 <div
                   key={i}
@@ -1849,7 +1961,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               ); })}
               {loadingPhase === "analyze" && analysisStep === 5 && (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${customerRoute ? T.border : "#e2e8f0"}`, fontSize: 13, color: customerRoute ? T.muted : "#64748b", fontWeight: 500 }}>
-                  {lastStepSubStatuses[lastStepSubIndex]}
+                  {ANALYSIS_LOADING_LAST_SUBS[lastStepSubIndex]}
                 </div>
               )}
             </div>
@@ -1882,9 +1994,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             }}
           >
             <div style={{ fontSize: 18, fontWeight: 800, color: customerRoute ? T.text : "#111", marginBottom: 12 }}>
-              {changeOrderLoading && "Nachtragspotenziale werden ermittelt…"}
-              {!changeOrderLoading && clarificationQuestionsLoading && "Rückfragen werden generiert…"}
-              {!changeOrderLoading && !clarificationQuestionsLoading && offerAssumptionsLoading && "Annahmen werden generiert…"}
+              {changeOrderLoading && "Nachtragspotenziale werden ermittelt"}
+              {!changeOrderLoading && clarificationQuestionsLoading && "Rückfragen werden formuliert"}
+              {!changeOrderLoading && !clarificationQuestionsLoading && offerAssumptionsLoading && "Annahmen werden erstellt"}
             </div>
             <div style={{ color: customerRoute ? T.muted : "#666", fontSize: 14 }}>
               Bitte einen Moment warten.
@@ -1979,7 +2091,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                 border: customerRoute ? `1px solid ${loading ? T.warning : result ? T.accent : "rgba(255,255,255,0.1)"}` : "none",
               }}
             >
-              {loading ? "Analyse läuft…" : result ? "Abgeschlossen" : "Bereit"}
+              {analysisStatus}
             </span>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -2759,42 +2871,16 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                       <div key={f.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderBottom: customerRoute ? `1px solid ${CX.rowHairline}` : "1px solid #f3f4f6" }}>
                         <span style={{ flexShrink: 0 }}>{severityDot(f.severity)}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, color: customerRoute ? CX.text : "#111", fontWeight: 600, lineHeight: 1.35 }}>{sanitizeForDisplay(f.title ?? "")}</div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginTop: 6 }}>
-                            <StatusBadge variant="info" small>
-                              {catLabel(f.category)}
-                            </StatusBadge>
-                            <StatusBadge variant={f.severity === "high" ? "danger" : f.severity === "medium" ? "warning" : "info"} small>
-                              {severityLabel(f.severity)}
-                            </StatusBadge>
-                          </div>
-                          {(() => {
-                            const ph = collectPruefHinweiseFromFinding(f, 2);
-                            if (ph.length === 0) return null;
-                            return (
-                              <div
-                                style={{
-                                  marginTop: 8,
-                                  padding: "8px 10px",
-                                  borderRadius: 8,
-                                  background: customerRoute ? CX.intro : "#f0f9ff",
-                                  border: customerRoute ? `1px solid ${CX.border}` : "1px solid #bae6fd",
-                                  fontSize: 12,
-                                  lineHeight: 1.45,
-                                  color: customerRoute ? CX.text : "#0c4a6e",
-                                }}
-                              >
-                                <div style={{ fontWeight: 700, marginBottom: 4 }}>Prüfhinweise</div>
-                                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                  {ph.map((line, i) => (
-                                    <li key={i} style={{ marginBottom: 4 }}>
-                                      {sanitizeForDisplay(line)}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            );
-                          })()}
+                          <RiskFindingTabLayout f={f} customerRoute={customerRoute} titleFontSize={13}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginTop: 6 }}>
+                              <StatusBadge variant="info" small>
+                                {catLabel(f.category)}
+                              </StatusBadge>
+                              <StatusBadge variant={f.severity === "high" ? "danger" : f.severity === "medium" ? "warning" : "info"} small>
+                                {severityLabel(f.severity)}
+                              </StatusBadge>
+                            </div>
+                          </RiskFindingTabLayout>
                         </div>
                       </div>
                     ))
@@ -2834,42 +2920,16 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                     <div key={f.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderBottom: customerRoute ? `1px solid ${CX.rowHairline}` : "1px solid #f3f4f6" }}>
                       <span style={{ flexShrink: 0 }}>{severityDot(f.severity)}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, color: customerRoute ? CX.text : "#111", fontWeight: 600, lineHeight: 1.35 }}>{sanitizeForDisplay(f.title ?? "")}</div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginTop: 6 }}>
-                          <StatusBadge variant="info" small>
-                            {catLabel(f.category)}
-                          </StatusBadge>
-                          <StatusBadge variant={f.severity === "high" ? "danger" : f.severity === "medium" ? "warning" : "info"} small>
-                            {severityLabel(f.severity)}
-                          </StatusBadge>
-                        </div>
-                        {(() => {
-                          const ph = collectPruefHinweiseFromFinding(f, MAX_PRUEF_HINWEISE_STANDARD);
-                          if (ph.length === 0) return null;
-                          return (
-                            <div
-                              style={{
-                                marginTop: 8,
-                                padding: "8px 10px",
-                                borderRadius: 8,
-                                background: customerRoute ? CX.intro : "#f0f9ff",
-                                border: customerRoute ? `1px solid ${CX.border}` : "1px solid #bae6fd",
-                                fontSize: 12,
-                                lineHeight: 1.45,
-                                color: customerRoute ? CX.text : "#0c4a6e",
-                              }}
-                            >
-                              <div style={{ fontWeight: 700, marginBottom: 4 }}>Prüfhinweise</div>
-                              <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                {ph.map((line, i) => (
-                                  <li key={i} style={{ marginBottom: 4 }}>
-                                    {sanitizeForDisplay(line)}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          );
-                        })()}
+                        <RiskFindingTabLayout f={f} customerRoute={customerRoute} titleFontSize={13}>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginTop: 6 }}>
+                            <StatusBadge variant="info" small>
+                              {catLabel(f.category)}
+                            </StatusBadge>
+                            <StatusBadge variant={f.severity === "high" ? "danger" : f.severity === "medium" ? "warning" : "info"} small>
+                              {severityLabel(f.severity)}
+                            </StatusBadge>
+                          </div>
+                        </RiskFindingTabLayout>
                       </div>
                     </div>
                   ))
@@ -3823,42 +3883,16 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               ) : (
                 filteredFindings.map((f) => (
                   <div key={f.id} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
-                    <div style={{ fontWeight: D.fontWeightCardTitle, color: customerRoute ? CX.text : D.textPrimary, marginBottom: 6, fontSize: D.fontSizeBody }}>{sanitizeForDisplay(f.title ?? "")}</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                      <StatusBadge variant="info" small>
-                        {catLabel(f.category)}
-                      </StatusBadge>
-                      <StatusBadge variant={f.severity === "high" ? "danger" : f.severity === "medium" ? "warning" : "info"} small>
-                        {severityLabel(f.severity)}
-                      </StatusBadge>
-                    </div>
-                    {(() => {
-                      const ph = collectPruefHinweiseFromFinding(f, MAX_PRUEF_HINWEISE_STANDARD);
-                      if (ph.length === 0) return null;
-                      return (
-                        <div
-                          style={{
-                            marginBottom: 8,
-                            padding: "10px 12px",
-                            borderRadius: 8,
-                            background: customerRoute ? CX.intro : "#f0f9ff",
-                            border: customerRoute ? `1px solid ${CX.border}` : "1px solid #bae6fd",
-                            fontSize: 13,
-                            lineHeight: 1.45,
-                            color: customerRoute ? CX.text : "#0c4a6e",
-                          }}
-                        >
-                          <div style={{ fontWeight: 700, marginBottom: 6 }}>Prüfhinweise</div>
-                          <ul style={{ margin: 0, paddingLeft: 18 }}>
-                            {ph.map((line, i) => (
-                              <li key={i} style={{ marginBottom: 4 }}>
-                                {sanitizeForDisplay(line)}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      );
-                    })()}
+                    <RiskFindingTabLayout f={f} customerRoute={customerRoute} titleFontSize={D.fontSizeBody}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8, marginTop: 2 }}>
+                        <StatusBadge variant="info" small>
+                          {catLabel(f.category)}
+                        </StatusBadge>
+                        <StatusBadge variant={f.severity === "high" ? "danger" : f.severity === "medium" ? "warning" : "info"} small>
+                          {severityLabel(f.severity)}
+                        </StatusBadge>
+                      </div>
+                    </RiskFindingTabLayout>
                   </div>
                 ))
               )}
@@ -3890,38 +3924,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         {(f as any).claimLevel != null && (f as any).claimLevel !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Claim-Level:</span> {(f as any).claimLevel}</div>}
                         {(f as any).regex != null && (f as any).regex !== "" && <div style={{ fontFamily: "ui-monospace, monospace", fontSize: D.fontSizeCaption }}><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Regex:</span> {(f as any).regex}</div>}
                         {(f as any).keywords != null && (f as any).keywords !== "" && <div><span style={{ color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 600 }}>Keywords:</span> {(f as any).keywords}</div>}
-                        <div style={{ marginTop: 4, fontWeight: D.fontWeightCardTitle, color: customerRoute ? CX.text : D.textPrimary }}>{sanitizeForDisplay(f.title ?? "")}</div>
-                        {(() => {
-                          const ph = collectPruefHinweiseFromFinding(f, MAX_PRUEF_HINWEISE_STANDARD);
-                          if (ph.length === 0) return null;
-                          return (
-                            <div
-                              style={{
-                                marginTop: 8,
-                                padding: "8px 10px",
-                                borderRadius: 8,
-                                background: customerRoute ? "rgba(224, 124, 94, 0.08)" : "#f0f9ff",
-                                border: `1px solid ${customerRoute ? CX.border : "#bae6fd"}`,
-                                fontSize: 13,
-                                lineHeight: 1.45,
-                                color: customerRoute ? CX.text : "#0c4a6e",
-                              }}
-                            >
-                              <div style={{ fontWeight: 700, marginBottom: 4 }}>Prüfhinweise (nutzertauglich)</div>
-                              <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                {ph.map((line, i) => (
-                                  <li key={i} style={{ marginBottom: 4 }}>
-                                    {sanitizeForDisplay(line)}
-                                  </li>
-                                ))}
-                              </ul>
-                              <div style={{ fontSize: 11, color: customerRoute ? CX.faint : D.textMuted, marginTop: 6 }}>
-                                Aus <code>triggers.user_hint</code> (Anzeige im Ergebnis ggf. mehrzeilig nach Zusammenführung). Kein Ersatz für die
-                                technische Regelbewertung.
-                              </div>
-                            </div>
-                          );
-                        })()}
+                        <div style={{ marginTop: 8 }}>
+                          <RiskFindingTabLayout f={f} customerRoute={customerRoute} titleFontSize={D.fontSizeBody} expertFootnote />
+                        </div>
                         {f.detail && (
                           <div style={{ marginTop: 8 }}>
                             <div style={{ fontSize: 11, fontWeight: 700, color: customerRoute ? CX.faint : D.textMuted, marginBottom: 4 }}>
@@ -4058,26 +4063,143 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         <div style={{ fontSize: 12, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 700, marginBottom: 10 }}>
                           {labels[group]} ({items.length})
                         </div>
-                        <div style={{ display: "grid", gap: 10 }}>
-                          {items.map((q: any) => (
-                            <div key={q.id} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: 10, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                <StatusBadge variant={q.severity === "high" ? "danger" : q.severity === "medium" ? "warning" : "info"} small>
-                                  {q.severity ?? "—"}
-                                </StatusBadge>
-                                {q.sourceFindingId && (
-                                  <span style={{ fontSize: 11, color: customerRoute ? CX.faint : D.textMuted }}>← {q.sourceFindingId}</span>
-                                )}
-                              </div>
-                              <div style={{ marginTop: 8, fontWeight: 600, color: customerRoute ? CX.text : D.textPrimary, fontSize: 13, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(q.question ?? "")}</div>
-                              <div style={{ marginTop: 6, fontSize: 12, color: customerRoute ? CX.muted : D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(q.reason ?? "")}</div>
-                              {q.sourceTextSnippet && (
-                                <div style={{ marginTop: 6, fontSize: 11, color: customerRoute ? CX.faint : D.textMuted, fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap" }}>
-                                  &quot;{sanitizeForDisplay(q.sourceTextSnippet)}&quot;
+                        <div style={{ display: "grid", gap: 8 }}>
+                          {items.map((q: any) => {
+                            const qStr = String(q.question ?? "");
+                            const titleBase =
+                              (typeof q.title === "string" && q.title.trim()) ||
+                              qStr.split(/(?<=[.!?])\s+/)[0]?.trim() ||
+                              "";
+                                                       let displayTitle = shortenClarificationTitle(titleBase);
+                            const displayQuestion = compactQuestionForDisplay(qStr, displayTitle, 2, 260);
+                            if (!displayTitle && displayQuestion) {
+                              const fromQ = displayQuestion.split(/[.!?]/)[0]?.trim() || displayQuestion;
+                              displayTitle = shortenClarificationTitle(fromQ);
+                            }
+                            const displayWhy = compactWhy(String(q.why ?? q.reason ?? ""));
+                            const displayPoints = normalizeClarifyPoints(
+                              Array.isArray(q.clarifyPoints) ? q.clarifyPoints : [],
+                              displayTitle,
+                              displayQuestion,
+                              { maxPoints: 4, maxLen: 82 }
+                            );
+                            const showExpert =
+                              isExpertMode &&
+                              (q.sourceLabel ||
+                                q.sourceFindingId ||
+                                (q.expert &&
+                                  (q.expert.snippet || q.expert.keyword || q.expert.context || q.expert.findingId)));
+                            return (
+                              <div
+                                key={q.id}
+                                style={{
+                                  border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`,
+                                  borderRadius: 8,
+                                  padding: "8px 10px",
+                                  background: customerRoute ? CX.card : D.cardBg,
+                                }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <StatusBadge variant={q.severity === "high" ? "danger" : q.severity === "medium" ? "warning" : "info"} small>
+                                    {q.severity ?? "—"}
+                                  </StatusBadge>
                                 </div>
-                              )}
-                            </div>
-                          ))}
+                                {displayTitle ? (
+                                  <div
+                                    style={{
+                                      marginTop: 6,
+                                      fontWeight: 700,
+                                      color: customerRoute ? CX.text : D.textPrimary,
+                                      fontSize: 15,
+                                      lineHeight: 1.25,
+                                      display: "-webkit-box",
+                                      WebkitBoxOrient: "vertical" as const,
+                                  WebkitLineClamp: 3,
+                                  overflow: "hidden",
+                                    }}
+                                  >
+                                    {sanitizeForDisplay(displayTitle)}
+                                  </div>
+                                ) : null}
+                                {displayQuestion ? (
+                                  <div
+                                    style={{
+                                      marginTop: 6,
+                                      fontWeight: 600,
+                                      color: customerRoute ? CX.text : D.textPrimary,
+                                      fontSize: 13,
+                                      lineHeight: 1.4,
+                                    }}
+                                  >
+                                    {sanitizeForDisplay(displayQuestion)}
+                                  </div>
+                                ) : null}
+                                {displayWhy ? (
+                                  <div
+                                    style={{
+                                      marginTop: 5,
+                                      fontSize: 11,
+                                      color: customerRoute ? CX.muted : D.textSecondary,
+                                      lineHeight: 1.35,
+                                      wordBreak: "break-word",
+                                      whiteSpace: "normal",
+                                    }}
+                                  >
+                                    <span style={{ fontWeight: 600 }}>Relevanz: </span>
+                                    {sanitizeForDisplay(displayWhy)}
+                                  </div>
+                                ) : null}
+                                {displayPoints.length > 0 ? (
+                                  <ul
+                                    style={{
+                                      margin: "6px 0 0",
+                                      paddingLeft: 16,
+                                      fontSize: 11,
+                                      color: customerRoute ? CX.text : D.textPrimary,
+                                      lineHeight: 1.32,
+                                    }}
+                                  >
+                                    {displayPoints.map((pt: string, i: number) => (
+                                      <li key={i} style={{ marginBottom: 2 }}>
+                                        {sanitizeForDisplay(pt)}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                                {showExpert ? (
+                                  <div
+                                    style={{
+                                      marginTop: 8,
+                                      padding: "6px 8px",
+                                      borderRadius: 6,
+                                      background: customerRoute ? "rgba(0,0,0,0.22)" : "#f1f5f9",
+                                      fontSize: 10,
+                                      color: customerRoute ? CX.muted : "#475569",
+                                      lineHeight: 1.35,
+                                    }}
+                                  >
+                                    <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 10 }}>Experte / Rohdaten</div>
+                                    {q.sourceLabel ? <div>Quelle: {sanitizeForDisplay(q.sourceLabel)}</div> : null}
+                                    {(q.expert?.findingId || q.sourceFindingId) && (
+                                      <div>Finding-ID: {sanitizeForDisplay(q.expert?.findingId ?? q.sourceFindingId)}</div>
+                                    )}
+                                    {q.expert?.keyword ? <div>Keyword: {sanitizeForDisplay(q.expert.keyword)}</div> : null}
+                                    {q.expert?.context ? <div>Kontext: {sanitizeForDisplay(q.expert.context)}</div> : null}
+                                    {q.expert?.snippet ? (
+                                      <div style={{ marginTop: 4, fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                        {sanitizeForDisplay(q.expert.snippet)}
+                                      </div>
+                                    ) : null}
+                                    {q.sourceTextSnippet && !q.expert?.snippet ? (
+                                      <div style={{ marginTop: 4, fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                        {sanitizeForDisplay(q.sourceTextSnippet)}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
@@ -4146,23 +4268,129 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         <div style={{ fontSize: 12, color: customerRoute ? CX.muted : D.textSecondary, fontWeight: 700, marginBottom: 10 }}>
                           {labels[group]} ({items.length})
                         </div>
-                        <div style={{ display: "grid", gap: 10 }}>
-                          {items.map((a: any) => (
-                            <div key={a.id} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: 10, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                <StatusBadge variant={a.severity === "high" ? "danger" : a.severity === "medium" ? "warning" : "info"} small>
-                                  {a.severity ?? "—"}
-                                </StatusBadge>
-                                <span style={{ fontSize: 11, color: customerRoute ? CX.faint : D.textMuted }}>
-                                  {a.sourceFindingId && <>Risiko: {a.sourceFindingId}</>}
-                                  {a.sourceFindingId && a.sourceQuestionId && " · "}
-                                  {a.sourceQuestionId && <>Frage: {a.sourceQuestionId}</>}
-                                </span>
+                        <div style={{ display: "grid", gap: 8 }}>
+                          {items.map((a: any) => {
+                            const bodyRaw = String(a.clarification ?? a.assumption ?? "");
+                            const titleBase =
+                              (typeof a.title === "string" && a.title.trim()) ||
+                              bodyRaw.split(/(?<=[.!?])\s+/)[0]?.trim() ||
+                              "";
+                            let displayTitle = shortenClarificationTitle(titleBase);
+                            const displayClar = compactOfferClarificationBody(bodyRaw, 2, 265);
+                            if (!displayTitle && displayClar) {
+                              displayTitle = shortenClarificationTitle(displayClar.split(/[.!?]/)[0]?.trim() || displayClar);
+                            }
+                            const displayScope = a.scopeNote ? compactOfferScopeNote(String(a.scopeNote)) : "";
+                            const displayWhy = compactWhy(String(a.why ?? a.reason ?? ""));
+                            const showExpert =
+                              isExpertMode &&
+                              (a.sourceLabel ||
+                                a.sourceFindingId ||
+                                a.sourceQuestionId ||
+                                (a.expert &&
+                                  (a.expert.snippet || a.expert.keyword || a.expert.context || a.expert.findingId)));
+                            return (
+                              <div
+                                key={a.id}
+                                style={{
+                                  border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`,
+                                  borderRadius: 8,
+                                  padding: "8px 10px",
+                                  background: customerRoute ? CX.card : D.cardBg,
+                                }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <StatusBadge variant={a.severity === "high" ? "danger" : a.severity === "medium" ? "warning" : "info"} small>
+                                    {a.severity ?? "—"}
+                                  </StatusBadge>
+                                </div>
+                                {displayTitle ? (
+                                  <div
+                                    style={{
+                                      marginTop: 6,
+                                      fontWeight: 700,
+                                      color: customerRoute ? CX.text : D.textPrimary,
+                                      fontSize: 15,
+                                      lineHeight: 1.25,
+                                      display: "-webkit-box",
+                                      WebkitBoxOrient: "vertical" as const,
+                                      WebkitLineClamp: 3,
+                                      overflow: "hidden",
+                                    }}
+                                  >
+                                    {sanitizeForDisplay(displayTitle)}
+                                  </div>
+                                ) : null}
+                                {displayClar ? (
+                                  <div
+                                    style={{
+                                      marginTop: 6,
+                                      fontWeight: 600,
+                                      color: customerRoute ? CX.text : D.textPrimary,
+                                      fontSize: 13,
+                                      lineHeight: 1.4,
+                                    }}
+                                  >
+                                    {sanitizeForDisplay(displayClar)}
+                                  </div>
+                                ) : null}
+                                {displayScope ? (
+                                  <div
+                                    style={{
+                                      marginTop: 5,
+                                      fontSize: 12,
+                                      color: customerRoute ? CX.muted : D.textSecondary,
+                                      lineHeight: 1.35,
+                                    }}
+                                  >
+                                    {sanitizeForDisplay(displayScope)}
+                                  </div>
+                                ) : null}
+                                {displayWhy ? (
+                                  <div
+                                    style={{
+                                      marginTop: 5,
+                                      fontSize: 11,
+                                      color: customerRoute ? CX.muted : D.textSecondary,
+                                      lineHeight: 1.35,
+                                      wordBreak: "break-word",
+                                      whiteSpace: "normal",
+                                    }}
+                                  >
+                                    <span style={{ fontWeight: 600 }}>Warum sinnvoll: </span>
+                                    {sanitizeForDisplay(displayWhy)}
+                                  </div>
+                                ) : null}
+                                {showExpert ? (
+                                  <div
+                                    style={{
+                                      marginTop: 8,
+                                      padding: "6px 8px",
+                                      borderRadius: 6,
+                                      background: customerRoute ? "rgba(0,0,0,0.22)" : "#f1f5f9",
+                                      fontSize: 10,
+                                      color: customerRoute ? CX.muted : "#475569",
+                                      lineHeight: 1.35,
+                                    }}
+                                  >
+                                    <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 10 }}>Experte / Rohdaten</div>
+                                    {a.sourceLabel ? <div>Quelle: {sanitizeForDisplay(a.sourceLabel)}</div> : null}
+                                    {(a.expert?.findingId || a.sourceFindingId) && (
+                                      <div>Finding-ID: {sanitizeForDisplay(a.expert?.findingId ?? a.sourceFindingId)}</div>
+                                    )}
+                                    {a.sourceQuestionId ? <div>Rückfrage-ID: {sanitizeForDisplay(a.sourceQuestionId)}</div> : null}
+                                    {a.expert?.keyword ? <div>Keyword: {sanitizeForDisplay(a.expert.keyword)}</div> : null}
+                                    {a.expert?.context ? <div>Kontext: {sanitizeForDisplay(a.expert.context)}</div> : null}
+                                    {a.expert?.snippet ? (
+                                      <div style={{ marginTop: 4, fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                        {sanitizeForDisplay(a.expert.snippet)}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                               </div>
-                              <div style={{ marginTop: 8, fontWeight: 600, color: customerRoute ? CX.text : D.textPrimary, fontSize: 13, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(a.assumption ?? "")}</div>
-                              <div style={{ marginTop: 6, fontSize: 12, color: customerRoute ? CX.muted : D.textSecondary, whiteSpace: "pre-wrap" }}>{sanitizeForDisplay(a.reason ?? "")}</div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     );

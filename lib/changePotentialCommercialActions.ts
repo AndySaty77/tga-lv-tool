@@ -224,32 +224,38 @@ export function deriveCommercialActionsFromChangePotential(
 }
 
 /**
- * Prüft, ob eine Trigger-basierte Frage mit einer CP-Frage inhaltlich stark überlappt.
- * Wenn ja, soll die CP-Variante bevorzugt werden (präziser / besser begründet).
+ * Prüft, ob eine Trigger-basierte Frage mit einer CP-Frage inhaltlich nahezu identisch ist.
+ * Nur echte Dubletten (hohe Überschneidung): mittelschwere inhaltliche Nähe reicht nicht,
+ * damit starke Einzelthemen (z. B. Hebeanlage) nicht mit einer generischen CP-Rückfrage verdrängt werden.
  */
 export function isSimilarToExistingQuestion(
-  cpQuestionText: string,
+  newQuestionText: string,
   existingQuestions: Array<{ question: string }>,
-  threshold = 0.65
+  threshold = 0.9
 ): boolean {
-  const norm = normalizeForCompare(cpQuestionText);
+  const norm = normalizeForCompare(newQuestionText);
+  if (norm.length < 24) return false;
   for (const eq of existingQuestions) {
+    const o = normalizeForCompare(eq.question);
+    if (o.length < 24) continue;
     if (textSimilarity(eq.question, norm) >= threshold) return true;
   }
   return false;
 }
 
 /**
- * Prüft, ob eine Trigger-basierte Klarstellung mit einer CP-Klarstellung stark überlappt.
+ * Prüft, ob eine Trigger-Klarstellung mit einer CP-Klarstellung nahezu identisch ist.
  */
 export function isSimilarToExistingClarification(
-  cpClarificationText: string,
+  newClarificationText: string,
   existingClarifications: Array<{ clarification?: string; assumption?: string }>,
-  threshold = 0.65
+  threshold = 0.9
 ): boolean {
-  const norm = normalizeForCompare(cpClarificationText);
+  const norm = normalizeForCompare(newClarificationText);
+  if (norm.length < 28) return false;
   for (const ec of existingClarifications) {
     const text = (ec.clarification ?? ec.assumption ?? "").trim();
+    if (text.length < 28) continue;
     if (text && textSimilarity(text, norm) >= threshold) return true;
   }
   return false;

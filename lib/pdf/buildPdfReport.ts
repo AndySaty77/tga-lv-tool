@@ -437,19 +437,29 @@ function buildQuestions(rj: Record<string, unknown>): PdfQuestion[] {
     if (item == null) return null;
     const obj = item as {
       question?: string;
+      why?: string;
       reason?: string;
+      clarifyPoints?: string[];
       text?: string;
       title?: string;
       priority?: string | number;
       severity?: string;
       category?: string;
     };
+    const bullets =
+      Array.isArray(obj.clarifyPoints) && obj.clarifyPoints.length > 0
+        ? obj.clarifyPoints.map((p) => String(p).trim()).filter(Boolean)
+        : [];
+    const mainQ = safeString(obj.question);
     const text =
-      safeString(obj.question) ||
-      safeString(obj.reason) ||
-      safeString(obj.text) ||
-      safeString(obj.title) ||
-      String(item).trim();
+      mainQ && bullets.length
+        ? `${mainQ}\n• ${bullets.slice(0, 4).join("\n• ")}`
+        : mainQ ||
+          safeString(obj.text) ||
+          safeString(obj.why) ||
+          safeString(obj.reason) ||
+          safeString(obj.title) ||
+          String(item).trim();
     if (!text) return null;
     const catKey = obj.category ? String(obj.category).trim() : "";
     const categoryLabel = catKey ? CATEGORY_LABELS[catKey] ?? catKey.replace(/_/g, " ") : undefined;
@@ -466,13 +476,26 @@ function buildQuestions(rj: Record<string, unknown>): PdfQuestion[] {
 
 function clarificationFromOfferAssumptionItem(item: unknown): PdfClarification | null {
   if (item == null) return null;
-  const obj = item as { assumption?: string; text?: string; title?: string; reason?: string; category?: string };
-  const text =
+   const obj = item as {
+    clarification?: string;
+    scopeNote?: string;
+    assumption?: string;
+    text?: string;
+    title?: string;
+    reason?: string;
+    why?: string;
+    category?: string;
+  };
+  const core =
+    safeString(obj.clarification) ||
     safeString(obj.assumption) ||
     safeString(obj.text) ||
+    safeString(obj.why) ||
     safeString(obj.reason) ||
     safeString(obj.title) ||
     (typeof item === "string" ? item.trim() : "");
+  const scope = safeString(obj.scopeNote);
+  const text = scope && core ? `${core} ${scope}` : core;
   if (!text) return null;
   const catKey = typeof obj.category === "string" && obj.category.trim() ? obj.category.trim() : "";
   const categoryLabel = catKey ? CATEGORY_LABELS[catKey] ?? catKey.replace(/_/g, " ") : "";

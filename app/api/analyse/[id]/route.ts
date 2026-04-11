@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getUser } from "@/lib/auth/get-user";
 import { normalizeEditableTitleInput } from "@/lib/analysisDisplayTitle";
 import { mergeManualProjectDataPatch } from "@/lib/manualProjectData";
+import { normalizeLvStatus } from "@/lib/analyseRunLvStatus";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -31,7 +32,9 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
 
   const { data, error } = await supabase
     .from("analyse_runs")
-    .select("id, created_at, project_name, file_name, score, status, management_summary, result_json, user_id, is_favorite")
+    .select(
+      "id, created_at, project_name, file_name, score, status, management_summary, result_json, user_id, is_favorite, lv_status, bid_amount_net"
+    )
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -70,12 +73,20 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     return NextResponse.json({ error: "id erforderlich" }, { status: 400 });
   }
 
-  let body: { resultJsonMerge?: Record<string, unknown>; projectName?: string | null; isFavorite?: boolean };
+  let body: {
+    resultJsonMerge?: Record<string, unknown>;
+    projectName?: string | null;
+    isFavorite?: boolean;
+    lvStatus?: string | null;
+    bidAmountNet?: number | null;
+  };
   try {
     body = (await req.json()) as {
       resultJsonMerge?: Record<string, unknown>;
       projectName?: string | null;
       isFavorite?: boolean;
+      lvStatus?: string | null;
+      bidAmountNet?: number | null;
     };
   } catch {
     return NextResponse.json({ error: "Ungültiges JSON" }, { status: 400 });
@@ -85,9 +96,14 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     body.resultJsonMerge != null && typeof body.resultJsonMerge === "object" && !Array.isArray(body.resultJsonMerge);
   const hasTitle = body.projectName !== undefined;
   const hasFavorite = typeof body.isFavorite === "boolean";
+  const hasLvStatus = body.lvStatus !== undefined;
+  const hasBidAmount = body.bidAmountNet !== undefined;
 
-  if (!hasMerge && !hasTitle && !hasFavorite) {
-    return NextResponse.json({ error: "resultJsonMerge, projectName und/oder isFavorite erforderlich" }, { status: 400 });
+  if (!hasMerge && !hasTitle && !hasFavorite && !hasLvStatus && !hasBidAmount) {
+    return NextResponse.json(
+      { error: "resultJsonMerge, projectName, isFavorite, lvStatus und/oder bidAmountNet erforderlich" },
+      { status: 400 }
+    );
   }
 
   const { data: existing, error: fetchErr } = await supabase
@@ -133,12 +149,28 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     updates.is_favorite = body.isFavorite;
   }
 
+  if (hasLvStatus) {
+    updates.lv_status = normalizeLvStatus(body.lvStatus ?? undefined);
+  }
+
+  if (hasBidAmount) {
+    if (body.bidAmountNet === null) {
+      updates.bid_amount_net = null;
+    } else if (typeof body.bidAmountNet === "number" && Number.isFinite(body.bidAmountNet)) {
+      updates.bid_amount_net = Math.round(body.bidAmountNet * 100) / 100;
+    } else {
+      return NextResponse.json({ error: "bidAmountNet muss eine Zahl oder null sein" }, { status: 400 });
+    }
+  }
+
   const { data: updated, error: updateErr } = await supabase
     .from("analyse_runs")
     .update(updates)
     .eq("id", id)
     .eq("user_id", user.id)
-    .select("id, created_at, project_name, file_name, score, status, management_summary, result_json, is_favorite")
+    .select(
+      "id, created_at, project_name, file_name, score, status, management_summary, result_json, is_favorite, lv_status, bid_amount_net"
+    )
     .maybeSingle();
 
   if (updateErr) {

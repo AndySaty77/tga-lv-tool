@@ -4,6 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { appTheme as T } from "@/components/app/appTheme";
 import { StatusBadge } from "@/components/shared/statusBadge";
+import { LV_STATUS_KEYS, LV_STATUS_LABEL_DE, lvStatusBadgeStyle, type LvStatusKey } from "@/lib/analyseRunLvStatus";
 import { Star } from "lucide-react";
 
 const PAGE_SIZE = 10;
@@ -21,6 +22,9 @@ type AnalyseRun = {
   metaSegments: string[];
   deadlineWarnBadge: DeadlineWarnBadge | null;
   isFavorite: boolean;
+  lvStatus: LvStatusKey;
+  bidAmountNet: number | null;
+  bidAmountNetLabel: string;
 };
 
 const DEADLINE_WARN_LABEL: Record<DeadlineWarnBadge, string> = {
@@ -29,6 +33,28 @@ const DEADLINE_WARN_LABEL: Record<DeadlineWarnBadge, string> = {
   d1to3: "1–3 Tage",
   d4to7: "4–7 Tage",
 };
+
+function LvStatusBadge({ k }: { k: LvStatusKey }) {
+  const st = lvStatusBadgeStyle(k);
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: "0.02em",
+        padding: "2px 7px",
+        borderRadius: 4,
+        border: `1px solid ${st.border}`,
+        background: st.background,
+        color: st.color,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {LV_STATUS_LABEL_DE[k]}
+    </span>
+  );
+}
 
 function deadlineWarnChipStyle(level: DeadlineWarnBadge): React.CSSProperties {
   const base: React.CSSProperties = {
@@ -108,6 +134,8 @@ export default function AppAnalysenPage() {
     "" | "present" | "none" | "overdue" | "today" | "d1to3" | "d4to7" | "within7"
   >("");
   const [filterFavorite, setFilterFavorite] = React.useState<"" | "only">("");
+  const [filterLvStatus, setFilterLvStatus] = React.useState<"" | LvStatusKey>("");
+  const [filterBid, setFilterBid] = React.useState<"" | "with" | "without">("");
   const [sortOrder, setSortOrder] = React.useState<"newest" | "oldest" | "deadline" | "favorites_first">("newest");
   const [favoriteBusyId, setFavoriteBusyId] = React.useState<string | null>(null);
 
@@ -130,6 +158,8 @@ export default function AppAnalysenPage() {
           frist: filterFrist,
           sort: sortOrder,
           ...(filterFavorite === "only" ? { favorite: "only" } : {}),
+          ...(filterLvStatus ? { lvStatus: filterLvStatus } : {}),
+          ...(filterBid ? { bid: filterBid } : {}),
         });
         const res = await fetch(`/api/analyse/list?${params.toString()}`);
         const data = await res.json();
@@ -150,7 +180,7 @@ export default function AppAnalysenPage() {
         setLoading(false);
       }
     },
-    [searchQ, filterGewerk, filterProjektart, filterFrist, filterFavorite, sortOrder],
+    [searchQ, filterGewerk, filterProjektart, filterFrist, filterFavorite, filterLvStatus, filterBid, sortOrder],
   );
 
   const toggleFavorite = React.useCallback(async (id: string, currently: boolean) => {
@@ -175,7 +205,7 @@ export default function AppAnalysenPage() {
 
   React.useEffect(() => {
     setPage(1);
-  }, [searchQ, filterGewerk, filterProjektart, filterFrist, filterFavorite, sortOrder]);
+  }, [searchQ, filterGewerk, filterProjektart, filterFrist, filterFavorite, filterLvStatus, filterBid, sortOrder]);
 
   React.useEffect(() => {
     if (skipNextLoadRef.current) {
@@ -434,6 +464,55 @@ export default function AppAnalysenPage() {
               <option value="only">nur Favoriten</option>
             </select>
           </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200, flex: "1 1 200px" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Bearbeitungsstatus
+            </span>
+            <select
+              value={filterLvStatus}
+              onChange={(e) => setFilterLvStatus(e.target.value as typeof filterLvStatus)}
+              style={{
+                padding: "8px 10px",
+                fontSize: 13,
+                borderRadius: T.radiusSm,
+                border: `1px solid ${T.border}`,
+                background: T.card,
+                color: T.text,
+                width: "100%",
+                cursor: "pointer",
+              }}
+            >
+              <option value="">Alle</option>
+              {LV_STATUS_KEYS.map((k) => (
+                <option key={k} value={k}>
+                  {LV_STATUS_LABEL_DE[k]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200, flex: "0 1 200px" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Angebotsbetrag
+            </span>
+            <select
+              value={filterBid}
+              onChange={(e) => setFilterBid(e.target.value as typeof filterBid)}
+              style={{
+                padding: "8px 10px",
+                fontSize: 13,
+                borderRadius: T.radiusSm,
+                border: `1px solid ${T.border}`,
+                background: T.card,
+                color: T.text,
+                width: "100%",
+                cursor: "pointer",
+              }}
+            >
+              <option value="">alle</option>
+              <option value="with">nur mit Betrag</option>
+              <option value="without">nur ohne Betrag</option>
+            </select>
+          </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 180, flex: "0 1 180px" }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
               Sortierung
@@ -569,7 +648,7 @@ export default function AppAnalysenPage() {
         {hasItems && (
           <>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", minWidth: 640, borderCollapse: "collapse", fontSize: 13 }}>
+              <table style={{ width: "100%", minWidth: 920, borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${T.border}` }}>
                     <th style={{ width: 44, padding: T.space.md, verticalAlign: "middle" }}>
@@ -586,7 +665,9 @@ export default function AppAnalysenPage() {
                     <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", minWidth: 140 }}>Analyse</th>
                     <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Datum</th>
                     <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", width: 72 }}>Score</th>
-                    <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", width: 120 }}>Status</th>
+                    <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 11, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", maxWidth: 130 }}>Bearbeitung</th>
+                    <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 11, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Angebot netto</th>
+                    <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", width: 120 }}>Auswertung</th>
                     <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, width: 180 }}></th>
                   </tr>
                 </thead>
@@ -687,6 +768,12 @@ export default function AppAnalysenPage() {
                         <span style={{ color: T.accent, fontWeight: 700, fontSize: 14 }}>
                           {row.score != null ? row.score : "—"}
                         </span>
+                      </td>
+                      <td style={{ padding: T.space.md, verticalAlign: "middle" }}>
+                        <LvStatusBadge k={row.lvStatus} />
+                      </td>
+                      <td style={{ padding: T.space.md, textAlign: "right", whiteSpace: "nowrap", fontSize: 12, color: T.text, fontVariantNumeric: "tabular-nums" }}>
+                        {row.bidAmountNetLabel}
                       </td>
                       <td style={{ padding: T.space.md }}>
                         <StatusBadge status={row.status ?? "Abgeschlossen"} />

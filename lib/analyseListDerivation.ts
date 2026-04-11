@@ -13,6 +13,11 @@ import {
   resolveFinalKeyFactDisplay,
   type ManualProjectData,
 } from "@/lib/manualProjectData";
+import {
+  normalizeLvStatus,
+  parseBidAmountNetFromDb,
+  type LvStatusKey,
+} from "@/lib/analyseRunLvStatus";
 
 const READONLY_KF = new Set<string>(READONLY_PROJECT_KEYFACT_KEYS);
 
@@ -96,6 +101,9 @@ export type AnalyseListRowInput = {
   result_json: unknown;
   /** Spalte `analyse_runs.is_favorite`; fehlend/null = false. */
   is_favorite?: boolean | null;
+  /** Bearbeitungsstatus LV/Angebot (DB: lv_status). */
+  lv_status?: string | null;
+  bid_amount_net?: unknown;
 };
 
 export type AnalyseListDerived = {
@@ -120,6 +128,9 @@ export type AnalyseListDerived = {
   deadlineWarnBadge: AnalyseListDeadlineWarnBadge | null;
   /** Persönliche Favoriten-Markierung (DB), kein Status. */
   isFavorite: boolean;
+  /** Bearbeitungsstatus (normalisiert). */
+  lvStatus: LvStatusKey;
+  bidAmountNet: number | null;
   searchBlob: string;
 };
 
@@ -179,6 +190,9 @@ export function deriveAnalyseListRow(row: AnalyseListRowInput): AnalyseListDeriv
     metaSegments.push(bauherrNorm);
   }
 
+  const lvStatus = normalizeLvStatus(row.lv_status);
+  const bidAmountNet = parseBidAmountNetFromDb(row.bid_amount_net);
+
   const searchBlob = [
     listTitle,
     fileTrim,
@@ -209,6 +223,8 @@ export function deriveAnalyseListRow(row: AnalyseListRowInput): AnalyseListDeriv
     deadlineDayDelta,
     deadlineWarnBadge,
     isFavorite,
+    lvStatus,
+    bidAmountNet,
     searchBlob,
   };
 }
@@ -226,6 +242,11 @@ export type AnalyseListSort = "newest" | "oldest" | "deadline" | "favorites_firs
 
 export type AnalyseListFavoriteFilter = "" | "only";
 
+export type AnalyseListLvStatusFilter = "" | LvStatusKey;
+
+/** Filter nach Angebotsbetrag: leer = alle, with = nur mit Betrag, without = nur ohne. */
+export type AnalyseListBidFilter = "" | "with" | "without";
+
 export type AnalyseListQuery = {
   q: string;
   gewerk: string;
@@ -233,6 +254,8 @@ export type AnalyseListQuery = {
   frist: AnalyseListFristFilter;
   sort: AnalyseListSort;
   favorite: AnalyseListFavoriteFilter;
+  lvStatus: AnalyseListLvStatusFilter;
+  bid: AnalyseListBidFilter;
 };
 
 function startOfTodayLocal(): Date {
@@ -283,12 +306,17 @@ export function filterAndSortAnalyseList(rows: AnalyseListDerived[], query: Anal
   const frist = query.frist;
   const sort = query.sort;
   const favorite = query.favorite;
+  const lvStatus = query.lvStatus;
+  const bid = query.bid;
 
   let out = rows.filter((r) => {
     if (q && !r.searchBlob.includes(q)) return false;
     if (g && !matchesToken(r.gewerkNorm, g)) return false;
     if (p && !matchesToken(r.projektartNorm, p)) return false;
     if (favorite === "only" && !r.isFavorite) return false;
+    if (lvStatus && r.lvStatus !== lvStatus) return false;
+    if (bid === "with" && r.bidAmountNet == null) return false;
+    if (bid === "without" && r.bidAmountNet != null) return false;
 
     const d = r.deadlineDayDelta;
 

@@ -18,6 +18,14 @@ import {
 import { buildKeyFactsDisplayListQuick } from "@/lib/keyFactsDisplayQuick";
 import type { PdfTopRiskItem, PdfCategoryScore, PdfQuestion } from "@/lib/pdf/pdfTypes";
 import { collectPruefHinweiseFromFinding, MAX_PRUEF_HINWEISE_STANDARD } from "@/lib/userHintsForFinding";
+import {
+  LV_STATUS_KEYS,
+  LV_STATUS_LABEL_DE,
+  normalizeLvStatus,
+  parseBidAmountNetFromDb,
+  parseBidAmountNetInput,
+  type LvStatusKey,
+} from "@/lib/analyseRunLvStatus";
 
 type AnalyseItem = {
   id: string;
@@ -28,6 +36,8 @@ type AnalyseItem = {
   status: string | null;
   management_summary: string | null;
   result_json?: unknown;
+  lv_status?: string | null;
+  bid_amount_net?: unknown;
 };
 
 type RiskFinding = {
@@ -58,7 +68,7 @@ const RISK_CATEGORY_LABELS: Record<string, string> = {
 function mapStatus(status: string | null): string | null {
   if (!status) return null;
   const s = status.toLowerCase();
-  if (s === "completed" || s === "done") return "Abgeschlossen";
+  if (s === "completed" || s === "done") return "Analyse abgeschlossen";
   return status;
 }
 
@@ -90,6 +100,11 @@ function getFilenameFromDisposition(header: string | null): string | null {
 
 function labelUnknownCategory(catKey: string): string {
   return catKey.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function bidNetToInputString(n: number | null): string {
+  if (n == null || !Number.isFinite(n)) return "";
+  return new Intl.NumberFormat("de-DE", { minimumFractionDigits: 0, maximumFractionDigits: 2, useGrouping: true }).format(n);
 }
 
 function severityRank(s?: string): number {
@@ -201,6 +216,11 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
   const [titleDraft, setTitleDraft] = React.useState("");
   const [titleSaving, setTitleSaving] = React.useState(false);
   const [titleError, setTitleError] = React.useState<string | null>(null);
+  const [lvStatusDraft, setLvStatusDraft] = React.useState<LvStatusKey>("offen");
+  const [bidDraft, setBidDraft] = React.useState("");
+  const [bidAmountFocused, setBidAmountFocused] = React.useState(false);
+  const [vorgangSaving, setVorgangSaving] = React.useState(false);
+  const [vorgangError, setVorgangError] = React.useState<string | null>(null);
   const [manualProjectData, setManualProjectData] = React.useState<ManualProjectData>({});
   const router = useRouter();
 
@@ -239,6 +259,13 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
       setTitleError(null);
     }
   }, [item?.id, item?.project_name]);
+
+  React.useEffect(() => {
+    if (!item) return;
+    setLvStatusDraft(normalizeLvStatus(item.lv_status ?? undefined));
+    setBidDraft(bidNetToInputString(parseBidAmountNetFromDb(item.bid_amount_net)));
+    setVorgangError(null);
+  }, [item?.id, item?.lv_status, item?.bid_amount_net]);
 
   const handleSaveManualField = React.useCallback(
     async (key: ManualProjectFieldKey, value: string) => {
@@ -303,6 +330,39 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
       setTitleSaving(false);
     }
   }, [id, item, titleDirty, titleDraft]);
+
+  const vorgangDirty = React.useMemo(() => {
+    if (!item) return false;
+    const curLv = normalizeLvStatus(item.lv_status ?? undefined);
+    const curBid = parseBidAmountNetFromDb(item.bid_amount_net);
+    const draftBid = parseBidAmountNetInput(bidDraft);
+    const bidEqual =
+      (draftBid == null && curBid == null) || (draftBid != null && curBid != null && draftBid === curBid);
+    return lvStatusDraft !== curLv || !bidEqual;
+  }, [item, lvStatusDraft, bidDraft]);
+
+  const handleSaveVorgang = React.useCallback(async () => {
+    if (!item || !vorgangDirty) return;
+    setVorgangSaving(true);
+    setVorgangError(null);
+    try {
+      const res = await fetch(`/api/analyse/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lvStatus: lvStatusDraft,
+          bidAmountNet: parseBidAmountNetInput(bidDraft),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Speichern fehlgeschlagen.");
+      if (data?.item) setItem(data.item as AnalyseItem);
+    } catch (e: unknown) {
+      setVorgangError(e instanceof Error ? e.message : "Unbekannter Fehler");
+    } finally {
+      setVorgangSaving(false);
+    }
+  }, [id, item, vorgangDirty, lvStatusDraft, bidDraft]);
 
   const handlePdfExport = React.useCallback(async () => {
     if (!item || !canPdfExport) return;
@@ -503,12 +563,168 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
               ) : null}
               {titleError ? <span style={{ fontSize: 13, color: T.danger }}>{titleError}</span> : null}
             </div>
-            <p style={{ margin: "10px 0 0", fontSize: 14, color: T.muted }}>
+            <div
+              style={{
+                marginTop: T.space.md,
+                paddingTop: T.space.sm,
+                borderTop: `1px solid ${T.border}`,
+                maxWidth: 560,
+              }}
+            >
+              <div
+                style={{
+                  padding: `${T.space.sm}px ${T.space.md}px`,
+                  borderRadius: T.radiusSm,
+                  border: `1px solid ${T.border}`,
+                  background: "rgba(255,255,255,0.02)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    color: T.faint,
+                    marginBottom: 4,
+                  }}
+                >
+                  Bearbeitung & Angebot
+                </div>
+                <p style={{ margin: "0 0 10px", fontSize: 12, color: T.muted, lineHeight: 1.45 }}>
+                  Diese Angaben dienen nur Ihrer internen Verwaltung und ändern weder Analyse noch PDF.
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200, flex: "1 1 180px" }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>Bearbeitungsstatus</span>
+                    <select
+                      value={lvStatusDraft}
+                      onChange={(e) => setLvStatusDraft(e.target.value as LvStatusKey)}
+                      style={{
+                        padding: "8px 10px",
+                        fontSize: 13,
+                        borderRadius: T.radiusSm,
+                        border: `1px solid ${T.border}`,
+                        background: T.card,
+                        color: T.text,
+                        cursor: "pointer",
+                        outline: "none",
+                      }}
+                    >
+                      {LV_STATUS_KEYS.map((k) => (
+                        <option key={k} value={k}>
+                          {LV_STATUS_LABEL_DE[k]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 180, flex: "1 1 180px" }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>Angebotsbetrag netto in €</span>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "stretch",
+                        borderRadius: T.radiusSm,
+                        border: `1px solid ${bidAmountFocused ? "rgba(100, 116, 139, 0.45)" : T.border}`,
+                        background: T.card,
+                        boxShadow: bidAmountFocused ? "0 0 0 2px rgba(100, 116, 139, 0.1)" : "none",
+                        transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+                        maxWidth: 260,
+                      }}
+                    >
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={bidDraft}
+                        onChange={(e) => setBidDraft(e.target.value)}
+                        onFocus={() => setBidAmountFocused(true)}
+                        onBlur={() => setBidAmountFocused(false)}
+                        placeholder="z. B. 125.000,50 €"
+                        autoComplete="off"
+                        aria-label="Angebotsbetrag netto in Euro"
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          border: "none",
+                          outline: "none",
+                          background: "transparent",
+                          padding: "8px 10px",
+                          fontSize: 13,
+                          color: T.text,
+                        }}
+                      />
+                      <span
+                        style={{
+                          padding: "8px 10px",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: T.muted,
+                          background: "rgba(148, 163, 184, 0.08)",
+                          borderLeft: `1px solid ${T.border}`,
+                          userSelect: "none",
+                          lineHeight: 1.25,
+                          display: "flex",
+                          alignItems: "center",
+                        }}
+                        aria-hidden
+                      >
+                        €
+                      </span>
+                    </div>
+                  </label>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "flex-end",
+                      flex: "0 0 auto",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveVorgang()}
+                      disabled={!vorgangDirty || vorgangSaving}
+                      style={{
+                        padding: "9px 14px",
+                        fontSize: 13,
+                        fontWeight: vorgangDirty ? 700 : 600,
+                        letterSpacing: vorgangDirty ? "0.01em" : "0",
+                        color: vorgangDirty ? "#0c1222" : T.muted,
+                        background: vorgangDirty ? T.accent : T.card,
+                        border: `1px solid ${vorgangDirty ? "rgba(224, 124, 94, 0.55)" : T.border}`,
+                        borderRadius: T.radiusSm,
+                        boxShadow: vorgangDirty ? "0 1px 0 rgba(0,0,0,0.22),0 2px 8px rgba(224, 124, 94, 0.2)" : "none",
+                        cursor: !vorgangDirty || vorgangSaving ? "not-allowed" : "pointer",
+                        opacity: vorgangSaving ? 0.85 : 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {vorgangSaving ? "Speichern…" : "Vorgang speichern"}
+                    </button>
+                  </div>
+                </div>
+                {vorgangError ? (
+                  <div style={{ marginTop: 8 }}>
+                    <span style={{ fontSize: 12, color: T.danger }}>{vorgangError}</span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <p
+              style={{
+                margin: `${T.space.md}px 0 0`,
+                paddingTop: T.space.sm,
+                borderTop: `1px solid ${T.border}`,
+                fontSize: 12,
+                color: T.muted,
+                lineHeight: 1.5,
+              }}
+            >
               {item.created_at ? new Date(item.created_at).toLocaleString("de-DE") : "—"}
               {mappedStatus ? (
                 <>
                   {" · "}
-                  <span style={{ textTransform: "capitalize" }}>{mappedStatus}</span>
+                  <span>{mappedStatus}</span>
                 </>
               ) : null}
               {item.file_name ? (

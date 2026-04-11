@@ -5,11 +5,23 @@
  */
 
 import {
+  buildClarificationFallbackFinding,
+  buildClarificationFromHint,
+  buildClarificationFromPlainText,
+  buildClarificationHeadline,
+  extractClarifyPointsFromHint,
+  primaryUserHintFromFinding,
+  type ClarificationItem,
+  type FindingLike,
+} from "./commercialCopyFromHints";
+import {
   deriveCommercialActionsFromChangePotential,
   isSimilarToExistingQuestion,
 } from "./changePotentialCommercialActions";
 import type { ChangePotentialSummary } from "./changePotentialModel";
 import { KEYFACT_LABELS } from "./keyFactsDefinition";
+
+export type { ClarificationItem } from "./commercialCopyFromHints";
 
 export type ScoreCategory =
   | "vertrags_lv_risiken"
@@ -18,18 +30,18 @@ export type ScoreCategory =
   | "schnittstellen_nebenleistungen"
   | "kalkulationsunsicherheit";
 
-export type ClarificationQuestion = {
-  id: string;
+/**
+ * Strukturierte Rückfrage inkl. Gruppierung (category) und Rückwärtskompatibilität:
+ * `reason` entspricht `why`, `sourceTextSnippet` spiegelt ggf. `expert.snippet`.
+ */
+export type ClarificationQuestion = ClarificationItem & {
   category: ScoreCategory;
-  severity: "low" | "medium" | "high";
-  question: string;
-  reason: string;
   sourceFindingId?: string;
   sourceTextSnippet?: string;
-  /** Bei fehlendem KeyFact: Key für Gruppierung */
   sourceKeyFact?: string;
-  /** Aus Nachtragspotenzial-Engine (ChangePotentialItem). */
   sourceChangePotentialItemId?: string;
+  /** Alias für `why` (bestehende Clients). */
+  reason: string;
 };
 
 export type QuestionGroup = "technisch" | "vertraglich" | "terminlich";
@@ -42,6 +54,9 @@ export type ClarificationInput = {
     detail?: string;
     severity: string;
     penalty?: number;
+    user_hint?: string | null;
+    user_hints?: string[] | null;
+    raw_excerpt?: string | null;
   }>;
   riskClauses?: Array<{
     type: string;
@@ -163,12 +178,25 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
   if (cpSummary?.items?.length) {
     const actions = deriveCommercialActionsFromChangePotential(cpSummary);
     for (const q of actions.questions) {
-      const cq: ClarificationQuestion = {
+      const cat = fieldTypeToCategory(q.fieldType);
+      const title =
+        buildClarificationHeadline(q.question, "Nachtragspotenzial", cat).trim() || "Nachtragspotenzial";
+      const cpPoints = extractClarifyPointsFromHint(q.question, title, "Nachtragspotenzial", cat);
+      const base = buildClarificationFromPlainText({
         id: q.id,
-        category: fieldTypeToCategory(q.fieldType),
         severity: q.severity,
+        title,
         question: q.question,
-        reason: q.reason,
+        why: q.reason,
+        clarifyPoints: cpPoints,
+        sourceLabel: "Nachtragspotenzial",
+        sourceType: "sys",
+        expert: q.sourceQuote ? { snippet: q.sourceQuote } : undefined,
+      });
+      const cq: ClarificationQuestion = {
+        ...base,
+        category: cat,
+        reason: base.why,
         sourceTextSnippet: q.sourceQuote,
         sourceChangePotentialItemId: q.itemId,
       };
@@ -183,25 +211,38 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
   for (const f of input.findings ?? []) {
     const cat = normalizeCategory(f.category);
     const sev = normalizeSeverity(f.severity);
+    const fl = f as FindingLike;
     const legalQ =
       typeof (f as { legalMeta?: { suggestedQuestion?: string } }).legalMeta?.suggestedQuestion === "string"
         ? String((f as { legalMeta?: { suggestedQuestion?: string } }).legalMeta?.suggestedQuestion ?? "").trim()
         : "";
-    const question = legalQ
-      ? legalQ
-      : `Bitte Klarstellung zu: ${f.title}. ${(f.detail ?? "").split("|")[0]?.trim() ?? ""}`.trim();
-    if (cpQuestionTexts.length > 0 && isSimilarToExistingQuestion(question, cpQuestionTexts)) continue;
-    const reason = String(f.id ?? "").startsWith("LEGAL_")
-      ? `Vertrags-/Vergabehinweis: ${f.title}`
-      : `Trigger-Finding: ${f.title}`;
+    const hint = primaryUserHintFromFinding(fl);
+    let baseItem: ClarificationItem;
+    if (legalQ) {
+      baseItem = buildClarificationFallbackFinding(fl, {
+        id: genId("f"),
+        severity: sev,
+        legalQuestion: legalQ,
+      });
+    } else if (hint) {
+      baseItem = buildClarificationFromHint(fl, { id: genId("f"), severity: sev });
+    } else {
+      baseItem = buildClarificationFallbackFinding(fl, {
+        id: genId("f"),
+        severity: sev,
+      });
+    }
+    const skipFindingDup =
+      sev !== "high" &&
+      cpQuestionTexts.length > 0 &&
+      isSimilarToExistingQuestion(baseItem.question, cpQuestionTexts);
+    if (skipFindingDup) continue;
     const q: ClarificationQuestion = {
-      id: genId("f"),
+      ...baseItem,
       category: cat,
-      severity: sev,
-      question,
-      reason,
       sourceFindingId: f.id,
-      sourceTextSnippet: snippet(f.detail ?? ""),
+      reason: baseItem.why,
+      sourceTextSnippet: baseItem.expert?.snippet?.slice(0, 500) ?? snippet(f.detail ?? ""),
     };
     questions.push(q);
     cpQuestionTexts.push({ question: q.question });
@@ -212,17 +253,36 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
   for (const r of input.riskClauses ?? []) {
     const sev = normalizeSeverity(r.riskLevel);
     const cat: ScoreCategory = "vertrags_lv_risiken";
+    const label = r.type || "Vertragsklausel";
     const question =
       r.interpretation && r.interpretation.length > 20
-        ? r.interpretation
-        : `Bitte Klarstellung zur Vertragsklausel: ${snippet(r.text, 80)}`;
-    if (cpQuestionTexts.length > 0 && isSimilarToExistingQuestion(question, cpQuestionTexts)) continue;
-    const q: ClarificationQuestion = {
+        ? (r.interpretation.trim().startsWith("Bitte ") ? r.interpretation.trim() : `Bitte konkretisieren Sie: ${r.interpretation.trim()}`)
+        : `Bitte legen Sie die Auslegung der Klausel im Einleitungstext fest (${snippet(r.text, 72)}).`;
+    const riskHigh = normalizeSeverity(r.riskLevel) === "high";
+    const skipRiskDup =
+      !riskHigh &&
+      cpQuestionTexts.length > 0 &&
+      isSimilarToExistingQuestion(question, cpQuestionTexts);
+    if (skipRiskDup) continue;
+    const hintForTitle = (r.interpretation || "").trim();
+    const title = hintForTitle.length >= 6
+      ? buildClarificationHeadline(hintForTitle, label, "vertrags_lv_risiken").trim() || `Vortext: ${label}`
+      : `Vortext: ${label}`;
+    const base = buildClarificationFromPlainText({
       id: genId("r"),
-      category: cat,
       severity: sev,
+      title,
       question,
-      reason: `Vortext-Risiko: ${r.type || "Vertragsklausel"}`,
+      why: `Hinweis aus der Vortext-Analyse (${label}).`,
+      clarifyPoints: extractClarifyPointsFromHint(hintForTitle, title, label, "vertrags_lv_risiken"),
+      sourceLabel: label,
+      sourceType: "sys",
+      expert: { snippet: r.text },
+    });
+    const q: ClarificationQuestion = {
+      ...base,
+      category: cat,
+      reason: base.why,
       sourceTextSnippet: snippet(r.text),
     };
     questions.push(q);
@@ -243,14 +303,25 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
           : group === "technisch"
             ? "technische_vollstaendigkeit"
             : "vertrags_lv_risiken";
-      const question = `Bitte Angabe zu ${label}: Keine klare Angabe im Vortext gefunden.`;
+      const question = `Bitte konkretisieren Sie ${label}: Im Vortext wurde keine ausreichend klare Angabe gefunden.`;
       if (cpQuestionTexts.length > 0 && isSimilarToExistingQuestion(question, cpQuestionTexts)) continue;
-      const q: ClarificationQuestion = {
+      const base = buildClarificationFromPlainText({
         id: genId("k"),
-        category: cat,
         severity: "medium",
+        title: `Fehlende Angabe: ${label}`,
         question,
-        reason: `Fehlendes KeyFact: ${label}`,
+        why: "Ohne diese Angabe ist der Leistungs- oder Terminrahmen im Angebot unscharf.",
+        clarifyPoints: [
+          `Erwartete Information: ${label}.`,
+          "Bitte bestätigen Sie die gültigen Werte oder verweisen Sie auf die maßgebliche Vertragsurkunde.",
+        ],
+        sourceLabel: label,
+        sourceType: "sys",
+      });
+      const q: ClarificationQuestion = {
+        ...base,
+        category: cat,
+        reason: base.why,
         sourceKeyFact: key,
       };
       questions.push(q);

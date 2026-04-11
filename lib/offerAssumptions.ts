@@ -7,21 +7,32 @@
 
 import type { ScoreCategory, QuestionGroup } from "./clarificationQuestions";
 import {
+  buildOfferClarificationFallbackFinding,
+  buildOfferClarificationFromHint,
+  buildOfferFromPlainText,
+  buildOfferHeadline,
+  primaryUserHintFromFinding,
+  type FindingLike,
+  type OfferClarificationItem,
+} from "./commercialCopyFromHints";
+import {
   deriveCommercialActionsFromChangePotential,
   isSimilarToExistingClarification,
 } from "./changePotentialCommercialActions";
 import type { ChangePotentialSummary } from "./changePotentialModel";
 import { KEYFACT_LABELS } from "./keyFactsDefinition";
 
-export type OfferAssumption = {
-  id: string;
+export type { OfferClarificationItem } from "./commercialCopyFromHints";
+
+/** Strukturierte Angebotsklarstellung; `assumption`/`reason` bleiben Aliase für Abwärtskompatibilität. */
+export type OfferAssumption = OfferClarificationItem & {
   category: ScoreCategory;
-  severity: "low" | "medium" | "high";
+  /** Alias für `clarification` (LLM-Refinement, Legacy-UI). */
   assumption: string;
+  /** Alias für `why`. */
   reason: string;
   sourceFindingId?: string;
   sourceQuestionId?: string;
-  /** Aus Nachtragspotenzial-Engine (ChangePotentialItem). */
   sourceChangePotentialItemId?: string;
 };
 
@@ -31,6 +42,8 @@ export type ClarificationQuestionInput = {
   severity?: string;
   question: string;
   reason: string;
+  title?: string;
+  why?: string;
   sourceFindingId?: string;
   sourceKeyFact?: string;
 };
@@ -42,6 +55,9 @@ export type OfferAssumptionInput = {
     title: string;
     detail?: string;
     severity: string;
+    user_hint?: string | null;
+    user_hints?: string[] | null;
+    raw_excerpt?: string | null;
   }>;
   riskClauses?: Array<{
     type: string;
@@ -160,12 +176,24 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
   if (input.changePotentialSummary?.items?.length) {
     const actions = deriveCommercialActionsFromChangePotential(input.changePotentialSummary);
     for (const c of actions.clarifications) {
-      const a: OfferAssumption = {
+      const title = buildOfferHeadline(c.clarification, "Nachtragspotenzial").trim() || "Nachtragspotenzial";
+      const base = buildOfferFromPlainText({
         id: c.id,
-        category: fieldTypeToCategory(c.fieldType),
         severity: c.severity,
-        assumption: c.clarification,
-        reason: c.reason,
+        title,
+        clarification: c.clarification,
+        scopeNote:
+          "Weitergehende oder nicht eindeutig beschriebene Anforderungen aus dem Nachtragspotenzial sind nicht Leistungsbestandteil.",
+        why: c.reason,
+        sourceLabel: "Nachtragspotenzial",
+        sourceType: "sys",
+        expert: c.sourceQuote ? { snippet: c.sourceQuote } : undefined,
+      });
+      const a: OfferAssumption = {
+        ...base,
+        category: fieldTypeToCategory(c.fieldType),
+        assumption: base.clarification,
+        reason: base.why,
         sourceChangePotentialItemId: c.itemId,
       };
       assumptions.push(a);
@@ -189,24 +217,31 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
   for (const f of input.findings ?? []) {
     const cat = normalizeCategory(f.category);
     const sev = normalizeSeverity(f.severity);
+    const fl = f as FindingLike;
     const legalA =
       typeof (f as { legalMeta?: { suggestedClarification?: string } }).legalMeta?.suggestedClarification === "string"
         ? String((f as { legalMeta?: { suggestedClarification?: string } }).legalMeta?.suggestedClarification ?? "").trim()
         : "";
-    const assumption = legalA
-      ? legalA
-      : `Wir gehen davon aus, dass die Anforderungen gemäß ${f.title} im Sinne der anerkannten Regeln der Technik ausgeführt werden, sofern keine abweichende Klarstellung erfolgt.`;
-    if (existingClarificationTexts.length > 0 && isSimilarToExistingClarification(assumption, existingClarificationTexts)) continue;
-    const reason = String(f.id ?? "").startsWith("LEGAL_")
-      ? `Vertrags-/Vergabehinweis: ${f.title}`
-      : `Finding: ${f.title}`;
+    const hint = primaryUserHintFromFinding(fl);
+    let base: OfferClarificationItem;
+    if (legalA) {
+      base = buildOfferClarificationFallbackFinding(fl, { id: genId("f"), severity: sev, legalClarification: legalA });
+    } else if (hint) {
+      base = buildOfferClarificationFromHint(fl, { id: genId("f"), severity: sev });
+    } else {
+      base = buildOfferClarificationFallbackFinding(fl, { id: genId("f"), severity: sev });
+    }
+    const skipOfferDup =
+      sev !== "high" &&
+      existingClarificationTexts.length > 0 &&
+      isSimilarToExistingClarification(base.clarification, existingClarificationTexts);
+    if (skipOfferDup) continue;
     const q = questionByFindingId.get(f.id);
     const a: OfferAssumption = {
-      id: genId("f"),
+      ...base,
       category: cat,
-      severity: sev,
-      assumption,
-      reason,
+      assumption: base.clarification,
+      reason: base.why,
       sourceFindingId: f.id,
       sourceQuestionId: q?.id,
     };
@@ -224,17 +259,35 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
   for (const r of input.riskClauses ?? []) {
     const sev = normalizeSeverity(r.riskLevel);
     const cat: ScoreCategory = "vertrags_lv_risiken";
-    const assumption =
+    const label = r.type || "Vertragsklausel";
+    const clarification =
       r.interpretation && r.interpretation.length > 30
-        ? `Wir gehen davon aus: ${r.interpretation}`
-        : `Wir gehen davon aus, dass die Vertragsklausel im üblichen Sinne ausgelegt wird, sofern keine Klarstellung erfolgt.`;
-    if (existingClarificationTexts.length > 0 && isSimilarToExistingClarification(assumption, existingClarificationTexts)) continue;
-    const a: OfferAssumption = {
+        ? `Unsere Kalkulation berücksichtigt die beschriebene Klausel nur insoweit, wie sie sich aus dem Leistungsverzeichnis ohne weitergehende Auslegung ergibt (${r.interpretation.trim()})`
+        : "Unsere Kalkulation geht davon aus, dass die Vertragsklausel im Einleitungstext im üblichen marktüblichen Sinne ausgelegt wird, sofern nicht ausdrücklich anderes vereinbart wird.";
+    const riskHigh = normalizeSeverity(r.riskLevel) === "high";
+    const skipRiskOfferDup =
+      !riskHigh &&
+      existingClarificationTexts.length > 0 &&
+      isSimilarToExistingClarification(clarification, existingClarificationTexts);
+    if (skipRiskOfferDup) continue;
+    const title =
+      buildOfferHeadline((r.interpretation || "").trim(), label).trim() || `Vortext: ${label}`;
+    const base = buildOfferFromPlainText({
       id: genId("r"),
-      category: cat,
       severity: sev,
-      assumption,
-      reason: `Vortext-Risiko: ${r.type || "Vertragsklausel"}`,
+      title,
+      clarification,
+      scopeNote: "Weitergehende oder nicht eindeutig beschriebene Zusatzleistungen sind nicht enthalten.",
+      why: `Absicherung zu einem Hinweis aus der Vortext-Analyse (${label}).`,
+      sourceLabel: label,
+      sourceType: "sys",
+      expert: { snippet: r.text },
+    });
+    const a: OfferAssumption = {
+      ...base,
+      category: cat,
+      assumption: base.clarification,
+      reason: base.why,
       sourceQuestionId: input.clarificationQuestions?.find((q) => q.reason.includes(r.type || "Vertragsklausel"))?.id,
     };
     assumptions.push(a);
@@ -278,12 +331,21 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
         `Wir gehen davon aus, dass ${label} gemäß den Vertragsunterlagen bzw. anerkannten Regeln gilt.`;
       if (existingClarificationTexts.length > 0 && isSimilarToExistingClarification(assumption, existingClarificationTexts)) continue;
       const q = questionByKeyFact.get(key);
-      const a: OfferAssumption = {
+      const base = buildOfferFromPlainText({
         id: genId("k"),
-        category: cat,
         severity: "medium",
-        assumption,
-        reason: `Fehlendes KeyFact: ${label}`,
+        title: `Annahme: ${label}`,
+        clarification: assumption,
+        scopeNote: "Abweichende vertragliche Regelungen sind erst nach ausdrücklicher Vereinbarung leistungsrelevant.",
+        why: `Platzhalter-Annahme, weil „${label}“ im Vortext nicht klar belegt ist.`,
+        sourceLabel: label,
+        sourceType: "sys",
+      });
+      const a: OfferAssumption = {
+        ...base,
+        category: cat,
+        assumption: base.clarification,
+        reason: base.why,
         sourceQuestionId: q?.id,
       };
       assumptions.push(a);
@@ -303,14 +365,29 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
     if (q.sourceFindingId || q.sourceKeyFact) continue;
     const cat = normalizeCategory(q.category ?? "vertrags_lv_risiken");
     const sev = normalizeSeverity(q.severity ?? "medium");
-    const assumption = `Wir gehen davon aus, dass die Klarstellung zu „${q.question.slice(0, 80)}…" im üblichen Sinne beantwortet wird.`;
+    const shortQ = q.question.length > 100 ? `${q.question.slice(0, 97).trim()}…` : q.question;
+    const assumption = `Unsere Kalkulation berücksichtigt die offene Rückfrage nur insoweit, wie sie sich aus dem Leistungsverzeichnis ohne weitere Klarstellung zum üblichen Verständnis ergibt (bezogen auf: ${shortQ}).`;
     if (existingClarificationTexts.length > 0 && isSimilarToExistingClarification(assumption, existingClarificationTexts)) continue;
-    const a: OfferAssumption = {
+    const title =
+      (q as ClarificationQuestionInput).title ||
+      buildOfferHeadline(q.question, "Rückfrage").trim() ||
+      "Offene Rückfrage";
+    const why = (q as ClarificationQuestionInput).why || q.reason;
+    const base = buildOfferFromPlainText({
       id: genId("q"),
-      category: cat,
       severity: sev,
-      assumption,
-      reason: q.reason,
+      title,
+      clarification: assumption,
+      scopeNote: "Sobald eine schriftliche Klarstellung vorliegt, ist der Leistungsumfang entsprechend zu bewerten.",
+      why,
+      sourceLabel: "Rückfrage",
+      sourceType: "sys",
+    });
+    const a: OfferAssumption = {
+      ...base,
+      category: cat,
+      assumption: base.clarification,
+      reason: base.why,
       sourceQuestionId: q.id,
     };
     assumptions.push(a);
