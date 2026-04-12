@@ -19,6 +19,7 @@ import {
   deriveCommercialActionsFromChangePotential,
   isSimilarToExistingClarification,
 } from "./changePotentialCommercialActions";
+import { dedupeAndFilterOfferAssumptions, guardCommercialUserFacingText } from "./commercialOutputNormalize";
 import type { ChangePotentialSummary } from "./changePotentialModel";
 import { KEYFACT_LABELS } from "./keyFactsDefinition";
 
@@ -399,19 +400,27 @@ export function generateOfferAssumptions(input: OfferAssumptionInput): OfferAssu
     });
   }
 
-  // 5) Gruppierung
+  const qTextsForNearDup = (input.clarificationQuestions ?? []).map((q) => q.question).filter(Boolean);
+  const assumptionsPolished: OfferAssumption[] = assumptions.map((a) => {
+    const cl = guardCommercialUserFacingText(a.clarification, 12) || a.clarification;
+    const tl = a.title ? guardCommercialUserFacingText(a.title, 6) || a.title : a.title;
+    const wy = a.why ? guardCommercialUserFacingText(a.why, 8) || a.why : a.why;
+    return { ...a, clarification: cl, assumption: cl, title: tl ?? a.title, why: wy, reason: wy };
+  });
+  const assumptionsDeduped = dedupeAndFilterOfferAssumptions(assumptionsPolished, qTextsForNearDup) as OfferAssumption[];
+
   const byGroup: Record<QuestionGroup, OfferAssumption[]> = {
     technisch: [],
     vertraglich: [],
     terminlich: [],
   };
 
-  for (const a of assumptions) {
+  for (const a of assumptionsDeduped) {
     let group: QuestionGroup = CATEGORY_TO_GROUP[a.category] ?? "vertraglich";
     const keyFactMatch = input.clarificationQuestions?.find((q) => q.id === a.sourceQuestionId)?.sourceKeyFact;
     if (keyFactMatch) group = MISSING_KEYFACT_GROUPS[keyFactMatch] ?? group;
     byGroup[group].push(a);
   }
 
-  return { assumptions, byGroup, debug };
+  return { assumptions: assumptionsDeduped, byGroup, debug };
 }

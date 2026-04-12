@@ -9,6 +9,14 @@ export type ManagementSummaryInput = {
   keyFacts?: Record<string, string> | null;
   changeOrderAnalysis?: { offerStrategySummary?: { executiveSummary?: string | null } | null } | null;
   clarificationQuestions?: unknown[] | null;
+  /**
+   * Optional: bereits berechnete Nachtrags-Kennzahl (keine Neuberechnung).
+   * Nur für sprachliche Trennung: niedriges Gesamtrisiko vs. erhöhtes Nachtragspotenzial.
+   */
+  changePotentialSummary?: {
+    v2Debug?: { potentialScore?: number; enforceabilityScore?: number } | null;
+    overallIndex?: number;
+  } | null;
 };
 
 function normalizeTotal(scoreResult?: ManagementSummaryInput["scoreResult"]): number | null {
@@ -228,6 +236,32 @@ function findingsMentionSchedulePressure(
   return false;
 }
 
+/**
+ * Wenn die Gesamtbewertung niedrig ist, das Nachtragspotenzial aber mindestens „erhöht“ (≥50/100) ist:
+ * klarstellen, dass kommerzielle Hebel separat zu betrachten sind (ohne neue Kennzahl).
+ */
+function riskVsClaimBridge(
+  total: number | null,
+  level: string | null,
+  changePotentialSummary?: ManagementSummaryInput["changePotentialSummary"],
+): string | null {
+  const lowOverall =
+    level === "solide" || level === "sauber" || (total != null && total < 40);
+  if (!lowOverall) return null;
+  const cp = changePotentialSummary;
+  if (!cp) return null;
+  let score: number | null = null;
+  const v2 = cp.v2Debug;
+  if (v2 && typeof v2.potentialScore === "number" && typeof v2.enforceabilityScore === "number") {
+    score = Math.round(v2.potentialScore);
+  } else if (typeof cp.overallIndex === "number" && Number.isFinite(cp.overallIndex)) {
+    score = Math.round(cp.overallIndex);
+  }
+  if (score == null || score < 50) return null;
+
+  return "Die Gesamtlage kann überschaubar wirken; gleichzeitig ist das Nachtragspotenzial aus Abgrenzung und Schnittstellen erhöht – diese Themen sollten in Angebot und Kalkulation separat und bewusst adressiert werden.";
+}
+
 /** Absatz 1: Einordnung – ohne „sauber/gut strukturiert“-Floskeln. */
 function einordnungSentence(
   total: number | null,
@@ -374,6 +408,7 @@ export function buildManagementSummary(input: ManagementSummaryInput): string | 
   const einordnung = einordnungSentence(total, level, findings);
   if (!einordnung) return null;
 
+  const bridge = riskVsClaimBridge(total, level, input.changePotentialSummary);
   const mainDrivers = formatMainDriversParagraph(findings, topics);
   const empfehlung = empfehlungSentence(
     level,
@@ -383,5 +418,8 @@ export function buildManagementSummary(input: ManagementSummaryInput): string | 
     input.changeOrderAnalysis,
   );
 
-  return [einordnung, mainDrivers, empfehlung].join("\n\n");
+  const parts = [einordnung];
+  if (bridge) parts.push(bridge);
+  parts.push(mainDrivers, empfehlung);
+  return parts.join("\n\n");
 }

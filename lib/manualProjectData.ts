@@ -4,7 +4,8 @@
  */
 
 import { KEYFACTS_CORE_12_KEYS } from "@/lib/keyFactsDefinition";
-import { KEYFACT_FALLBACK_LABEL } from "@/lib/keyFactsValidation";
+import { buildKeyFactsDisplayListQuick } from "@/lib/keyFactsDisplayQuick";
+import { isPlausibleKeyFactDisplayValue, KEYFACT_FALLBACK_LABEL } from "@/lib/keyFactsValidation";
 
 /** Erste 10 Kern-KeyFacts (ohne LV-Strukturgröße / Vorbemerkungsumfang). */
 export const EDITABLE_KEYFACT_KEYS = KEYFACTS_CORE_12_KEYS.slice(0, 10) as readonly string[];
@@ -158,8 +159,19 @@ export function resolveRowPresentation(args: {
   const multiline = args.multiline ?? false;
   const manual = args.manual?.manualValue?.trim() ?? "";
   const hasManual = manual.length > 0;
+
+  let displayValue = args.displayValue;
+  let isFallbackRow = args.isFallback;
+  if (args.keyFactKey && !hasManual) {
+    const v = displayValue.trim();
+    if (!isFallbackRow && v !== KEYFACT_FALLBACK_LABEL && !isPlausibleKeyFactDisplayValue(args.keyFactKey, v)) {
+      displayValue = KEYFACT_FALLBACK_LABEL;
+      isFallbackRow = true;
+    }
+  }
+
   const recognizedUsable = args.keyFactKey
-    ? isUsableRecognized(args.displayValue, args.isFallback)
+    ? isUsableRecognized(displayValue, isFallbackRow)
     : false;
 
   let finalValue: string;
@@ -173,7 +185,7 @@ export function resolveRowPresentation(args: {
       source = "manual_fill";
     }
   } else if (args.keyFactKey) {
-    finalValue = args.displayValue;
+    finalValue = displayValue;
     source = recognizedUsable ? "lv" : "none";
   } else {
     finalValue = "";
@@ -193,7 +205,7 @@ export function resolveRowPresentation(args: {
     keyFactKey: args.keyFactKey,
     label: args.label,
     finalValue,
-    recognizedValue: args.displayValue,
+    recognizedValue: displayValue,
     recognizedUsable,
     source,
     sourceLabel: sourceLabelForDisplay(source),
@@ -266,6 +278,14 @@ export function buildProjectInfoManualBundle(
     multiline: true,
   });
   return { rows, notesRow };
+}
+
+/** Gespeichertes `result_json` → gleiche KeyFact-Zeilen wie PDF (`buildKeyFactsDisplayListQuick` + manuelle Schicht). */
+export function buildProjectInfoManualBundleFromResultJson(
+  rj: Record<string, unknown>,
+  manualData: ManualProjectData,
+): ProjectInfoManualBundle {
+  return buildProjectInfoManualBundle(buildKeyFactsDisplayListQuick(rj), manualData);
 }
 
 /**

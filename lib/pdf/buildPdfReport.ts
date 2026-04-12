@@ -39,6 +39,18 @@ import {
 } from "./pdfFormatters";
 import { normalizeLegalSignalsForReport } from "@/lib/legal-signals/presentation";
 import type { PdfLegalSignalItem } from "./pdfTypes";
+import {
+  computeCommercialOutputMetrics,
+  flattenStoredClarificationQuestions,
+  flattenStoredOfferAssumptions,
+  guardCommercialUserFacingText,
+  resolveClarificationQuestionDisplayTitle,
+  resolveOfferAssumptionDisplayTitle,
+  type CommercialOutputMetrics,
+} from "@/lib/commercialOutputNormalize";
+import { buildNachtragCustomerView } from "@/lib/nachtrag-v2/customerView";
+import { alignStoredTextNachtragIndexParagraphs, leadingNachtragspotenzialScore } from "@/lib/nachtrag-v2/leadingPotentialScore";
+import type { NachtragResultV2 } from "@/lib/nachtrag-v2/types";
 
 /** Kategorien-Labels (5er-API und UI); 6er-Kategorien aus scoring.ts werden auf lesbare Labels gemappt. */
 const CATEGORY_LABELS: Record<string, string> = {
@@ -102,37 +114,37 @@ function flattenByGroup(byGroup: Record<string, unknown[]> | undefined): unknown
   return flat;
 }
 
-/**
- * Gespeicherte Analysen nutzen oft `{ questions, byGroup }` statt eines flachen Arrays.
- * Wichtig: `questions` kann leer sein, während `byGroup` die eigentlichen Einträge enthält.
- */
+/** Rohdaten: Vereinigung von `questions` und `byGroup` (keine stillen Teilzählungen). */
 function extractClarificationQuestionsArray(rj: Record<string, unknown>): unknown[] {
   const raw = rj.clarificationQuestions ?? rj.clarification_questions;
-  if (raw == null) return [];
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw === "object") {
-    const o = raw as { questions?: unknown[]; byGroup?: Record<string, unknown[]> };
-    const fromGroup = flattenByGroup(o.byGroup);
-    if (Array.isArray(o.questions) && o.questions.length > 0) return o.questions;
-    if (fromGroup.length > 0) return fromGroup;
-    if (Array.isArray(o.questions)) return o.questions;
-  }
-  return [];
+  return flattenStoredClarificationQuestions(raw);
 }
 
-/** Analog: `{ assumptions, byGroup }` aus Angebotsklarstellungen. */
+/** Analog Angebotsklarstellungen: `assumptions` ∪ `byGroup`. */
 function extractOfferAssumptionItems(rj: Record<string, unknown>): unknown[] {
   const raw = rj.offerAssumptions ?? rj.offer_assumptions;
-  if (raw == null) return [];
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw === "object") {
-    const o = raw as { assumptions?: unknown[]; byGroup?: Record<string, unknown[]> };
-    const fromGroup = flattenByGroup(o.byGroup);
-    if (Array.isArray(o.assumptions) && o.assumptions.length > 0) return o.assumptions;
-    if (fromGroup.length > 0) return fromGroup;
-    if (Array.isArray(o.assumptions)) return o.assumptions;
-  }
-  return [];
+  return flattenStoredOfferAssumptions(raw);
+}
+
+function tryNachtragV2FromResultJson(rj: Record<string, unknown>): NachtragResultV2 | null {
+  const cp = rj.changePotentialSummary;
+  if (cp == null || typeof cp !== "object") return null;
+  const v2 = (cp as { v2Debug?: unknown }).v2Debug;
+  if (v2 == null || typeof v2 !== "object") return null;
+  const o = v2 as { potentialScore?: unknown; enforceabilityScore?: unknown };
+  if (typeof o.potentialScore !== "number" || typeof o.enforceabilityScore !== "number") return null;
+  return v2 as NachtragResultV2;
+}
+
+/**
+ * Gleiche V2-Erkennung wie PDF/Report: `result_json` gemerged wie in `buildPdfReport`
+ * (z. B. damit UI keinen zweiten KI-Strategietext zeigt, wenn Nachtrag-V2 maßgeblich ist).
+ */
+export function analysisInputHasNachtragV2(input: unknown): boolean {
+  if (input == null || typeof input !== "object") return false;
+  const raw = input as Record<string, unknown>;
+  const rj = mergeResultJsonWithTopLevel(raw);
+  return tryNachtragV2FromResultJson(rj) !== null;
 }
 
 /** result_json kann als Objekt oder (selten) JSON-String vorliegen; Felder auch auf Analyse-Zeile. */
@@ -162,6 +174,10 @@ function mergeResultJsonWithTopLevel(raw: Record<string, unknown>): Record<strin
   lift("clarificationQuestions", "clarification_questions");
   lift("offerAssumptions", "offer_assumptions");
   lift("legalSignals", "legal_signals");
+  if (out.changePotentialSummary == null && out.changeOrderAnalysis != null && typeof out.changeOrderAnalysis === "object") {
+    const co = out.changeOrderAnalysis as Record<string, unknown>;
+    if (co.changePotentialSummary != null) out.changePotentialSummary = co.changePotentialSummary;
+  }
   return out;
 }
 
@@ -177,13 +193,20 @@ export function buildPdfReport(input: unknown, options?: BuildPdfReportOptions):
   const raw = input as Record<string, unknown>;
   const rj = mergeResultJsonWithTopLevel(raw);
 
+  const flatQuestionsRaw = extractClarificationQuestionsArray(rj);
+  const flatAssumptionsRaw = extractOfferAssumptionItems(rj);
+  const { metrics: commercialMetrics, questionsNet, assumptionsNet } = computeCommercialOutputMetrics(
+    flatQuestionsRaw,
+    flatAssumptionsRaw,
+  );
+
   const meta = buildMeta(raw, rj);
-  const summary = buildSummary(raw, rj);
+  const summary = buildSummary(raw, rj, commercialMetrics);
   const categoryScores = buildCategoryScores(rj);
   const keyFacts = buildKeyFactRows(rj);
-  const claimPotential = buildClaimPotential(rj);
-  const questions = buildQuestions(rj);
-  const clarifications = buildClarifications(rj);
+  const claimPotential = buildClaimPotential(rj, tryNachtragV2FromResultJson(rj));
+  const questions = buildQuestionsFromItems(questionsNet);
+  const clarifications = buildClarificationsFromItems(assumptionsNet);
   const topRisks = buildTopRisksItems(rj);
   const legalSignals = buildLegalSignalsItems(rj);
   const nextSteps = buildNextSteps(questions, clarifications, claimPotential);
@@ -270,33 +293,80 @@ function buildMeta(raw: Record<string, unknown>, rj: Record<string, unknown>): P
   };
 }
 
-function buildSummary(raw: Record<string, unknown>, rj: Record<string, unknown>): PdfSummary {
-  const managementSummary = safeString(raw.management_summary ?? raw.managementSummary);
+function buildSummary(raw: Record<string, unknown>, rj: Record<string, unknown>, metrics: CommercialOutputMetrics): PdfSummary {
+  let managementSummary = safeString(raw.management_summary ?? raw.managementSummary);
   const scoreResult = rj.scoreResult != null && typeof rj.scoreResult === "object" ? (rj.scoreResult as Record<string, unknown>) : {};
   const changeOrder = rj.changeOrderAnalysis != null && typeof rj.changeOrderAnalysis === "object" ? (rj.changeOrderAnalysis as Record<string, unknown>) : {};
   const offerSummary = changeOrder.offerStrategySummary != null && typeof changeOrder.offerStrategySummary === "object"
     ? (changeOrder.offerStrategySummary as Record<string, unknown>)
     : {};
 
-  /** Gleiche Priorität wie gespeicherte Ansicht: Offer-Strategie zuerst, dann DB-Template. */
-  const executiveSummary =
-    safeString(offerSummary.executiveSummary) ||
-    managementSummary ||
-    undefined;
+  const v2 = tryNachtragV2FromResultJson(rj);
+  const cpForScore = rj.changePotentialSummary;
+  let nachtragCustomerView: ReturnType<typeof buildNachtragCustomerView> | null = null;
+
+  if (v2) {
+    nachtragCustomerView = buildNachtragCustomerView({ v2 });
+    if (cpForScore != null && typeof cpForScore === "object") {
+      const unified = leadingNachtragspotenzialScore(cpForScore as { overallIndex: number; v2Debug?: unknown });
+      if (managementSummary.trim()) {
+        managementSummary = alignStoredTextNachtragIndexParagraphs(managementSummary, unified);
+      }
+    }
+  }
+
+  /**
+   * Bei Nachtrag-V2: **eine** Strategiequelle (buildNachtragCustomerView) – keine KI-Angebotsstrategie,
+   * die „defensiv/offensiv“ widersprüchlich zur Nachtragspotenzial-Kachel wäre.
+   */
+  let executiveSummary: string | undefined;
+  if (v2 && nachtragCustomerView) {
+    const view = nachtragCustomerView;
+    const strategyOnly = `${view.recommendedStrategy.title}. ${view.recommendedStrategy.rationale}`;
+    const base = managementSummary?.trim() ? managementSummary.trim() : "";
+    executiveSummary = base ? `${base}\n\n${strategyOnly}` : strategyOnly;
+  } else {
+    executiveSummary =
+      safeString(offerSummary.executiveSummary) ||
+      managementSummary ||
+      undefined;
+  }
+
+  const countsExplanation =
+    metrics.questionsTotalDetected > 0 || metrics.clarificationsTotalDetected > 0
+      ? `Rückfragen: ${metrics.questionsTotalDetected} erkannt, ${metrics.questionsAfterDedupe} nach inhaltlicher Verdichtung (Handlungsfokus bis zu ${metrics.questionsPrioritizedForManagement}). ` +
+        `Angebotsklarstellungen: ${metrics.clarificationsTotalDetected} erkannt, ${metrics.clarificationsAfterDedupe} nach Verdichtung (Fokus bis zu ${metrics.clarificationsPrioritizedForManagement}). ` +
+        `Ausführliche Listen im Bericht entsprechen der verdichteten Auswahl.`
+      : undefined;
+
+  if (countsExplanation) {
+    executiveSummary = executiveSummary ? `${executiveSummary}\n\n${countsExplanation}` : countsExplanation;
+  }
 
   const totalScore = numberOrNull(raw.score ?? scoreResult.total);
   const level = safeString(scoreResult.level);
   const totalRiskLabel = level ? levelToRiskLabel(level) : totalScore != null ? scoreToRiskLabel(totalScore) : undefined;
 
-  const nQuestions = extractClarificationQuestionsArray(rj).length;
-  const nAssumptions = extractOfferAssumptionItems(rj).length;
-
   return {
     ...(executiveSummary ? { executiveSummary } : {}),
     ...(totalScore != null ? { totalScore } : {}),
     ...(totalRiskLabel ? { totalRiskLabel } : {}),
-    ...(nQuestions > 0 ? { questionCount: nQuestions } : {}),
-    ...(nAssumptions > 0 ? { clarificationCount: nAssumptions } : {}),
+    ...(nachtragCustomerView
+      ? {
+          claimLevel: `${nachtragCustomerView.potentialLabel} · ${Math.round(nachtragCustomerView.potentialScore)}/100`,
+        }
+      : {}),
+    ...(metrics.questionsAfterDedupe > 0 ? { questionCount: metrics.questionsAfterDedupe } : {}),
+    ...(metrics.clarificationsAfterDedupe > 0 ? { clarificationCount: metrics.clarificationsAfterDedupe } : {}),
+    ...(metrics.questionsTotalDetected > 0 ? { questionsTotalDetected: metrics.questionsTotalDetected } : {}),
+    ...(metrics.questionsAfterDedupe > 0 ? { questionsAfterDedupe: metrics.questionsAfterDedupe } : {}),
+    ...(metrics.questionsPrioritizedForManagement > 0 ? { questionsPrioritizedForManagement: metrics.questionsPrioritizedForManagement } : {}),
+    ...(metrics.clarificationsTotalDetected > 0 ? { clarificationsTotalDetected: metrics.clarificationsTotalDetected } : {}),
+    ...(metrics.clarificationsAfterDedupe > 0 ? { clarificationsAfterDedupe: metrics.clarificationsAfterDedupe } : {}),
+    ...(metrics.clarificationsPrioritizedForManagement > 0
+      ? { clarificationsPrioritizedForManagement: metrics.clarificationsPrioritizedForManagement }
+      : {}),
+    ...(countsExplanation ? { countsExplanation } : {}),
   };
 }
 
@@ -361,7 +431,7 @@ function buildCategoryScores(rj: Record<string, unknown>): PdfCategoryScore[] {
   });
 }
 
-function buildClaimPotential(rj: Record<string, unknown>): PdfClaimPotential | undefined {
+function buildClaimPotential(rj: Record<string, unknown>, v2: NachtragResultV2 | null): PdfClaimPotential | undefined {
   const changeOrder = rj.changeOrderAnalysis != null && typeof rj.changeOrderAnalysis === "object"
     ? (rj.changeOrderAnalysis as Record<string, unknown>)
     : {};
@@ -372,7 +442,8 @@ function buildClaimPotential(rj: Record<string, unknown>): PdfClaimPotential | u
   const scoreResult = rj.scoreResult != null && typeof rj.scoreResult === "object" ? (rj.scoreResult as Record<string, unknown>) : {};
   const findingsSorted = Array.isArray(scoreResult.findingsSorted) ? scoreResult.findingsSorted : [];
 
-  const executiveSummary = sanitizeText(offerSummary.executiveSummary);
+  /** Bei V2 keine separate KI-„Einordnung“ mit konkurrierender Angebotsstrategie (siehe Executive Summary / finalRecommendation). */
+  const executiveSummary = v2 ? undefined : sanitizeText(offerSummary.executiveSummary);
   const topRisks = normalizeStringList(findingsSorted, 5)
     .map((t) => sanitizeText(stripScoringEngineeringJargon(t), { maxLength: 200, stripTechnical: false }))
     .filter((t) => t.trim().length > 0);
@@ -381,7 +452,13 @@ function buildClaimPotential(rj: Record<string, unknown>): PdfClaimPotential | u
     5
   ).map((t) => sanitizeText(t, { maxLength: 200 }));
   const immediateActions = normalizeStringList(offerSummary.immediateActions, 5);
-  const finalRecommendation = sanitizeText(offerSummary.finalRecommendation ?? offerSummary.recommendation);
+  let finalRecommendation = sanitizeText(offerSummary.finalRecommendation ?? offerSummary.recommendation);
+
+  /** Eine maßgebliche Strategie: bei vorhandenem Nachtrag-V2 identisch zur Kundenansicht (Nachtragspotenzial-UI). */
+  if (v2) {
+    const view = buildNachtragCustomerView({ v2 });
+    finalRecommendation = `${view.recommendedStrategy.title}. ${view.recommendedStrategy.rationale}`;
+  }
 
   if (
     !executiveSummary &&
@@ -431,8 +508,7 @@ function severityToReadablePriority(sev: unknown): string | number | undefined {
   return sev as string | number;
 }
 
-function buildQuestions(rj: Record<string, unknown>): PdfQuestion[] {
-  const clarificationQuestions = extractClarificationQuestionsArray(rj);
+function buildQuestionsFromItems(clarificationQuestions: unknown[]): PdfQuestion[] {
   return normalizeList(clarificationQuestions, (item) => {
     if (item == null) return null;
     const obj = item as {
@@ -442,32 +518,41 @@ function buildQuestions(rj: Record<string, unknown>): PdfQuestion[] {
       clarifyPoints?: string[];
       text?: string;
       title?: string;
+      user_hint?: string;
+      userHint?: string;
       priority?: string | number;
       severity?: string;
       category?: string;
     };
     const bullets =
       Array.isArray(obj.clarifyPoints) && obj.clarifyPoints.length > 0
-        ? obj.clarifyPoints.map((p) => String(p).trim()).filter(Boolean)
+        ? obj.clarifyPoints.map((p) => guardCommercialUserFacingText(String(p).trim(), 8)).filter(Boolean)
         : [];
-    const mainQ = safeString(obj.question);
+    const mainQ = guardCommercialUserFacingText(safeString(obj.question), 8) || safeString(obj.question);
     const text =
       mainQ && bullets.length
         ? `${mainQ}\n• ${bullets.slice(0, 4).join("\n• ")}`
         : mainQ ||
+          guardCommercialUserFacingText(safeString(obj.text), 8) ||
           safeString(obj.text) ||
+          guardCommercialUserFacingText(safeString(obj.why), 8) ||
           safeString(obj.why) ||
+          guardCommercialUserFacingText(safeString(obj.reason), 8) ||
           safeString(obj.reason) ||
+          guardCommercialUserFacingText(safeString(obj.title), 8) ||
           safeString(obj.title) ||
           String(item).trim();
-    if (!text) return null;
+    const textClean = guardCommercialUserFacingText(text, 12);
+    if (!textClean) return null;
     const catKey = obj.category ? String(obj.category).trim() : "";
     const categoryLabel = catKey ? CATEGORY_LABELS[catKey] ?? catKey.replace(/_/g, " ") : undefined;
     const priority =
       obj.priority != null ? obj.priority : obj.severity != null ? severityToReadablePriority(obj.severity) : undefined;
+    const titleNorm = resolveClarificationQuestionDisplayTitle(item);
+    const titleOk = titleNorm ? guardCommercialUserFacingText(titleNorm, 8) || titleNorm : "";
     return {
-      ...(safeString(obj.title) ? { title: obj.title!.trim() } : {}),
-      text: sanitizeText(text, { maxLength: 500 }),
+      ...(titleOk ? { title: sanitizeText(titleOk, { maxLength: 160 }) } : {}),
+      text: sanitizeText(textClean, { maxLength: 500 }),
       ...(priority != null ? { priority } : {}),
       ...(categoryLabel ? { categoryLabel } : {}),
     };
@@ -484,9 +569,11 @@ function clarificationFromOfferAssumptionItem(item: unknown): PdfClarification |
     title?: string;
     reason?: string;
     why?: string;
+    user_hint?: string;
+    userHint?: string;
     category?: string;
   };
-  const core =
+  const coreRaw =
     safeString(obj.clarification) ||
     safeString(obj.assumption) ||
     safeString(obj.text) ||
@@ -494,22 +581,24 @@ function clarificationFromOfferAssumptionItem(item: unknown): PdfClarification |
     safeString(obj.reason) ||
     safeString(obj.title) ||
     (typeof item === "string" ? item.trim() : "");
-  const scope = safeString(obj.scopeNote);
+  const core = guardCommercialUserFacingText(coreRaw, 14) || coreRaw.trim();
+  const scope = guardCommercialUserFacingText(safeString(obj.scopeNote), 6) || safeString(obj.scopeNote);
   const text = scope && core ? `${core} ${scope}` : core;
-  if (!text) return null;
+  const textClean = guardCommercialUserFacingText(text, 14);
+  if (!textClean) return null;
   const catKey = typeof obj.category === "string" && obj.category.trim() ? obj.category.trim() : "";
   const categoryLabel = catKey ? CATEGORY_LABELS[catKey] ?? catKey.replace(/_/g, " ") : "";
-  const explicitTitle = safeString(obj.title);
-  const title = explicitTitle || categoryLabel;
+  const titleNorm = resolveOfferAssumptionDisplayTitle(item);
+  const titleOk = titleNorm ? guardCommercialUserFacingText(titleNorm, 8) || titleNorm : "";
+  const title = titleOk || (categoryLabel ? categoryLabel : undefined);
   return {
-    ...(title ? { title } : {}),
-    text: sanitizeText(text, { maxLength: 500 }),
-    ...(categoryLabel && explicitTitle ? { categoryLabel } : {}),
+    ...(title ? { title: sanitizeText(title, { maxLength: 160 }) } : {}),
+    text: sanitizeText(textClean, { maxLength: 500 }),
+    ...(categoryLabel && safeString(obj.title).trim() ? { categoryLabel } : {}),
   };
 }
 
-function buildClarifications(rj: Record<string, unknown>): PdfClarification[] {
-  const items = extractOfferAssumptionItems(rj);
+function buildClarificationsFromItems(items: unknown[]): PdfClarification[] {
   return normalizeList(items, (item) => clarificationFromOfferAssumptionItem(item));
 }
 

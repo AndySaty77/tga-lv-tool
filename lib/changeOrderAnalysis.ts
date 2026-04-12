@@ -683,27 +683,7 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
     return sorted.slice(0, 3).map((c) => c.text);
   }
 
-  let offerStrategySummary: import("./changePotentialModel").OfferStrategySummary | undefined;
-  try {
-    const oss = await buildOfferStrategySummary(summary, commercialActionsFromChangePotential);
-    if (oss) offerStrategySummary = oss;
-  } catch {
-    if (process.env.NODE_ENV !== "test") {
-      console.warn("[changeOrderAnalysis] Offer-Strategy-Summary Fehler");
-    }
-  }
-
-  let systemLogicResult: import("./system-logic").SystemLogicResult | undefined;
-  try {
-    const vortext = input.vortext ?? "";
-    const positionsText = input.lvPositions ?? "";
-    const combinedText = [vortext, positionsText].filter(Boolean).join("\n").trim() || vortext + " " + positionsText;
-    systemLogicResult = runSystemLogicEngine({ vortext, positionsText, combinedText });
-  } catch (_e) {
-    // fail-safe: bei Fehler keine systemLogic setzen
-  }
-
-  // ===== Interner Nachtrag-V2-Debug-Strang (additiv, nur für Admin/Debug über changePotentialSummary.v2Debug) =====
+  // ===== Nachtrag-V2 an Summary anbinden (vor Offer-Strategy-Summary, damit Kennzahl mit UI/PDF übereinstimmt) =====
   try {
     const v2Evidences = mapChangePotentialSummaryToNachtragEvidences(summary);
     const v2 = runNachtragV2Engine(v2Evidences, { primaryDiscipline: null, secondaryDisciplines: [] });
@@ -724,6 +704,26 @@ export async function runChangeOrderAnalysis(input: ChangeOrderInput): Promise<C
     };
   } catch {
     // fail-safe: V2 Debug niemals die produktive Pipeline brechen lassen
+  }
+
+  let offerStrategySummary: import("./changePotentialModel").OfferStrategySummary | undefined;
+  try {
+    const oss = await buildOfferStrategySummary(summary, commercialActionsFromChangePotential);
+    if (oss) offerStrategySummary = oss;
+  } catch {
+    if (process.env.NODE_ENV !== "test") {
+      console.warn("[changeOrderAnalysis] Offer-Strategy-Summary Fehler");
+    }
+  }
+
+  let systemLogicResult: import("./system-logic").SystemLogicResult | undefined;
+  try {
+    const vortext = input.vortext ?? "";
+    const positionsText = input.lvPositions ?? "";
+    const combinedText = [vortext, positionsText].filter(Boolean).join("\n").trim() || vortext + " " + positionsText;
+    systemLogicResult = runSystemLogicEngine({ vortext, positionsText, combinedText });
+  } catch (_e) {
+    // fail-safe: bei Fehler keine systemLogic setzen
   }
 
   return {

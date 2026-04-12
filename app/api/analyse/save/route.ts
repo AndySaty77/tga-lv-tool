@@ -85,11 +85,16 @@ export async function POST(req: Request) {
     try {
       if (body.resultJson && typeof body.resultJson === "object") {
         const rj = body.resultJson as any;
+        const co = rj.changeOrderAnalysis as { changePotentialSummary?: unknown } | null | undefined;
         const summaryInput: ManagementSummaryInput = {
           scoreResult: rj.scoreResult,
           keyFacts: rj.keyFacts ?? null,
           changeOrderAnalysis: rj.changeOrderAnalysis ?? null,
           clarificationQuestions: rj.clarificationQuestions ?? null,
+          changePotentialSummary:
+            (rj.changePotentialSummary as ManagementSummaryInput["changePotentialSummary"]) ??
+            (co?.changePotentialSummary as ManagementSummaryInput["changePotentialSummary"]) ??
+            null,
         };
         managementSummary = buildManagementSummary(summaryInput);
       }

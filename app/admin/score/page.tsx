@@ -47,6 +47,7 @@ import {
   normalizeClarifyPoints,
   shortenClarificationTitle,
 } from "@/lib/commercialQuestionsDisplay";
+import { resolveClarificationQuestionDisplayTitle, resolveOfferAssumptionDisplayTitle } from "@/lib/commercialOutputNormalize";
 
 /** Einheitliches Design für alle Tabs (Rückfragen, Risiken, Angebotsklarstellungen, Admin). */
 const D = PAGE_DESIGN;
@@ -4066,16 +4067,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         <div style={{ display: "grid", gap: 8 }}>
                           {items.map((q: any) => {
                             const qStr = String(q.question ?? "");
-                            const titleBase =
-                              (typeof q.title === "string" && q.title.trim()) ||
-                              qStr.split(/(?<=[.!?])\s+/)[0]?.trim() ||
-                              "";
-                                                       let displayTitle = shortenClarificationTitle(titleBase);
+                            const displayTitle = shortenClarificationTitle(resolveClarificationQuestionDisplayTitle(q));
                             const displayQuestion = compactQuestionForDisplay(qStr, displayTitle, 2, 260);
-                            if (!displayTitle && displayQuestion) {
-                              const fromQ = displayQuestion.split(/[.!?]/)[0]?.trim() || displayQuestion;
-                              displayTitle = shortenClarificationTitle(fromQ);
-                            }
                             const displayWhy = compactWhy(String(q.why ?? q.reason ?? ""));
                             const displayPoints = normalizeClarifyPoints(
                               Array.isArray(q.clarifyPoints) ? q.clarifyPoints : [],
@@ -4271,15 +4264,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                         <div style={{ display: "grid", gap: 8 }}>
                           {items.map((a: any) => {
                             const bodyRaw = String(a.clarification ?? a.assumption ?? "");
-                            const titleBase =
-                              (typeof a.title === "string" && a.title.trim()) ||
-                              bodyRaw.split(/(?<=[.!?])\s+/)[0]?.trim() ||
-                              "";
-                            let displayTitle = shortenClarificationTitle(titleBase);
+                            const displayTitle = shortenClarificationTitle(resolveOfferAssumptionDisplayTitle(a));
                             const displayClar = compactOfferClarificationBody(bodyRaw, 2, 265);
-                            if (!displayTitle && displayClar) {
-                              displayTitle = shortenClarificationTitle(displayClar.split(/[.!?]/)[0]?.trim() || displayClar);
-                            }
                             const displayScope = a.scopeNote ? compactOfferScopeNote(String(a.scopeNote)) : "";
                             const displayWhy = compactWhy(String(a.why ?? a.reason ?? ""));
                             const showExpert =

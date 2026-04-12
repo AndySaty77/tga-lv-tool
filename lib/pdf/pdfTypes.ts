@@ -28,8 +28,21 @@ export type PdfSummary = {
   totalRiskLabel?: string;
   complexityScore?: number;
   claimLevel?: string;
+  /** @deprecated Nutze questionsTotalDetected + questionsAfterDedupe für klare Kennzeichnung */
   questionCount?: number;
+  /** @deprecated Nutze clarificationsTotalDetected + clarificationsAfterDedupe */
   clarificationCount?: number;
+  /** Rohanzahl (Vereinigung questions + byGroup), vor inhaltlicher Deduplizierung */
+  questionsTotalDetected?: number;
+  /** Anzahl nach Deduplizierung / Verdichtung (maßgeblich für ausführliche Listen) */
+  questionsAfterDedupe?: number;
+  /** Kurzliste für Management / Fokus (Cap), ≤ questionsAfterDedupe */
+  questionsPrioritizedForManagement?: number;
+  clarificationsTotalDetected?: number;
+  clarificationsAfterDedupe?: number;
+  clarificationsPrioritizedForManagement?: number;
+  /** Einzeiler zur Einordnung der Kennzahlen (PDF/UI) */
+  countsExplanation?: string;
 };
 
 export type PdfClaimPotential = {

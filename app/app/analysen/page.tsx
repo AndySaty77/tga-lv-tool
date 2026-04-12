@@ -348,7 +348,7 @@ export default function AppAnalysenPage() {
         }}
       >
         <div style={{ display: "flex", flexWrap: "wrap", gap: T.space.md, alignItems: "flex-end" }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200, flex: "1 1 180px" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200, flex: "1 1 200px" }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
               Suche
             </span>
@@ -369,100 +369,6 @@ export default function AppAnalysenPage() {
                 boxSizing: "border-box",
               }}
             />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 120, flex: "0 1 120px" }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              Gewerk
-            </span>
-            <input
-              type="text"
-              value={filterGewerk}
-              onChange={(e) => setFilterGewerk(e.target.value)}
-              placeholder="Gewerk filtern"
-              autoComplete="off"
-              style={{
-                padding: "8px 10px",
-                fontSize: 13,
-                borderRadius: T.radiusSm,
-                border: `1px solid ${T.border}`,
-                background: T.card,
-                color: T.text,
-                width: "100%",
-                boxSizing: "border-box",
-              }}
-            />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 120, flex: "0 1 120px" }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              Projektart
-            </span>
-            <input
-              type="text"
-              value={filterProjektart}
-              onChange={(e) => setFilterProjektart(e.target.value)}
-              placeholder="Projektart filtern"
-              autoComplete="off"
-              style={{
-                padding: "8px 10px",
-                fontSize: 13,
-                borderRadius: T.radiusSm,
-                border: `1px solid ${T.border}`,
-                background: T.card,
-                color: T.text,
-                width: "100%",
-                boxSizing: "border-box",
-              }}
-            />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 160, flex: "0 1 160px" }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              Abgabefrist
-            </span>
-            <select
-              value={filterFrist}
-              onChange={(e) => setFilterFrist(e.target.value as typeof filterFrist)}
-              style={{
-                padding: "8px 10px",
-                fontSize: 13,
-                borderRadius: T.radiusSm,
-                border: `1px solid ${T.border}`,
-                background: T.card,
-                color: T.text,
-                width: "100%",
-                cursor: "pointer",
-              }}
-            >
-              <option value="">alle</option>
-              <option value="present">vorhanden</option>
-              <option value="none">nicht erkennbar</option>
-              <option value="overdue">überfällig</option>
-              <option value="today">heute</option>
-              <option value="d1to3">in 1–3 Tagen</option>
-              <option value="d4to7">in 4–7 Tagen</option>
-              <option value="within7">innerhalb 7 Tage</option>
-            </select>
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 140, flex: "0 1 140px" }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              Favoriten
-            </span>
-            <select
-              value={filterFavorite}
-              onChange={(e) => setFilterFavorite(e.target.value as typeof filterFavorite)}
-              style={{
-                padding: "8px 10px",
-                fontSize: 13,
-                borderRadius: T.radiusSm,
-                border: `1px solid ${T.border}`,
-                background: T.card,
-                color: T.text,
-                width: "100%",
-                cursor: "pointer",
-              }}
-            >
-              <option value="">alle</option>
-              <option value="only">nur Favoriten</option>
-            </select>
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200, flex: "1 1 200px" }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
@@ -490,13 +396,16 @@ export default function AppAnalysenPage() {
               ))}
             </select>
           </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200, flex: "0 1 200px" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 120, flex: "0 1 120px" }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              Angebotsbetrag
+              Gewerk
             </span>
-            <select
-              value={filterBid}
-              onChange={(e) => setFilterBid(e.target.value as typeof filterBid)}
+            <input
+              type="text"
+              value={filterGewerk}
+              onChange={(e) => setFilterGewerk(e.target.value)}
+              placeholder="z. B. Elektro"
+              autoComplete="off"
               style={{
                 padding: "8px 10px",
                 fontSize: 13,
@@ -505,13 +414,31 @@ export default function AppAnalysenPage() {
                 background: T.card,
                 color: T.text,
                 width: "100%",
-                cursor: "pointer",
+                boxSizing: "border-box",
               }}
-            >
-              <option value="">alle</option>
-              <option value="with">nur mit Betrag</option>
-              <option value="without">nur ohne Betrag</option>
-            </select>
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 120, flex: "0 1 120px" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Projektart
+            </span>
+            <input
+              type="text"
+              value={filterProjektart}
+              onChange={(e) => setFilterProjektart(e.target.value)}
+              placeholder="z. B. Neubau"
+              autoComplete="off"
+              style={{
+                padding: "8px 10px",
+                fontSize: 13,
+                borderRadius: T.radiusSm,
+                border: `1px solid ${T.border}`,
+                background: T.card,
+                color: T.text,
+                width: "100%",
+                boxSizing: "border-box",
+              }}
+            />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 180, flex: "0 1 180px" }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
@@ -533,10 +460,105 @@ export default function AppAnalysenPage() {
             >
               <option value="newest">Neueste zuerst</option>
               <option value="oldest">Älteste zuerst</option>
-              <option value="deadline">Abgabefrist zuerst</option>
+              <option value="deadline">Nach Abgabefrist</option>
               <option value="favorites_first">Favoriten zuerst</option>
             </select>
           </label>
+        </div>
+        <div
+          style={{
+            marginTop: T.space.sm,
+            paddingTop: T.space.sm,
+            borderTop: `1px solid ${T.border}`,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: T.faint,
+              marginBottom: T.space.sm,
+            }}
+          >
+            Weitere Filter
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: T.space.md, alignItems: "flex-end" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 160, flex: "0 1 160px" }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                Abgabefrist
+              </span>
+              <select
+                value={filterFrist}
+                onChange={(e) => setFilterFrist(e.target.value as typeof filterFrist)}
+                style={{
+                  padding: "8px 10px",
+                  fontSize: 13,
+                  borderRadius: T.radiusSm,
+                  border: `1px solid ${T.border}`,
+                  background: T.card,
+                  color: T.text,
+                  width: "100%",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">alle</option>
+                <option value="present">Frist erkannt</option>
+                <option value="none">Frist nicht erkennbar</option>
+                <option value="overdue">überfällig</option>
+                <option value="today">heute</option>
+                <option value="d1to3">in 1–3 Tagen</option>
+                <option value="d4to7">in 4–7 Tagen</option>
+                <option value="within7">innerhalb 7 Tage</option>
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 140, flex: "0 1 140px" }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                Favoriten
+              </span>
+              <select
+                value={filterFavorite}
+                onChange={(e) => setFilterFavorite(e.target.value as typeof filterFavorite)}
+                style={{
+                  padding: "8px 10px",
+                  fontSize: 13,
+                  borderRadius: T.radiusSm,
+                  border: `1px solid ${T.border}`,
+                  background: T.card,
+                  color: T.text,
+                  width: "100%",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">alle</option>
+                <option value="only">nur Favoriten</option>
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200, flex: "0 1 200px" }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                Angebotsbetrag netto
+              </span>
+              <select
+                value={filterBid}
+                onChange={(e) => setFilterBid(e.target.value as typeof filterBid)}
+                style={{
+                  padding: "8px 10px",
+                  fontSize: 13,
+                  borderRadius: T.radiusSm,
+                  border: `1px solid ${T.border}`,
+                  background: T.card,
+                  color: T.text,
+                  width: "100%",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">alle</option>
+                <option value="with">nur mit Betrag</option>
+                <option value="without">nur ohne Betrag</option>
+              </select>
+            </label>
+          </div>
         </div>
         {listTruncated ? (
           <p style={{ margin: "10px 0 0", fontSize: 12, color: T.muted, lineHeight: 1.45 }}>
@@ -662,12 +684,12 @@ export default function AppAnalysenPage() {
                         />
                       </label>
                     </th>
-                    <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", minWidth: 140 }}>Analyse</th>
+                    <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", minWidth: 140 }}>Titel</th>
                     <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Datum</th>
                     <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", width: 72 }}>Score</th>
-                    <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 11, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", maxWidth: 130 }}>Bearbeitung</th>
+                    <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 11, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", maxWidth: 130 }}>Status</th>
                     <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 11, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Angebot netto</th>
-                    <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", width: 120 }}>Auswertung</th>
+                    <th style={{ textAlign: "left", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", width: 120 }}>Analyse</th>
                     <th style={{ textAlign: "right", padding: T.space.md, fontWeight: 600, fontSize: 12, color: T.faint, width: 180 }}></th>
                   </tr>
                 </thead>

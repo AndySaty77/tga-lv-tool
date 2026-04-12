@@ -18,6 +18,12 @@ import {
   deriveCommercialActionsFromChangePotential,
   isSimilarToExistingQuestion,
 } from "./changePotentialCommercialActions";
+import {
+  collapseSpecialtyBuckets,
+  dedupeClarificationQuestionItems,
+  guardCommercialUserFacingText,
+  normalizeQuestionTitleForDisplay,
+} from "./commercialOutputNormalize";
 import type { ChangePotentialSummary } from "./changePotentialModel";
 import { KEYFACT_LABELS } from "./keyFactsDefinition";
 
@@ -330,14 +336,29 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
     }
   }
 
-  // 4) Gruppierung
+  const polished: ClarificationQuestion[] = questions.map((q) => {
+    const qt = guardCommercialUserFacingText(q.question, 10) || q.question;
+    const tt = q.title ? guardCommercialUserFacingText(q.title, 6) || q.title : q.title;
+    const wy = q.why ? guardCommercialUserFacingText(q.why, 8) || q.why : q.why;
+    return { ...q, question: qt, ...(tt ? { title: tt } : {}), why: wy, reason: wy };
+  });
+
+  const pass1 = dedupeClarificationQuestionItems(polished, 0.4);
+  const pass2 = dedupeClarificationQuestionItems(collapseSpecialtyBuckets(pass1), 0.34);
+  const deduped = dedupeClarificationQuestionItems(pass2, 0.3) as ClarificationQuestion[];
+
+  const withTitles = deduped.map((q) => ({
+    ...q,
+    title: normalizeQuestionTitleForDisplay(q.title, [q.question, q.reason, q.why].filter(Boolean).join(" ")),
+  }));
+
   const byGroup: Record<QuestionGroup, ClarificationQuestion[]> = {
     technisch: [],
     vertraglich: [],
     terminlich: [],
   };
 
-  for (const q of questions) {
+  for (const q of withTitles) {
     let group: QuestionGroup = CATEGORY_TO_GROUP[q.category] ?? "vertraglich";
     if (q.sourceKeyFact) {
       group = MISSING_KEYFACT_GROUPS[q.sourceKeyFact] ?? group;
@@ -345,5 +366,5 @@ export function generateClarificationQuestions(input: ClarificationInput): Clari
     byGroup[group].push(q);
   }
 
-  return { questions, byGroup, debug };
+  return { questions: withTitles, byGroup, debug };
 }

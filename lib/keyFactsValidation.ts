@@ -359,6 +359,39 @@ export function toLegacyKeyFactConfidence(validated: Record<string, KeyFactField
   return out;
 }
 
+/**
+ * Schnelle Plausibilitätsprüfung für Anzeige aus flachem `keyFacts` (ohne vollständige Validierung).
+ * Unterdrückt offensichtliche Fehl-Extrakte; kein Ersatz für die Extraktionslogik.
+ */
+export function isPlausibleKeyFactDisplayValue(key: string, raw: string): boolean {
+  const v = (raw ?? "").replace(/\s+/g, " ").trim();
+  if (!v) return false;
+  if (isRejectedByBlacklist(v)) return false;
+
+  const L = v.toLowerCase();
+  const metaKeys = new Set([
+    "projektart",
+    "gewerk",
+    "bauvorhaben",
+    "ort",
+    "bauherr_ag",
+    "planer",
+    "vertragsgrundlagen",
+  ]);
+  if (metaKeys.has(key)) {
+    if (v.length < 3) return false;
+    if (/^(die|der|das|den|dem|eine|ein|einem|einen|einer)\s+(geplanten|vorgesehenen|nachfolgenden|genannten|oben)\b/i.test(v)) return false;
+    if (/\b(geplanten|vorgesehenen)\s+(menge|mengen|leistung|leistungen|umfang|arbeiten|position)\b/i.test(v)) return false;
+    if (/^(die|der|das)\s+menge\b/i.test(v)) return false;
+    if (key === "projektart") {
+      if (/^(und|oder|sowie|bzw\.?|sowohl)\b/i.test(v)) return false;
+      if (/\b(lv|gaeb|position|leistung|abschnitt)\b/i.test(L) && v.length < 35) return false;
+      if (looksLikeSentenceFragment(v) && !/\b(neu|umbau|sanierung|erweiterung|modernisierung|ersatz|neubau|altbau)\b/i.test(L)) return false;
+    }
+  }
+  return true;
+}
+
 /** Einheitlicher Fallback-Text für missing/rejected im Standardmodus. */
 export const KEYFACT_FALLBACK_LABEL = "im LV nicht zuverlässig erkannt";
 

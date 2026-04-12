@@ -18,6 +18,7 @@ import type {
   ChangePotentialRecommendedAction,
 } from "./changePotentialModel";
 import type { CommercialActionsFromChangePotential } from "./changePotentialCommercialActions";
+import { leadingNachtragspotenzialScore } from "./nachtrag-v2/leadingPotentialScore";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -214,8 +215,9 @@ function buildContext(summary: ChangePotentialSummary, actions: CommercialAction
   const itemSnapshots = buildItemSnapshots(summary, MAX_ITEMS_SNIPPET);
   const aggregates = buildAggregatedSnapshot(summary);
 
+  const nachtragKennzahl = leadingNachtragspotenzialScore(summary);
   const context: Record<string, unknown> = {
-    overallIndex: summary.overallIndex,
+    overallIndex: nachtragKennzahl,
     totalItems: summary.totalItems,
     highImpactCount: summary.highImpactCount,
     veryHighImpactCount: summary.veryHighImpactCount,
@@ -309,7 +311,7 @@ function parseVariant(raw: unknown): OfferStrategyVariant | null {
 
 function buildDeterministicExecutiveSummary(summary: ChangePotentialSummary, actions: CommercialActionsFromChangePotential | null): string {
   const parts: string[] = [];
-  const index = summary.overallIndex;
+  const index = leadingNachtragspotenzialScore(summary);
   const total = summary.totalItems;
 
   // 1) Satz: Gesamtlage

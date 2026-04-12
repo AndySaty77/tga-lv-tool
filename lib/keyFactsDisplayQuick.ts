@@ -1,12 +1,33 @@
 /**
  * Schnelle KeyFacts-12-Zeilen aus gespeichertem result_json (ohne Live-Validierung).
- * Defensiv: gleiche Grob-Logik wie die Cockpit-Fallback-Pfade (Gewerk → primaryTrade).
+ * Zentraler Resolver: gleiche Plausibilität wie PDF + UI (siehe resolveRowPresentation).
  */
 
 import { KEYFACTS_CORE_12 } from "@/lib/keyFactsDefinition";
-import { KEYFACT_FALLBACK_LABEL } from "@/lib/keyFactsValidation";
+import { isPlausibleKeyFactDisplayValue, KEYFACT_FALLBACK_LABEL } from "@/lib/keyFactsValidation";
 
 export type KeyFactDisplayRow = { key: string; label: string; value: string; isFallback: boolean };
+
+/** Ein Kern-KeyFact-Wert inkl. Fallback – für PDF/UI identisch. */
+export function resolveKeyFactDisplayValue(
+  key: string,
+  raw: string | undefined | null,
+  primaryTrade: string | null,
+): { value: string; isFallback: boolean } {
+  const v = raw != null ? String(raw).trim() : "";
+  if (key === "gewerk") {
+    if (v && isPlausibleKeyFactDisplayValue("gewerk", v)) return { value: v, isFallback: false };
+    if (primaryTrade && isPlausibleKeyFactDisplayValue("gewerk", primaryTrade)) {
+      return { value: primaryTrade, isFallback: false };
+    }
+    return { value: KEYFACT_FALLBACK_LABEL, isFallback: true };
+  }
+  if (!v) return { value: KEYFACT_FALLBACK_LABEL, isFallback: true };
+  if (!isPlausibleKeyFactDisplayValue(key, v)) {
+    return { value: KEYFACT_FALLBACK_LABEL, isFallback: true };
+  }
+  return { value: v, isFallback: false };
+}
 
 export function buildKeyFactsDisplayListQuick(rj: Record<string, unknown>): KeyFactDisplayRow[] {
   const kf =
@@ -18,21 +39,8 @@ export function buildKeyFactsDisplayListQuick(rj: Record<string, unknown>): KeyF
   const primaryTrade = dt?.primaryTrade != null && String(dt.primaryTrade).trim() ? String(dt.primaryTrade).trim() : null;
 
   return KEYFACTS_CORE_12.map(({ key, label }) => {
-    if (key === "gewerk") {
-      const raw = kf.gewerk;
-      if (raw != null && String(raw).trim()) {
-        return { key, label, value: String(raw).trim(), isFallback: false };
-      }
-      if (primaryTrade) {
-        return { key, label, value: primaryTrade, isFallback: false };
-      }
-      return { key, label, value: KEYFACT_FALLBACK_LABEL, isFallback: true };
-    }
-    const raw = kf[key];
-    const v = raw != null ? String(raw).trim() : "";
-    if (v) {
-      return { key, label, value: v, isFallback: false };
-    }
-    return { key, label, value: KEYFACT_FALLBACK_LABEL, isFallback: true };
+    const raw = key === "gewerk" ? kf.gewerk : kf[key];
+    const resolved = resolveKeyFactDisplayValue(key, raw, primaryTrade);
+    return { key, label, value: resolved.value, isFallback: resolved.isFallback };
   });
 }

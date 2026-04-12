@@ -2,7 +2,8 @@
 
 import React from "react";
 
-export type StatusVariant = "Abgeschlossen" | "In Analyse" | "Fehler";
+/** Technischer Analyse-Status (analyse_runs.status) – nur Anzeige, keine Backend-Logik. */
+export type StatusVariant = "Abgeschlossen" | "In Bearbeitung" | "Fehlgeschlagen";
 
 const variantStyles: Record<
   StatusVariant,
@@ -13,19 +14,62 @@ const variantStyles: Record<
     text: "rgba(74,222,128,0.95)",
     border: "rgba(74,222,128,0.35)",
   },
-  "In Analyse": {
+  "In Bearbeitung": {
     bg: "rgba(126,184,212,0.15)",
     text: "rgba(126,184,212,0.95)",
     border: "rgba(126,184,212,0.35)",
   },
-  Fehler: {
+  Fehlgeschlagen: {
     bg: "rgba(248,113,113,0.15)",
     text: "rgba(248,113,113,0.95)",
     border: "rgba(248,113,113,0.35)",
   },
 };
 
-/** Status-Badge für Tabellen: Abgeschlossen (grün), In Analyse (blau), Fehler (rot). */
+/** Mappt Rohwerte aus der DB/API auf einheitliche deutsche Anzeige (technischer Analyse-Status). */
+export function mapTechnicalAnalyseStatus(raw: string | null | undefined): StatusVariant {
+  const s = (raw ?? "").trim().toLowerCase();
+  if (!s) return "Abgeschlossen";
+
+  if (
+    s === "abgeschlossen" ||
+    s === "completed" ||
+    s === "done" ||
+    s === "success" ||
+    s === "ok" ||
+    s === "complete"
+  ) {
+    return "Abgeschlossen";
+  }
+  if (
+    s === "fehlgeschlagen" ||
+    s === "failed" ||
+    s === "error" ||
+    s === "fehler" ||
+    s === "failure"
+  ) {
+    return "Fehlgeschlagen";
+  }
+  if (
+    s === "in bearbeitung" ||
+    s === "in_bearbeitung" ||
+    s === "in analyse" ||
+    s === "in_analyse" ||
+    s === "running" ||
+    s === "processing" ||
+    s === "pending" ||
+    s === "in_progress" ||
+    s === "queued" ||
+    s === "working" ||
+    s === "started"
+  ) {
+    return "In Bearbeitung";
+  }
+
+  return "Abgeschlossen";
+}
+
+/** Status-Badge: technischer Analysezustand (grün / blau / rot). */
 export function StatusBadge({
   status,
   style,
@@ -33,8 +77,8 @@ export function StatusBadge({
   status: string;
   style?: React.CSSProperties;
 }) {
-  const variant = status in variantStyles ? variantStyles[status as StatusVariant] : variantStyles["Abgeschlossen"];
-  const s = variant;
+  const label = mapTechnicalAnalyseStatus(status);
+  const s = variantStyles[label];
 
   return (
     <span
@@ -50,7 +94,7 @@ export function StatusBadge({
         ...style,
       }}
     >
-      {status}
+      {label}
     </span>
   );
 }

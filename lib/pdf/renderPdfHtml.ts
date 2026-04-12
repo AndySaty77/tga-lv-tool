@@ -60,6 +60,12 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
   const claimLevel = opt(summary.claimLevel);
   const questionCount = summary.questionCount ?? questions.length;
   const clarificationCount = summary.clarificationCount ?? clarifications.length;
+  const qTotal = summary.questionsTotalDetected;
+  const qDedup = summary.questionsAfterDedupe ?? questionCount;
+  const qPri = summary.questionsPrioritizedForManagement;
+  const cTotal = summary.clarificationsTotalDetected;
+  const cDedup = summary.clarificationsAfterDedupe ?? clarificationCount;
+  const cPri = summary.clarificationsPrioritizedForManagement;
 
   const parts: string[] = [];
 
@@ -127,7 +133,9 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
     complexityScore != null ||
     claimLevel ||
     questionCount > 0 ||
-    clarificationCount > 0;
+    clarificationCount > 0 ||
+    (qTotal != null && qTotal > 0) ||
+    (cTotal != null && cTotal > 0);
   if (keyFactRows.length > 0 || hasKpis) {
     parts.push('<section class="section section-context">');
     parts.push('<h2 class="section-title">Projektkontext und Kennzahlen</h2>');
@@ -175,14 +183,34 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
             "</div></div>"
         );
       }
-      if (questionCount > 0) {
+      if (qTotal != null && qTotal > 0 && qDedup != null) {
+        parts.push(
+          '<div class="kpi-card"><div class="kpi-label">Rückfragen (erkannt / verdichtet)</div><div class="kpi-value">' +
+            escapeHtml(`${qTotal} / ${qDedup}`) +
+            "</div>" +
+            (qPri != null && qPri > 0
+              ? '<div class="kpi-sub">' + escapeHtml(`Handlungsfokus bis zu ${qPri} priorisiert`) + "</div>"
+              : "") +
+            "</div>"
+        );
+      } else if (questionCount > 0) {
         parts.push(
           '<div class="kpi-card"><div class="kpi-label">Rückfragen</div><div class="kpi-value">' +
             escapeHtml(String(questionCount)) +
             "</div></div>"
         );
       }
-      if (clarificationCount > 0) {
+      if (cTotal != null && cTotal > 0 && cDedup != null) {
+        parts.push(
+          '<div class="kpi-card"><div class="kpi-label">Klarstellungen (erkannt / verdichtet)</div><div class="kpi-value">' +
+            escapeHtml(`${cTotal} / ${cDedup}`) +
+            "</div>" +
+            (cPri != null && cPri > 0
+              ? '<div class="kpi-sub">' + escapeHtml(`Fokus bis zu ${cPri} priorisiert`) + "</div>"
+              : "") +
+            "</div>"
+        );
+      } else if (clarificationCount > 0) {
         parts.push(
           '<div class="kpi-card"><div class="kpi-label">Klarstellungen</div><div class="kpi-value">' +
             escapeHtml(String(clarificationCount)) +

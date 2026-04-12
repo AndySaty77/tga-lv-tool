@@ -5,17 +5,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { appTheme as T } from "@/components/app/appTheme";
 import { getAnalysisDisplayTitle, normalizeEditableTitleInput } from "@/lib/analysisDisplayTitle";
-import { buildPdfReport } from "@/lib/pdf/buildPdfReport";
+import { analysisInputHasNachtragV2, buildPdfReport } from "@/lib/pdf/buildPdfReport";
 import { stripScoringEngineeringJargon } from "@/lib/pdf/pdfFormatters";
 import { sanitizeForDisplay } from "@/lib/displayText";
 import { ProjectInfoManualLayer } from "@/components/ProjectInfoManualLayer";
 import {
   parseManualProjectData,
-  buildProjectInfoManualBundle,
+  buildProjectInfoManualBundleFromResultJson,
   type ManualProjectData,
   type ManualProjectFieldKey,
 } from "@/lib/manualProjectData";
-import { buildKeyFactsDisplayListQuick } from "@/lib/keyFactsDisplayQuick";
 import type { PdfTopRiskItem, PdfCategoryScore, PdfQuestion } from "@/lib/pdf/pdfTypes";
 import { collectPruefHinweiseFromFinding, MAX_PRUEF_HINWEISE_STANDARD } from "@/lib/userHintsForFinding";
 import {
@@ -444,6 +443,7 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
   }
 
   const rj = (item.result_json ?? {}) as Record<string, unknown>;
+  const nachtragV2Active = analysisInputHasNachtragV2(item);
 
   const report = buildPdfReport(
     {
@@ -469,7 +469,7 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
 
   const mappedStatus = mapStatus(item.status);
 
-  const detailManualBundle = buildProjectInfoManualBundle(buildKeyFactsDisplayListQuick(rj), manualProjectData);
+  const detailManualBundle = buildProjectInfoManualBundleFromResultJson(rj, manualProjectData);
   const questions = sortQuestions(report.questions ?? []);
   const offerClarifications = report.clarifications ?? [];
   const hasQuestions = questions.length > 0;
@@ -1255,7 +1255,9 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
                 </div>
               ) : showNachtragFallback && changeOrder ? (
                 <>
-                  {typeof changeOrder.offerStrategySummary?.executiveSummary === "string" && changeOrder.offerStrategySummary.executiveSummary.trim() ? (
+                  {!nachtragV2Active &&
+                  typeof changeOrder.offerStrategySummary?.executiveSummary === "string" &&
+                  changeOrder.offerStrategySummary.executiveSummary.trim() ? (
                     <div style={{ fontSize: 14, color: T.muted, lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{changeOrder.offerStrategySummary.executiveSummary}</div>
                   ) : Array.isArray(changeOrder.opportunities) && changeOrder.opportunities.length > 0 ? (
                     <p style={{ margin: 0, fontSize: 14, color: T.muted }}>{changeOrder.opportunities.length} Einträge im Nachtragspotenzial.</p>

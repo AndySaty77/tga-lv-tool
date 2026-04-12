@@ -134,6 +134,12 @@ export const reportStyles = `
     font-weight: 700;
     color: #1a1a1a;
   }
+  .kpi-card .kpi-sub {
+    font-size: 8pt;
+    color: #555;
+    margin-top: 4pt;
+    line-height: 1.35;
+  }
 
   .section {
     margin-bottom: 16pt;

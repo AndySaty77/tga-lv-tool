@@ -81,7 +81,7 @@ function nextActionId(prefix: string): string {
 }
 
 /** Normalisierung für Ähnlichkeitsvergleich (Trim, Kleinbuchstaben, Reduktion mehrfacher Leerzeichen). */
-function normalizeForCompare(s: string): string {
+export function normalizeForCompare(s: string): string {
   return (s ?? "")
     .trim()
     .toLowerCase()
@@ -89,7 +89,7 @@ function normalizeForCompare(s: string): string {
 }
 
 /** Wort-Überlappung 0..1 (Jaccard-ähnlich auf Wörtern > 2 Zeichen). */
-function textSimilarity(a: string, b: string): number {
+export function textSimilarity(a: string, b: string): number {
   const na = normalizeForCompare(a);
   const nb = normalizeForCompare(b);
   if (na === nb) return 1;
