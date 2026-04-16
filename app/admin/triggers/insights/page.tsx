@@ -2,6 +2,10 @@ import Link from "next/link";
 import { loadTriggerFiresInsights } from "@/lib/triggerFiresInsights";
 import { InsightsInteractive } from "./InsightsInteractive";
 
+/** Immer aktueller DB-Stand nach Löschaktionen; vermeidet veraltete RSC-Payloads für KPIs/Tabellen. */
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const pageWrap: React.CSSProperties = {
   padding: 28,
   fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",

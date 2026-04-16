@@ -8,13 +8,17 @@ import {
   getTriggerFiresAdminClient,
 } from "@/lib/triggerFiresAdmin";
 import { isUuidString } from "@/lib/triggerFiresLog";
+import { loadTriggerFiresInsights } from "@/lib/triggerFiresInsights";
+
+export const dynamic = "force-dynamic";
 
 const RESET_CONFIRM = "RESET";
 
 /**
  * GET: Statistik für globalen Reset (nur Admin, Service Role).
+ * `?full=1`: zusätzlich komplette Insights-Payload (KPIs, Tabellen) – gleiche Quelle wie die Insights-Seite.
  */
-export async function GET() {
+export async function GET(req: Request) {
   const user = await getUser().catch(() => null);
   if (!user || !isAdmin(user)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -27,7 +31,12 @@ export async function GET() {
 
   try {
     const stats = await fetchTriggerFiresGlobalStats(supabase);
-    return NextResponse.json({ ok: true, stats });
+    const full = new URL(req.url).searchParams.get("full") === "1";
+    if (!full) {
+      return NextResponse.json({ ok: true, stats });
+    }
+    const insights = await loadTriggerFiresInsights();
+    return NextResponse.json({ ok: true, stats, insights });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: msg }, { status: 500 });

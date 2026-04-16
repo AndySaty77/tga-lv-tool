@@ -113,6 +113,7 @@ type Props = {
 
 export function InsightsInteractive({ data }: Props) {
   const router = useRouter();
+  const [model, setModel] = useState<TriggerFiresInsightsPayload>(data);
   const [flash, setFlash] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -126,6 +127,10 @@ export function InsightsInteractive({ data }: Props) {
     router.refresh();
   }, [router]);
 
+  useEffect(() => {
+    setModel(data);
+  }, [data]);
+
   const loadGlobalStats = useCallback(async () => {
     setGlobalStatsErr(null);
     try {
@@ -138,6 +143,25 @@ export function InsightsInteractive({ data }: Props) {
       if (j.stats) setGlobalStats(j.stats as GlobalStats);
     } catch {
       setGlobalStatsErr("Netzwerkfehler beim Laden der Statistik");
+    }
+  }, []);
+
+  /** Nach Mutation: gleiche Datenbasis wie Server-Insights (KPIs, Tabellen, Gefahren-Statistik). */
+  const reloadAllFromApi = useCallback(async () => {
+    setGlobalStatsErr(null);
+    try {
+      const r = await fetch("/api/admin/trigger-fires?full=1", { method: "GET", cache: "no-store" });
+      const j = await r.json();
+      if (!r.ok) {
+        setGlobalStatsErr(typeof j.error === "string" ? j.error : "Aktualisierung fehlgeschlagen");
+        return;
+      }
+      if (j.stats) setGlobalStats(j.stats as GlobalStats);
+      if (j.insights && typeof j.insights === "object" && j.insights.ok === true) {
+        setModel(j.insights);
+      }
+    } catch {
+      setGlobalStatsErr("Netzwerkfehler beim Aktualisieren");
     }
   }, []);
 
@@ -163,8 +187,8 @@ export function InsightsInteractive({ data }: Props) {
       const n = typeof j.deletedCount === "number" ? j.deletedCount : 0;
       setFlash({ type: "ok", text: n === 0 ? "Keine Zeilen gelöscht (bereits leer)." : `${n} Trigger-Fire-Zeilen gelöscht.` });
       setDeleteTarget(null);
+      await reloadAllFromApi();
       refresh();
-      void loadGlobalStats();
     } catch {
       setFlash({ type: "error", text: "Netzwerkfehler beim Löschen" });
     } finally {
@@ -190,8 +214,8 @@ export function InsightsInteractive({ data }: Props) {
       setFlash({ type: "ok", text: `Alle trigger_fires gelöscht (ca. ${n} Zeilen).` });
       setResetOpen(false);
       setResetConfirm("");
+      await reloadAllFromApi();
       refresh();
-      void loadGlobalStats();
     } catch {
       setFlash({ type: "error", text: "Netzwerkfehler beim Reset" });
     } finally {
@@ -200,7 +224,7 @@ export function InsightsInteractive({ data }: Props) {
   };
 
   const openDeleteRow = (r: PerAnalysisRow) => {
-    const labels = data.analyseLabelsById[r.analysis_id];
+    const labels = model.analyseLabelsById[r.analysis_id];
     const displayTitle = labels ? getAnalysisDisplayTitle(labels.project_name, labels.file_name) : "Kein analyse_run";
     setDeleteTarget({ ...r, displayTitle });
   };
@@ -224,7 +248,7 @@ export function InsightsInteractive({ data }: Props) {
 
       <section style={sectionStyle}>
         <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>KPIs</h2>
-        {data.aggregationCapped && (
+        {model.aggregationCapped && (
           <p style={{ margin: "10px 0 0", fontSize: 13, color: "#856404", background: "#fff8e6", padding: 10, borderRadius: 8 }}>
             Sehr große Datenlage: Aggregationen (außer Gesamtanzahl und letzte Auslösung) beziehen sich nur auf die neuesten Einträge bis
             zur internen Obergrenze. Zwei KPIs sind deshalb ausgeblendet.
@@ -233,35 +257,35 @@ export function InsightsInteractive({ data }: Props) {
         <div style={kpiGrid}>
           <div style={kpiBox}>
             <div style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>Trigger-Fires gesamt</div>
-            <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>{data.kpis.totalFires.toLocaleString("de-DE")}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>{model.kpis.totalFires.toLocaleString("de-DE")}</div>
           </div>
           <div style={kpiBox}>
             <div style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>Analysen mit Fires</div>
             <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>
-              {data.kpis.analysesWithFires == null ? "—" : data.kpis.analysesWithFires.toLocaleString("de-DE")}
+              {model.kpis.analysesWithFires == null ? "—" : model.kpis.analysesWithFires.toLocaleString("de-DE")}
             </div>
           </div>
           <div style={kpiBox}>
             <div style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>Trigger mit ≥1 Fire</div>
             <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>
-              {data.kpis.distinctTriggersFired == null ? "—" : data.kpis.distinctTriggersFired.toLocaleString("de-DE")}
+              {model.kpis.distinctTriggersFired == null ? "—" : model.kpis.distinctTriggersFired.toLocaleString("de-DE")}
             </div>
           </div>
           <div style={kpiBox}>
             <div style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>Letzte Auslösung</div>
-            <div style={{ fontSize: 15, fontWeight: 600, marginTop: 8 }}>{fmtDt(data.kpis.lastFireAt)}</div>
+            <div style={{ fontSize: 15, fontWeight: 600, marginTop: 8 }}>{fmtDt(model.kpis.lastFireAt)}</div>
           </div>
         </div>
       </section>
 
       <section style={sectionStyle}>
         <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Häufigste Trigger</h2>
-        {data.aggregationCapped && (
+        {model.aggregationCapped && (
           <p style={{ margin: "8px 0 0", fontSize: 12, color: "#666" }}>
             Rangliste bezieht sich nur auf die neuesten Einträge bis zur internen Obergrenze (nicht die gesamte Historie).
           </p>
         )}
-        {data.topTriggers.length === 0 ? (
+        {model.topTriggers.length === 0 ? (
           <p style={{ marginTop: 12, color: "#555" }}>Keine Zeilen.</p>
         ) : (
           <div style={{ overflowX: "auto", marginTop: 12 }}>
@@ -278,7 +302,7 @@ export function InsightsInteractive({ data }: Props) {
                 </tr>
               </thead>
               <tbody>
-                    {data.topTriggers.map((r) => (
+                    {model.topTriggers.map((r) => (
                       <tr key={r.trigger_id}>
                         <td style={thTd}>
                           <Link
@@ -304,7 +328,7 @@ export function InsightsInteractive({ data }: Props) {
 
       <section style={sectionStyle}>
         <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Letzte Trigger-Fires</h2>
-        {data.recentFires.length === 0 ? (
+        {model.recentFires.length === 0 ? (
           <p style={{ marginTop: 12, color: "#555" }}>Keine Zeilen.</p>
         ) : (
           <div style={{ overflowX: "auto", marginTop: 12 }}>
@@ -321,11 +345,11 @@ export function InsightsInteractive({ data }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {data.recentFires.map((r, i) => (
+                {model.recentFires.map((r, i) => (
                   <tr key={`${r.analysis_id}-${r.trigger_id}-${r.created_at}-${i}`}>
                     <td style={{ ...thTd, whiteSpace: "nowrap" }}>{fmtDt(r.created_at)}</td>
                     <td style={thTd}>
-                      <AnalysisTitleCell analysisId={r.analysis_id} labels={data.analyseLabelsById[r.analysis_id]} />
+                      <AnalysisTitleCell analysisId={r.analysis_id} labels={model.analyseLabelsById[r.analysis_id]} />
                     </td>
                     <td style={thTd}>
                       <TopRiskBadge isTop={r.is_top_risk} />
@@ -346,13 +370,13 @@ export function InsightsInteractive({ data }: Props) {
 
       <section style={sectionStyle}>
         <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Trigger pro Analyse</h2>
-        {data.aggregationCapped && (
+        {model.aggregationCapped && (
           <p style={{ margin: "8px 0 0", fontSize: 12, color: "#666" }}>
             Nur Analysen, die in der gleichen Teilmenge wie oben vorkommen; nicht zwingend alle gespeicherten Analysen. Row-Zahlen können bei
             Staffelung von der echten DB abweichen – die Lösch-API arbeitet immer auf der vollen Tabelle.
           </p>
         )}
-        {data.perAnalysis.length === 0 ? (
+        {model.perAnalysis.length === 0 ? (
           <p style={{ marginTop: 12, color: "#555" }}>Keine Zeilen.</p>
         ) : (
           <div style={{ overflowX: "auto", marginTop: 12 }}>
@@ -367,10 +391,10 @@ export function InsightsInteractive({ data }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {data.perAnalysis.map((r) => (
+                {model.perAnalysis.map((r) => (
                   <tr key={r.analysis_id}>
                     <td style={thTd}>
-                      <AnalysisTitleCell analysisId={r.analysis_id} labels={data.analyseLabelsById[r.analysis_id]} />
+                      <AnalysisTitleCell analysisId={r.analysis_id} labels={model.analyseLabelsById[r.analysis_id]} />
                     </td>
                     <td style={thTd}>{r.rowCount.toLocaleString("de-DE")}</td>
                     <td style={thTd}>{r.distinctTriggers.toLocaleString("de-DE")}</td>
