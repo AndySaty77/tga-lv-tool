@@ -1,8 +1,7 @@
 "use client";
 
 import { sanitizeForDisplay, toParagraphs } from "@/lib/displayText";
-
-const TEASER_MAX_LEN = 140;
+import { formatEvidenceModalBody, normalizeEvidenceDisplayString } from "@/lib/evidenceSnippet";
 
 export type VortextDetailModalProps = {
   /** Titel der Detailansicht (z. B. Risikotyp + Stufe). */
@@ -37,7 +36,7 @@ export function VortextDetailModal({
   onClose,
   theme,
 }: VortextDetailModalProps) {
-  const cleaned = sanitizeForDisplay(longText);
+  const cleaned = formatEvidenceModalBody(sanitizeForDisplay(longText));
   const paragraphs = toParagraphs(cleaned);
   const textPrimary = theme?.textPrimary ?? "#0f172a";
   const textSecondary = theme?.textSecondary ?? "#475569";
@@ -120,7 +119,7 @@ export function VortextDetailModal({
                   lineHeight: 1.5,
                 }}
               >
-                {shortText.length > TEASER_MAX_LEN ? `${shortText.slice(0, TEASER_MAX_LEN)}…` : shortText}
+                {normalizeEvidenceDisplayString(sanitizeForDisplay(shortText))}
               </p>
             )}
           </div>

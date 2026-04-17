@@ -37,6 +37,8 @@ export const LEGAL_SIGNAL_RULES: LegalSignalRuleDef[] = [
     patterns: [
       /ohne\s+zusätzliche\s+vergütung/gi,
       /unentgeltlich\s+zu\s+erbringen/gi,
+      /unentgeltlich\s+(nachzuweisen|bereitzustellen|einzubringen|einzureichen)/gi,
+      /nicht\s+besonders\s+verg(ü|ue)tet/gi,
       /im\s+angebotspreis\s+mit\s+abgedeckt/gi,
     ],
     negativePatterns: [/nicht\s+verlangt/gi],
@@ -65,6 +67,8 @@ export const LEGAL_SIGNAL_RULES: LegalSignalRuleDef[] = [
       /einweisung.*nachweis/gi,
       /prüflast.*auftragnehmer/gi,
       /abnahme.*erst\s+nach/gi,
+      /f(ö|oe)rderf(ä|ae)higkeit/gi,
+      /nachweis.*unentgeltlich/gi,
     ],
     title: "Nachweise, Abnahme oder Dokumentation stark betont",
     summary:
@@ -93,6 +97,13 @@ export const LEGAL_SIGNAL_RULES: LegalSignalRuleDef[] = [
       /koordination\s+mit\s+.*gewerk/gi,
       /abhängig\s+von\s+.*(planer|ag|auftraggeber)/gi,
       /vorleistung.*nicht\s+terminsicher/gi,
+      /\bzu\s+klären\b/gi,
+      /\bbauseitig\b/gi,
+      /\bortsbesichtigung\b/gi,
+      /zwingend\s+(erforderlich|notwendig|vorgeschrieben)/gi,
+      /nach\s+voranmeldung/gi,
+      /in\s+abstimmung(\s+mit)?/gi,
+      /\bmsr\b[\s\S]{0,80}\bbauseit/gi,
     ],
     title: "Abhängigkeit von Vorleistungen oder Dritten",
     summary:
@@ -120,6 +131,9 @@ export const LEGAL_SIGNAL_RULES: LegalSignalRuleDef[] = [
       /nicht\s+abschließend\s+definiert/gi,
       /grob\s+beschrieben/gi,
       /ergänzung(en)?\s+(später|nach)/gi,
+      /\bim\s+bedarfsfall\b/gi,
+      /sp(ä|ae)ter(e|en)?\s+nachr(ü|ue)st(ung|en|et)?/gi,
+      /\beingelager(t|ung)\b/gi,
     ],
     title: "Offene Mengen oder spätere Konkretisierung",
     summary:
@@ -141,6 +155,7 @@ export const LEGAL_SIGNAL_RULES: LegalSignalRuleDef[] = [
       /schnittstelle.*nicht\s+(abschließend|eindeutig)/gi,
       /leistungsumfang.*offen/gi,
       /anpassung.*bedarf/gi,
+      /akzeptiert,?\s+sofern/gi,
     ],
     title: "Offene Schnittstellen oder Leistungsumfänge",
     summary:
@@ -153,5 +168,42 @@ export const LEGAL_SIGNAL_RULES: LegalSignalRuleDef[] = [
     suggestedQuestion: "Wie sind Schnittstellen zu benachbarten Gewerken inhaltlich und zeitlich abgegrenzt?",
     suggestedClarification:
       "Wir gehen davon aus, dass Leistungen an Schnittstellen nur nach der vertraglichen Beschreibung umfassen; Erweiterungen sind gesondert.",
+  },
+  {
+    ruleId: "hd_002",
+    signalType: "hindrance_dependency_risk",
+    patterns: [
+      /\bbleibt\b[\s\S]{0,120}\b(in betrieb|betrieben)\b/gi,
+      /lagerplatz[\s\S]{0,160}(begrenzt|nur\s+.*\s+verf(ü|ue)gung)/gi,
+      /betrieb(s)?restriktion|logistik[\s\S]{0,40}einschr(ä|ae)nkung/gi,
+    ],
+    title: "Betrieb, Logistik oder Lagerrestriktionen",
+    summary:
+      "Laufender Betrieb, begrenzter Lagerplatz oder Logistikrestriktionen können Mehraufwand bei Zugang, Zeiten und Hilfsleistungen bedeuten.",
+    recommendedAction:
+      "Zufuhr, Lager, Betriebszeiten und bauseitige Rahmenbedingungen vor Angebot klären.",
+    baseSeverity: "medium",
+    affectsCategories: ["schnittstellen_nebenleistungen", "kalkulationsunsicherheit"],
+    scoreDeltaHint: { schnittstellen_nebenleistungen: 1.5, kalkulationsunsicherheit: 1.2 },
+    suggestedQuestion:
+      "Welche Zugänge, Lagerflächen und Betriebsfenster stehen zuverlässig zur Verfügung; wer stellt sie bereit?",
+    suggestedClarification:
+      "Wir gehen davon aus, dass Einschränkungen durch laufenden Betrieb oder Logistik als Behinderung zu behandeln sind, sofern nicht ausdrücklich anders geregelt.",
+  },
+  {
+    ruleId: "co_003",
+    signalType: "change_order_potential",
+    patterns: [/\bkostenbeteiligung\b/gi, /zu\s+klären\s+ist/gi, /noch\s+nicht\s+(abschließend|verbindlich)/gi],
+    title: "Unklare Kostenverteilung oder ausstehende Festlegungen",
+    summary:
+      "Kostenbeteiligungen oder ausdrücklich offene Klärungspunkte können spätere Anpassungen, Nachträge oder Zusatzvereinbarungen erzwingen.",
+    recommendedAction:
+      "Kostenteilung und offene Punkte vor Angebotsabgabe schriftlich festziehen.",
+    baseSeverity: "medium",
+    affectsCategories: ["kalkulationsunsicherheit", "vertrags_lv_risiken"],
+    scoreDeltaHint: { kalkulationsunsicherheit: 1.8, vertrags_lv_risiken: 1 },
+    suggestedQuestion: "Wie verteilen sich Kosten für Nachrüstungen, Gemeindewerke oder spätere Ergänzungen verbindlich?",
+    suggestedClarification:
+      "Wir gehen davon aus, dass unklare Kostenpunkte nicht ohne gesonderte Vereinbarung zu Lasten des AN gehen.",
   },
 ];

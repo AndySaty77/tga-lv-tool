@@ -439,6 +439,7 @@ function applyDbTriggers(
       penalty: finalPenalty,
       detail: detailParts.join(" | "),
       ...(raw_excerpt != null && raw_excerpt.length > 0 ? { raw_excerpt } : {}),
+      ...(evalResult.matchedKeyword ? { matched_keyword: evalResult.matchedKeyword } : {}),
       ...(hints.length
         ? { user_hint: hints[0], user_hints: hints }
         : {}),
@@ -517,6 +518,7 @@ function mergeSimilarFindings(findings: Finding[]): Finding[] {
         .filter(Boolean)
         .join(" | "),
       ...(first.raw_excerpt != null && { raw_excerpt: first.raw_excerpt }),
+      ...(first.matched_keyword ? { matched_keyword: first.matched_keyword } : {}),
       ...(mergedHints.length ? { user_hint: mergedHints[0], user_hints: mergedHints } : {}),
     });
   }

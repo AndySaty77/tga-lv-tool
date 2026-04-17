@@ -30,6 +30,8 @@ export type Finding = {
   };
   /** Original-LV-Ausschnitt um den Trigger-Treffer (±250 Zeichen); für LLM-Validierung. */
   raw_excerpt?: string;
+  /** Erstes gematchtes Keyword (Trigger), für UI-Grounding / Transparenz. */
+  matched_keyword?: string;
   /** LLM-Validierung V1: bestätigt / unsicher / verworfen. */
   validation_status?: "confirm" | "uncertain" | "reject";
   validation_confidence?: number;

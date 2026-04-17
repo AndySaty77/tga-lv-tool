@@ -10,6 +10,13 @@ import {
   toLegacyKeyFactConfidence,
 } from "@/lib/keyFactsValidation";
 import { stripEmbeddedBinaryAndBase64Artifacts } from "@/lib/sanitizeAnalysisText";
+import { createClient } from "@supabase/supabase-js";
+import { isAdmin } from "@/lib/auth/is-admin";
+import { analyzeLvText, type DbTrigger } from "@/lib/analyzeLvText";
+import { detectDisciplines, type DisciplineKey } from "@/lib/disciplineDetect";
+import { detectLegalSignals, LEGAL_SIGNALS_V1_ENABLED } from "@/lib/legal-signals";
+import { displayCategoryForVortext, type VortextRiskClause } from "@/lib/vortextRiskFromEngine";
+import { mergeAndGroundVortextRisks } from "@/lib/vortextRiskGrounding";
 
 // ================= Types =================
 type RiskLevel = "low" | "medium" | "high";
@@ -20,6 +27,8 @@ type RiskClause = {
   text: string; // wörtlicher Auszug
   interpretation: string; // 1–2 Sätze
   confidence: number; // 0..1
+  /** Nur Transparenz (Trigger/Legal/LLM/Regex) */
+  source?: string;
 };
 
 type KeyFacts = Record<string, string>;
@@ -1336,6 +1345,67 @@ function extractKeyFactsFromNormalized(normalized: NormalizedPayload): {
 const VORTEXT_RATE_LIMIT_PER_MINUTE = 5;
 const VORTEXT_RATE_WINDOW_MS = 60_000;
 
+/** Anzeige Vortext-Karte: Fokus auf die wichtigsten Treffer. */
+const MAX_VORTEXT_RISK_CLAUSES_UI = 8;
+
+const DISCIPLINE_KEYS_VORTEXT = new Set<string>([
+  "heizung",
+  "sanitaer",
+  "lueftung",
+  "msr",
+  "elektro",
+  "kaelte",
+  "global",
+]);
+
+function supabaseAnonForVortext() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  return createClient(url, key);
+}
+
+async function loadActiveDbTriggersForVortext(): Promise<DbTrigger[]> {
+  const supabase = supabaseAnonForVortext();
+  const { data, error } = await supabase.from("triggers").select(`
+      id,
+      name,
+      description,
+      category,
+      trigger_type,
+      keywords,
+      regex,
+      norms,
+      weight,
+      claim_level,
+      risk_interpretation,
+      user_hint,
+      question_template,
+      offer_text_template,
+      is_active,
+      disciplines,
+      context_required,
+      exclude_keywords,
+      match_scope
+    `);
+  if (error) {
+    console.warn("[analyze-vortext] triggers:", error.message);
+    return [];
+  }
+  return (data ?? []) as DbTrigger[];
+}
+
+function filterDbTriggersByDisciplineForVortext(triggers: DbTrigger[], allowDisciplines: DisciplineKey[]): DbTrigger[] {
+  return triggers.filter((t) => {
+    if (typeof t.is_active === "boolean" ? !t.is_active : false) return false;
+    const td: string[] = Array.isArray(t.disciplines) ? t.disciplines : [];
+    if (allowDisciplines.length) {
+      if (!td.length) return false;
+      return td.some((d) => d === "global" || allowDisciplines.includes(d as DisciplineKey));
+    }
+    return true;
+  });
+}
+
 export async function POST(req: Request) {
   const user = await getUser().catch(() => null);
   if (!user) {
@@ -1351,6 +1421,10 @@ export async function POST(req: Request) {
   }
 
   try {
+    const reqUrl = new URL(req.url);
+    const debugVortextRisiko = reqUrl.searchParams.get("debug") === "1" && isAdmin(user);
+    let vortextRiskDebug: Record<string, unknown> | null = null;
+
     const body = await req.json().catch(() => ({}));
     const vortext = sanitizeVortext((body?.text ?? "").toString());
 
@@ -1470,7 +1544,113 @@ export async function POST(req: Request) {
       const llmFacts = llmResult.ok ? llmResult.data!.keyFacts : {};
       const llmConf = llmResult.ok ? llmResult.data!.keyFactConfidence : {};
       const llmRisk = llmResult.ok ? llmResult.data!.riskClauses : [];
-      riskClauses = llmRisk.length ? llmRisk : fallbackRiskClausesRegex(legacyVortext);
+
+      try {
+        const rawTriggers = await loadActiveDbTriggersForVortext();
+        const activeTr = rawTriggers.filter((t) => (typeof t.is_active === "boolean" ? t.is_active : true));
+        const ctx = body?.scoreContext && typeof body.scoreContext === "object" ? body.scoreContext : null;
+        let allowKeys: DisciplineKey[] = [];
+        if (Array.isArray(ctx?.disciplineKeys) && ctx.disciplineKeys.length > 0) {
+          allowKeys = ctx.disciplineKeys.filter((k: unknown): k is DisciplineKey => typeof k === "string" && DISCIPLINE_KEYS_VORTEXT.has(k));
+        } else {
+          const parts = [ctx?.projectName, ctx?.fileName, ctx?.positionsHead, legacyVortext].filter(
+            (s): s is string => typeof s === "string" && s.trim().length > 0
+          );
+          allowKeys = detectDisciplines(parts.join("\n\n")).all;
+        }
+        const dbTriggersFiltered = filterDbTriggersByDisciplineForVortext(activeTr, allowKeys);
+        const vortextFindings = analyzeLvText(legacyVortext, dbTriggersFiltered, {
+          vortext: legacyVortext,
+          allowDisciplines: allowKeys.length ? allowKeys : undefined,
+        });
+        const legalSignals = LEGAL_SIGNALS_V1_ENABLED ? detectLegalSignals(legacyVortext) : [];
+        const regexFb = fallbackRiskClausesRegex(legacyVortext);
+        const grounded = mergeAndGroundVortextRisks({
+          fullVortext: legacyVortext,
+          engineFindings: vortextFindings,
+          legalSignals,
+          llm: llmRisk as VortextRiskClause[],
+          regexFb: regexFb as VortextRiskClause[],
+          maxItems: MAX_VORTEXT_RISK_CLAUSES_UI,
+          categoryLabelForFinding: displayCategoryForVortext,
+          includeInterpretationDebug: debugVortextRisiko,
+        });
+        riskClauses = grounded.riskClauses as RiskClause[];
+
+        if (debugVortextRisiko) {
+          vortextRiskDebug = {
+            vortextLen: legacyVortext.length,
+            vortextSourcePath: vortextSource.sourcePath,
+            vortextSourceTextType: vortextSource.sourceTextType,
+            disciplineAllowKeys: allowKeys,
+            triggerFindingsCount: vortextFindings.length,
+            legalSignalsCount: legalSignals.length,
+            rawEngineTotal: vortextFindings.length + legalSignals.length,
+            mergedCount: riskClauses.length,
+            llmRiskCount: llmRisk.length,
+            regexFallbackCandidates: regexFb.length,
+            topTriggers: vortextFindings
+              .filter((f) => String(f.id).startsWith("DB_"))
+              .slice(0, 12)
+              .map((f) => ({
+                id: String(f.id).replace(/^DB_/, ""),
+                title: f.title,
+                matched_keyword: f.matched_keyword ?? null,
+              })),
+            groundedFinal: grounded.items.map((it) => ({
+              id: it.id,
+              finalTitle: it.finalTitle,
+              previewText: it.previewText,
+              evidenceText: it.evidenceText,
+              sourceLayer: it.evidenceSourceLayer,
+              sourceRuleId: it.sourceRuleId ?? null,
+              triggerId: it.triggerId ?? null,
+              dedupeGroup: it.dedupeGroup,
+              titleOrigin: it.titleOrigin,
+              evidenceOrigin: it.evidenceOrigin,
+              category: it.category,
+              severity: it.severity,
+              titleDowngradeReason: it.titleDowngradeReason ?? null,
+              interpretationAnchors: it.interpretationDebug?.interpretationAnchors ?? null,
+              blockedSpecificTerms: it.interpretationDebug?.blockedSpecificTerms ?? null,
+              ambiguousContextViolations: it.interpretationDebug?.ambiguousContextViolations ?? null,
+              interpretationDowngraded: it.interpretationDebug?.downgradedToGeneric ?? false,
+              interpretationDowngradeReason: it.interpretationDebug?.downgradeReason ?? null,
+            })),
+            droppedForGrounding: grounded.dropped,
+          };
+        }
+      } catch (mergeErr) {
+        console.warn("[analyze-vortext] Vortext-Risiko Engine-Merge:", mergeErr);
+        const regexOnly = fallbackRiskClausesRegex(legacyVortext);
+        const groundedFallback = mergeAndGroundVortextRisks({
+          fullVortext: legacyVortext,
+          engineFindings: [],
+          legalSignals: [],
+          llm: (llmRisk.length ? llmRisk : []) as VortextRiskClause[],
+          regexFb: regexOnly as VortextRiskClause[],
+          maxItems: MAX_VORTEXT_RISK_CLAUSES_UI,
+          categoryLabelForFinding: displayCategoryForVortext,
+          includeInterpretationDebug: debugVortextRisiko,
+        });
+        riskClauses = groundedFallback.riskClauses as RiskClause[];
+        if (debugVortextRisiko) {
+          vortextRiskDebug = {
+            error: mergeErr instanceof Error ? mergeErr.message : String(mergeErr),
+            fallback: "engine_failed_grounded_llm_regex_only",
+            groundedFinal: groundedFallback.items.map((it) => ({
+              id: it.id,
+              finalTitle: it.finalTitle,
+              previewText: it.previewText,
+              evidenceText: it.evidenceText,
+              sourceLayer: it.evidenceSourceLayer,
+              titleOrigin: it.titleOrigin,
+              evidenceOrigin: it.evidenceOrigin,
+            })),
+            droppedForGrounding: groundedFallback.dropped,
+          };
+        }
+      }
 
       if (useNormalizedStructure && (Object.keys(keyFacts).length > 0 || Object.keys(keyFactsSourceByField).length > 0)) {
         const keyFactsBeforeLegacy: KeyFacts = { ...keyFacts };
@@ -1635,6 +1815,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         riskClauses,
+        ...(vortextRiskDebug ? { vortextRiskDebug } : {}),
         keyFacts,
         keyFactConfidence: keyFactConfidenceOut,
         keyFactsValidated,

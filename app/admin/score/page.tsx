@@ -9,6 +9,7 @@ import { NachtragspotenzialBlock } from "@/components/NachtragspotenzialBlock";
 import { VortextDetailModal } from "@/components/VortextDetailModal";
 import { AnalyseCockpitView, type AnalyseCockpitViewProps } from "@/components/AnalyseCockpitView";
 import { sanitizeForDisplay, stripTechnicalNoiseForDisplay } from "@/lib/displayText";
+import { buildReadableSnippet } from "@/lib/evidenceSnippet";
 import { normalizeViewerPositionenText, normalizeViewerVorbemerkungenText } from "@/lib/gaebViewerNormalize";
 import type { ChangeOrderResult } from "@/lib/changeOrderAnalysis";
 import { AMPEL_THRESHOLDS } from "@/lib/scoringConfig";
@@ -989,7 +990,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
   const analyzeVortextLLM = async (
     vortext: string,
     vortextSource?: VortextSource,
-    options?: { normalized?: NormalizedPayload; formatDetected?: string }
+    options?: { normalized?: NormalizedPayload; formatDetected?: string },
+    scoreSync?: { disciplineKeys?: string[]; projectName?: string; fileName?: string; positionsHead?: string }
   ): Promise<VortextResult | null> => {
     setVortextLoading(true);
     setVortextError(null);
@@ -1007,7 +1009,17 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
         body.formatDetected = "gaeb-xml";
         body.normalized = options.normalized;
       }
-      const vRes = await fetch("/api/analyze-vortext", {
+      if (scoreSync && (scoreSync.disciplineKeys?.length || scoreSync.projectName || scoreSync.fileName || scoreSync.positionsHead)) {
+        body.scoreContext = {
+          ...(scoreSync.disciplineKeys?.length ? { disciplineKeys: scoreSync.disciplineKeys } : {}),
+          ...(scoreSync.projectName ? { projectName: scoreSync.projectName } : {}),
+          ...(scoreSync.fileName ? { fileName: scoreSync.fileName } : {}),
+          ...(scoreSync.positionsHead ? { positionsHead: scoreSync.positionsHead } : {}),
+        };
+      }
+      const vortextApiDebug =
+        typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
+      const vRes = await fetch(vortextApiDebug ? "/api/analyze-vortext?debug=1" : "/api/analyze-vortext", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1057,6 +1069,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             }
           : null;
       setKeyFactsDebug(debug);
+      if (vortextApiDebug && vData?.vortextRiskDebug && typeof vData.vortextRiskDebug === "object") {
+        console.log("VORTEXT-RISIKO DEBUG", vData.vortextRiskDebug);
+      }
       return { keyFacts: facts, riskClauses: clauses, keyFactsDebug: debug };
     } catch (e: any) {
       setVortextError(e?.message || "Vortext Analyse fehlgeschlagen");
@@ -1172,7 +1187,20 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
 
       let vortextResult: VortextResult | null = null;
       if (vortextForRisk.trim().length > 0 || normalizedPayload) {
-        vortextResult = await analyzeVortextLLM(vortextForRisk, vortextSource, isGaebXml && normalizedPayload ? { normalized: normalizedPayload, formatDetected: "gaeb-xml" } : undefined);
+        const positionsForDiscipline = (splitUsed?.positions ?? structurePositions ?? "").trim();
+        vortextResult = await analyzeVortextLLM(
+          vortextForRisk,
+          vortextSource,
+          isGaebXml && normalizedPayload ? { normalized: normalizedPayload, formatDetected: "gaeb-xml" } : undefined,
+          {
+            disciplineKeys: Array.isArray((data as any)?.debug?.detectedDisciplines)
+              ? ((data as any).debug.detectedDisciplines as string[])
+              : undefined,
+            projectName: projectNameForScore || undefined,
+            fileName: effectiveSourceFileNameForScore || undefined,
+            positionsHead: positionsForDiscipline ? positionsForDiscipline.slice(0, 12_000) : undefined,
+          }
+        );
       } else {
         setVortextError("Vortext ist leer (Split/Extraktion hat nichts geliefert).");
       }
@@ -2964,9 +2992,8 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
 
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {riskClauses.map((r, idx) => {
-                const teaserLen = 120;
                 const cleaned = sanitizeForDisplay(r.text);
-                const teaser = cleaned.length <= teaserLen ? cleaned : `${cleaned.slice(0, teaserLen)}…`;
+                const teaser = buildReadableSnippet(cleaned, 120);
                 const title = `${r.type || "Risiko"} · ${String(r.riskLevel).toUpperCase()}`;
                 return (
                   <div key={idx} style={{ border: `1px solid ${customerRoute ? CX.border : D.cardBorder}`, borderRadius: D.cardRadius, padding: 12, background: customerRoute ? CX.card : D.cardBg }}>
@@ -3015,7 +3042,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             {riskClauseDetailIndex !== null && riskClauses[riskClauseDetailIndex] && (
               <VortextDetailModal
                 title={`${riskClauses[riskClauseDetailIndex].type || "Risiko"} · ${String(riskClauses[riskClauseDetailIndex].riskLevel).toUpperCase()}`}
-                shortText={sanitizeForDisplay(riskClauses[riskClauseDetailIndex].text).slice(0, 140)}
+                shortText={buildReadableSnippet(sanitizeForDisplay(riskClauses[riskClauseDetailIndex].text), 140)}
                 longText={riskClauses[riskClauseDetailIndex].text}
                 interpretation={riskClauses[riskClauseDetailIndex].interpretation}
                 onClose={() => setRiskClauseDetailIndex(null)}
