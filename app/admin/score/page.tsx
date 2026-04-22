@@ -422,7 +422,8 @@ function fmtKB(bytes: number) {
   return `${(kb / 1024).toFixed(2)} MB`;
 }
 
-const MAX_FILE_BYTES = 10_000_000; // 10 MB MVP-Limit
+const MAX_FILE_BYTES = 10_000_000; // Upload-Limit für Datei-Einlesen
+const SCORE_REQUEST_SAFE_MAX_BYTES = 4_500_000; // Vercel Function Payload-Grenze (~4.5 MB)
 
 type SourceFilter = "both" | "db" | "sys" | "llm";
 type SeverityFilter = "all" | "high" | "medium" | "low";
@@ -1117,24 +1118,51 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
         : "";
       const structurePositions = preview?.structure ? preview.structure.positionen.raw : "";
 
-      const payload: any = { lvText: textToUse, useLlmRelevance };
-      if (splitUsed?.vortext || splitUsed?.positions || structureVortext || structurePositions) {
-        payload.vortext = (splitUsed?.vortext ?? structureVortext ?? "").trim();
-        payload.positions = (splitUsed?.positions ?? structurePositions ?? "").trim();
-      }
-
       // Gewerkserkennung in /api/score: disciplineText nutzt fileName/projectName (Route) – vorher oft leer.
       const effectiveSourceFileNameForScore =
         (typeof options?.sourceFileName === "string" && options.sourceFileName.trim() ? options.sourceFileName.trim() : null) ??
         (typeof fileMeta?.name === "string" && fileMeta.name.trim() ? fileMeta.name.trim() : null) ??
         (typeof lastFile?.name === "string" && lastFile.name.trim() ? lastFile.name.trim() : null);
-      if (effectiveSourceFileNameForScore) {
-        payload.fileName = effectiveSourceFileNameForScore;
-      }
+      const fileModeActive =
+        !!effectiveSourceFileNameForScore ||
+        !!lastFile ||
+        !!fileMeta ||
+        !!splitUsed?.vortext ||
+        !!splitUsed?.positions ||
+        !!structureVortext ||
+        !!structurePositions;
+      const fileVortext = (splitUsed?.vortext ?? structureVortext ?? "").trim();
+      const filePositions = (splitUsed?.positions ?? structurePositions ?? "").trim();
+
+      // Strikte Trennung: Datei-Modus ODER Text-Modus. Niemals beides im gleichen Request.
+      const payload: any = fileModeActive
+        ? {
+            lvText: [fileVortext, filePositions].filter(Boolean).join("\n\n"),
+            vortext: fileVortext,
+            positions: filePositions,
+            useLlmRelevance,
+          }
+        : {
+            lvText: textToUse,
+            useLlmRelevance,
+          };
+
+      if (effectiveSourceFileNameForScore) payload.fileName = effectiveSourceFileNameForScore;
       // Nur manueller Projektname: keyFacts sind im gleichen Takt nach resetVortext noch nicht zuverlässig befüllt.
       const projectNameForScore = resolveDisplayProjectName(manualProjectData, {}).trim();
       if (projectNameForScore) {
         payload.projectName = projectNameForScore;
+      }
+      if (typeof window !== "undefined") {
+        console.log("[/api/score] submit-debug", {
+          mode: fileModeActive ? "file" : "text",
+          fileSize: fileMeta?.size ?? lastFile?.size ?? 0,
+          lvTextLength: lvText.length,
+          payloadLvTextLength: String(payload.lvText ?? "").length,
+          payloadVortextLength: String(payload.vortext ?? "").length,
+          payloadPositionsLength: String(payload.positions ?? "").length,
+          payloadFields: Object.keys(payload),
+        });
       }
 
       const res = await fetch(apiUrl, {
@@ -1336,7 +1364,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
     if (file.size > MAX_FILE_BYTES) {
       setFileMeta({ name: file.name, size: file.size });
       setLvText("");
-      setError(`Datei zu groß (${fmtKB(file.size)}). Limit aktuell: 10 MB.`);
+      setError(`Datei zu groß (${fmtKB(file.size)}). Upload-Limit aktuell: ${fmtKB(MAX_FILE_BYTES)}.`);
       return;
     }
 
@@ -1897,6 +1925,15 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
     if (!customerRoute || !savedReportBanner) return null;
     return computeSavedReportCompleteness(clarificationQuestions, offerAssumptions, changeOrderAnalysis);
   }, [customerRoute, savedReportBanner, clarificationQuestions, offerAssumptions, changeOrderAnalysis]);
+  const savedReportChecklist = useMemo(() => {
+    if (!savedReportCompleteness) return [];
+    const missingSet = new Set(savedReportCompleteness.missingLabels);
+    return [
+      { label: "Nachtragspotenzial", tabId: "nachtragspotenzial" as ResultTabId, done: !missingSet.has("Nachtragspotenzial") },
+      { label: "Rückfragen", tabId: "rueckfragen" as ResultTabId, done: !missingSet.has("Rückfragen") },
+      { label: "Angebotsklarstellungen", tabId: "angebotsklarstellungen" as ResultTabId, done: !missingSet.has("Angebotsklarstellungen") },
+    ];
+  }, [savedReportCompleteness]);
 
   return (
     <div
@@ -2287,7 +2324,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               {customerRoute ? "Datei auswählen" : "Datei wählen"}
             </button>
             {customerRoute && (
-              <span style={{ fontSize: 11, color: T.faint }}>Max. 10 MB · TXT, XML, GAEB</span>
+              <span style={{ fontSize: 11, color: T.faint }}>
+                Upload max. {fmtKB(MAX_FILE_BYTES)} · Analyse-Request max. {fmtKB(SCORE_REQUEST_SAFE_MAX_BYTES)} · TXT, XML, GAEB
+              </span>
             )}
             {isExpertMode && (
               <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
@@ -2321,10 +2360,13 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
           placeholder={customerRoute ? "LV-Text hier einfügen …" : "LV Text hier einfügen..."}
           value={lvText}
           onChange={(e) => setLvText(e.target.value)}
+          readOnly={!!fileMeta}
         />
         {customerRoute && (
           <p style={{ margin: "8px 0 0", fontSize: 12, color: T.muted, lineHeight: 1.5 }}>
-            Diese Funktion funktioniert nur bei strukturiertem LV-Text. Für zuverlässige Ergebnisse empfehlen wir den Import einer GAEB-Datei.
+            {fileMeta
+              ? "Datei-Modus aktiv: Das Textfeld ist nur zur Ansicht. Für die Analyse werden ausschließlich Datei-/Split-Daten gesendet."
+              : "Text-Modus aktiv: Es werden nur Inhalte aus diesem Feld gesendet. Für zuverlässige Ergebnisse empfehlen wir den Import einer GAEB-Datei."}
           </p>
         )}
 
@@ -2426,7 +2468,9 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               {customerRoute ? "Erweiterte Filter (KI-Risiken)" : "Relevanzfilter (KI)"}
             </label>
           )}
-          <span style={{ fontSize: 12, color: customerRoute ? T.faint : "#9ca3af" }}>Max. 10 MB</span>
+          <span style={{ fontSize: 12, color: customerRoute ? T.faint : "#9ca3af" }}>
+            Upload max. {fmtKB(MAX_FILE_BYTES)} · Analyse-Request max. {fmtKB(SCORE_REQUEST_SAFE_MAX_BYTES)}
+          </span>
         </div>
 
         {error && <div style={{ marginTop: 12, color: customerRoute ? T.danger : "#b00020", fontWeight: 600, fontSize: 13 }}>{error}</div>}
@@ -2704,17 +2748,38 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                 </Link>
               </div>
               {savedReportCompleteness && (
-                <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.45 }}>
-                  {savedReportCompleteness.complete ? (
-                    <span style={{ color: T.text, fontWeight: 600 }}>Bericht vollständig</span>
-                  ) : (
-                    <>
-                      <span style={{ color: T.text, fontWeight: 600 }}>Bericht noch nicht vollständig</span>
-                      <span style={{ display: "block", marginTop: 4 }}>
-                        Es fehlen noch: {savedReportCompleteness.missingLabels.join(", ")}
-                      </span>
-                    </>
-                  )}
+                <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.45, display: "grid", gap: 8 }}>
+                  <div style={{ color: T.text, fontWeight: 700 }}>
+                    {savedReportCompleteness.complete
+                      ? "Bericht vollständig · 3/3 erledigt"
+                      : `Bericht noch nicht vollständig · ${savedReportChecklist.filter((i) => i.done).length}/3 erledigt`}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {savedReportChecklist.map((item) => (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={() => setResultTab(item.tabId)}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "6px 10px",
+                          borderRadius: T.radiusSm,
+                          border: item.done ? "1px solid rgba(74, 222, 128, 0.55)" : `1px solid ${T.border}`,
+                          background: item.done ? "rgba(74, 222, 128, 0.15)" : T.card,
+                          color: item.done ? "#bbf7d0" : T.text,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                        title={item.done ? "Erledigt – zum Tab wechseln" : "Noch offen – jetzt ausführen"}
+                      >
+                        <span aria-hidden>{item.done ? "✓" : "○"}</span>
+                        <span>{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
