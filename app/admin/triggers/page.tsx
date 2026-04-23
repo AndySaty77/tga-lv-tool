@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
-import { supabase } from "@/lib/supabaseClient";
 import { CLAIM_LEVELS } from "@/lib/scoringConfig";
 
 type DisciplineKey = "sanitaer" | "heizung" | "lueftung" | "msr" | "elektro" | "kaelte";
@@ -492,13 +491,6 @@ export default function TriggersPage() {
         STATUSES_STAMP_REVIEW.has(newReviewStatus) && newReviewStatus !== prevReviewStatus;
       if (shouldStamp) {
         payload.last_reviewed_at = new Date().toISOString();
-        const { data } = await supabase.auth.getUser();
-        const u = data?.user;
-        const reviewer =
-          (u?.email && u.email.trim()) ||
-          (typeof u?.user_metadata?.full_name === "string" && u.user_metadata.full_name.trim()) ||
-          null;
-        if (reviewer) payload.reviewed_by = reviewer;
       }
 
       await saveTrigger(payload as any, editingId ?? undefined);
@@ -519,13 +511,18 @@ export default function TriggersPage() {
   const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   async function load() {
-    const { data, error } = await supabase.from("triggers").select(TRIGGER_SELECT).order("created_at", { ascending: false });
-
-    if (error) setMsg("DB Fehler: " + error.message);
-    else {
-      const list = (data as TriggerRow[]) || [];
+    try {
+      const res = await fetch("/api/admin/triggers", { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg("DB Fehler: " + (data?.error ?? `HTTP ${res.status}`));
+        return;
+      }
+      const list = (data?.rows as TriggerRow[]) || [];
       setRows(list);
       if (!selectedId && list.length) setSelectedId(list[0].id);
+    } catch (e: any) {
+      setMsg("DB Fehler: " + (e?.message ?? "Unbekannt"));
     }
   }
 
@@ -647,8 +644,13 @@ export default function TriggersPage() {
       }
     }
 
-    const { error } = await supabase.from("triggers").upsert(data as any[], { onConflict: "name" });
-    if (error) return setMsg("DB Upsert Fehler: " + error.message);
+    const res = await fetch("/api/admin/triggers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "upsert_many", data }),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) return setMsg("DB Upsert Fehler: " + (out?.error ?? `HTTP ${res.status}`));
 
     setMsg(`Import ok: ${(data as any[]).length} Trigger`);
     await load();
@@ -657,11 +659,7 @@ export default function TriggersPage() {
   async function onExport() {
     setMsg("Export läuft...");
 
-    const { data, error } = await supabase.from("triggers").select("*").order("created_at", { ascending: false });
-
-    if (error) return setMsg("DB Export Fehler: " + error.message);
-
-    const exportRows = (data as any[]).map((r) => ({
+    const exportRows = (rows as any[]).map((r) => ({
       "Trigger-Name": r.name ?? "",
       Beschreibung: r.description ?? "",
       Risikokategorie: r.category ?? "",
@@ -732,12 +730,22 @@ export default function TriggersPage() {
     existingId?: string | null
   ) {
     if (existingId) {
-      const { error } = await supabase.from("triggers").update(payload).eq("id", existingId);
-      if (error) throw new Error(error.message);
-    } else {
-      const { error } = await supabase.from("triggers").insert(payload);
-      if (error) throw new Error(error.message);
+      const res = await fetch("/api/admin/triggers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save_one", payload, existingId }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out?.error ?? `HTTP ${res.status}`);
+      return;
     }
+    const res = await fetch("/api/admin/triggers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "save_one", payload }),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out?.error ?? `HTTP ${res.status}`);
   }
 
   async function testSelectedTrigger() {

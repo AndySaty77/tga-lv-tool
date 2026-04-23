@@ -5,10 +5,8 @@ import { getUser } from "@/lib/auth/get-user";
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return null;
-  const key = serviceKey || anonKey;
-  return createClient(url, key);
+  if (!url || !serviceKey) return null;
+  return createClient(url, serviceKey);
 }
 
 /**
@@ -23,7 +21,7 @@ export async function POST(req: NextRequest) {
 
   const supabase = getSupabase();
   if (!supabase) {
-    return NextResponse.json({ error: "Supabase nicht konfiguriert" }, { status: 503 });
+    return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY fehlt" }, { status: 503 });
   }
 
   let body: { ids?: unknown };

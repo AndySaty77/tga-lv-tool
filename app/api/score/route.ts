@@ -78,9 +78,10 @@ function mapCategoryTo5(cat: string, title?: string, detail?: string): CategoryK
 }
 
 function supabaseServer() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  return createClient(url, key);
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return null;
+  return createClient(url, serviceKey);
 }
 
 /** ---------- Scoring Config (DB) ---------- */
@@ -95,7 +96,10 @@ type ScoringConfig = {
 
 const FALLBACK_CONFIG: ScoringConfig = FALLBACK_SCORING_CONFIG as ScoringConfig;
 
-async function getScoringConfig(supabase: ReturnType<typeof supabaseServer>): Promise<ScoringConfig> {
+async function getScoringConfig(
+  supabase: ReturnType<typeof supabaseServer> | null
+): Promise<ScoringConfig> {
+  if (!supabase) return FALLBACK_CONFIG;
   const { data, error } = await supabase
     .from("scoring_config")
     .select("value")
@@ -211,7 +215,8 @@ export async function POST(req: Request) {
   const supabase = supabaseServer();
   const cfg = await getScoringConfig(supabase);
 
-  const { data, error } = await supabase.from("triggers").select(`
+  const { data, error } = supabase
+    ? await supabase.from("triggers").select(`
       id,
       name,
       description,
@@ -230,7 +235,8 @@ export async function POST(req: Request) {
       disciplines,
       context_required,
       exclude_keywords
-    `);
+    `)
+    : { data: null, error: new Error("SUPABASE_SERVICE_ROLE_KEY fehlt") };
 
   if (error) {
     console.error("Supabase Trigger Fehler:", error?.message ?? "Unbekannt");

@@ -9,10 +9,8 @@ const TEXTS_CONFIG_KEY = "default";
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return null;
-  const key = serviceKey || anonKey;
-  return createClient(url, key);
+  if (!url || !serviceKey) return null;
+  return createClient(url, serviceKey);
 }
 
 /** Tiefes Merge: base + existing + updates (updates überschreibt). */
@@ -48,7 +46,14 @@ export async function GET() {
   }
   const supabase = getSupabase();
   if (!supabase) {
-    return NextResponse.json({ config: DEFAULT_TEXTS_CONFIG, source: "default" });
+    return NextResponse.json(
+      {
+        error: "SUPABASE_SERVICE_ROLE_KEY fehlt. Admin-Texte können nicht aus der Datenbank geladen werden.",
+        config: DEFAULT_TEXTS_CONFIG,
+        source: "default",
+      },
+      { status: 503 }
+    );
   }
   const { data, error } = await supabase
     .from("texts_config")
@@ -80,7 +85,7 @@ export async function PUT(req: Request) {
   const supabase = getSupabase();
   if (!supabase) {
     return NextResponse.json(
-      { error: "Supabase nicht konfiguriert" },
+      { error: "SUPABASE_SERVICE_ROLE_KEY fehlt. Speichern ist nur serverseitig mit Service-Role erlaubt." },
       { status: 503 }
     );
   }

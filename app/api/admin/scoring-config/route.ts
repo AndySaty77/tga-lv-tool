@@ -64,11 +64,9 @@ function mergeConfig(v: any): ScoringConfigResponse {
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return null;
+  if (!url || !serviceKey) return null;
   // Service Role erlaubt Lesen/Schreiben trotz RLS (empfohlen für Admin-APIs).
-  const key = serviceKey || anonKey;
-  return createClient(url, key);
+  return createClient(url, serviceKey);
 }
 
 /**
@@ -82,7 +80,14 @@ export async function GET() {
   }
   const supabase = getSupabase();
   if (!supabase) {
-    return NextResponse.json({ config: FALLBACK_FULL, source: "fallback" });
+    return NextResponse.json(
+      {
+        error: "SUPABASE_SERVICE_ROLE_KEY fehlt. Scoring-Konfiguration kann nicht aus der Datenbank geladen werden.",
+        config: FALLBACK_FULL,
+        source: "fallback",
+      },
+      { status: 503 }
+    );
   }
   const { data, error } = await supabase
     .from("scoring_config")
@@ -165,7 +170,10 @@ export async function PUT(req: Request) {
   }
   const supabase = getSupabase();
   if (!supabase) {
-    return NextResponse.json({ error: "Supabase nicht konfiguriert" }, { status: 503 });
+    return NextResponse.json(
+      { error: "SUPABASE_SERVICE_ROLE_KEY fehlt. Speichern ist nur serverseitig mit Service-Role erlaubt." },
+      { status: 503 }
+    );
   }
 
   let body: any;

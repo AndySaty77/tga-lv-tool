@@ -18,8 +18,14 @@
    | Name | Wert | Hinweis |
    |------|------|--------|
    | `NEXT_PUBLIC_SUPABASE_URL` | deine Supabase-URL | z.B. `https://xxx.supabase.co` |
-   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dein Supabase Anon Key | aus Supabase Dashboard → Settings → API |
-   | `OPENAI_API_KEY` | dein OpenAI API Key | für LLM-Features (Split, Nachtragsanalyse, Vortext, etc.) |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dein Supabase Anon Key | Public Client-Key (nur für Browser/Auth-Client) |
+   | `SUPABASE_SERVICE_ROLE_KEY` | Service-Role Key | **Server-only, zwingend** für gehärtete Write-/Admin-Routen |
+   | `OPENAI_API_KEY` | OpenAI API Key | **Server-only** für LLM-Features |
+   | `RESEND_API_KEY` | Resend API Key | **Server-only** für Kontaktformular |
+   | `CONTACT_FORM_TO_EMAIL` | Zieladresse | Empfänger für Kontaktformular |
+   | `STRIPE_SECRET_KEY` | Stripe Secret | **Server-only** für Checkout/Portal/Webhook |
+   | `STRIPE_WEBHOOK_SECRET` | Stripe Webhook Secret | **Server-only** |
+   | `STRIPE_PRICE_PRO_MONTHLY` | Stripe Price ID | z. B. `price_...` |
 
    Für alle drei "Production", "Preview" und "Development" setzen (oder nur Production, wenn du nur live nutzt).
 
@@ -39,6 +45,9 @@
 
 - [ ] Repo auf GitHub (o.ä.) gepusht, ohne `.env*`
 - [ ] Vercel-Projekt mit diesem Repo verbunden
-- [ ] `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY` in Vercel gesetzt
-- [ ] `OPENAI_API_KEY` in Vercel gesetzt (wenn LLM-Features genutzt werden)
+- [ ] `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY` gesetzt
+- [ ] `SUPABASE_SERVICE_ROLE_KEY` gesetzt (server-only)
+- [ ] `OPENAI_API_KEY` gesetzt (wenn LLM-Features genutzt werden)
+- [ ] `RESEND_API_KEY` + `CONTACT_FORM_TO_EMAIL` gesetzt (wenn Kontaktformular genutzt wird)
+- [ ] `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PRO_MONTHLY` gesetzt (wenn Billing genutzt wird)
 - [ ] Deploy durchgelaufen, App unter der Vercel-URL erreichbar

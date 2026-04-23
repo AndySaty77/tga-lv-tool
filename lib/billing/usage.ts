@@ -12,6 +12,13 @@ function getSupabase() {
   return createClient(url, key);
 }
 
+function getSupabaseServiceRole() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return null;
+  return createClient(url, serviceKey);
+}
+
 /** Nutzungsinformationen (gesamte Lebenszeit für Free; Pro unbegrenzt). */
 export type TotalUsageInfo = {
   used: number;
@@ -102,33 +109,17 @@ export type IncrementResult = { ok: true } | { ok: false; error: string };
  * Verwendet direkten UPDATE (kein RPC), damit keine DB-Funktion in Produktion nötig ist.
  */
 export async function incrementAnalysisUsedTotal(userId: string): Promise<IncrementResult> {
-  const supabase = getSupabase();
+  const supabase = getSupabaseServiceRole();
   if (!supabase) {
-    return { ok: false, error: "Supabase nicht konfiguriert" };
+    return { ok: false, error: "SUPABASE_SERVICE_ROLE_KEY fehlt" };
   }
 
-  const { data: row, error: selectError } = await supabase
-    .from("profiles")
-    .select("analysis_used_total")
-    .eq("id", userId)
-    .maybeSingle();
+  const { error } = await supabase.rpc("increment_analysis_used_total", {
+    p_user_id: userId,
+  });
 
-  if (selectError) {
-    return { ok: false, error: `Select: ${selectError.message}` };
-  }
-
-  const current = typeof row?.analysis_used_total === "number" && row.analysis_used_total >= 0
-    ? row.analysis_used_total
-    : 0;
-  const nextValue = current + 1;
-
-  const { error: updateError } = await supabase
-    .from("profiles")
-    .update({ analysis_used_total: nextValue })
-    .eq("id", userId);
-
-  if (updateError) {
-    return { ok: false, error: `Update: ${updateError.message}` };
+  if (error) {
+    return { ok: false, error: `RPC increment_analysis_used_total: ${error.message}` };
   }
 
   return { ok: true };

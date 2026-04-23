@@ -14,6 +14,7 @@ import type { PlanId } from "@/lib/billing/plans";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { getTotalUsageForPlan, type TotalUsageInfo } from "@/lib/billing/usage";
 import { getUser } from "@/lib/auth/get-user";
+import { isAdmin } from "@/lib/auth/is-admin";
 import {
   SubscriptionBadge,
   SubscriptionMetaRow,
@@ -301,12 +302,12 @@ export default async function AppBillingPage({
   searchParams: Promise<{ debug?: string }>;
 }) {
   const sp = await searchParams;
-  const showBillingDebug = sp.debug === "1";
 
   const user = await getUser().catch(() => null);
   if (!user) {
     redirect("/login?redirectTo=/app/billing");
   }
+  const showBillingDebug = sp.debug === "1" && isAdmin(user);
 
   let plan: PlanId = "free";
   let usage: TotalUsageInfo | null = null;
@@ -374,8 +375,8 @@ export default async function AppBillingPage({
           {debugRow("user.email", user.email ?? "(null)")}
           {debugRow("plan", plan)}
           {debugRow("DISABLE_PUBLIC_PRO_CHECKOUT", process.env.DISABLE_PUBLIC_PRO_CHECKOUT ?? "(unset)")}
-          {debugRow("STRIPE_CHECKOUT_ALLOWED_EMAILS (raw)", process.env.STRIPE_CHECKOUT_ALLOWED_EMAILS ?? "(unset)")}
-          {debugRow("parsedAllowedEmails", [...checkoutAllowlistSet].join(", ") || "(empty set)")}
+          {debugRow("STRIPE_CHECKOUT_ALLOWED_EMAILS configured", checkoutAllowlistSet.size > 0 ? "yes" : "no")}
+          {debugRow("allowedEmailCount", String(checkoutAllowlistSet.size))}
           {debugRow("isEmailAllowed", String(isEmailAllowed))}
           {debugRow("showStripeCheckoutForFree", String(showStripeCheckoutForFree))}
         </div>

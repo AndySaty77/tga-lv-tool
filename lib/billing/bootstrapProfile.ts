@@ -13,6 +13,10 @@ function getSupabase() {
   return createClient(url, key);
 }
 
+function hasServiceRoleKey() {
+  return Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
 /**
  * Stellt sicher, dass für den aktuell eingeloggten Benutzer ein Eintrag in `profiles` existiert.
  * Wird ausschließlich serverseitig im geschützten App-Bereich aufgerufen.
@@ -39,6 +43,11 @@ export async function ensureUserProfile() {
       return;
     }
     if (existing) {
+      if (!hasServiceRoleKey()) {
+        // eslint-disable-next-line no-console
+        console.error("[ensureUserProfile] Profil-Update übersprungen: SUPABASE_SERVICE_ROLE_KEY fehlt");
+        return;
+      }
       // Optional: Profildaten aktualisieren, Plan nicht anfassen
       const updatePayload: Record<string, any> = {
         email: user.email,
@@ -65,6 +74,11 @@ export async function ensureUserProfile() {
     }
 
     const plan = getDefaultPlan();
+    if (!hasServiceRoleKey()) {
+      // eslint-disable-next-line no-console
+      console.error("[ensureUserProfile] Profil-Anlage übersprungen: SUPABASE_SERVICE_ROLE_KEY fehlt");
+      return;
+    }
     const insertPayload: Record<string, any> = {
       id: user.id,
       email: user.email,

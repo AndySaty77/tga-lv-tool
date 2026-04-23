@@ -1358,14 +1358,19 @@ const DISCIPLINE_KEYS_VORTEXT = new Set<string>([
   "global",
 ]);
 
-function supabaseAnonForVortext() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  return createClient(url, key);
+function supabaseServerForVortext() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return null;
+  return createClient(url, serviceKey);
 }
 
 async function loadActiveDbTriggersForVortext(): Promise<DbTrigger[]> {
-  const supabase = supabaseAnonForVortext();
+  const supabase = supabaseServerForVortext();
+  if (!supabase) {
+    console.warn("[analyze-vortext] SUPABASE_SERVICE_ROLE_KEY fehlt; Trigger-Liste leer");
+    return [];
+  }
   const { data, error } = await supabase.from("triggers").select(`
       id,
       name,
