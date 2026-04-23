@@ -33,6 +33,10 @@ const HIGH_IMPACT_LEVELS: ChangePotentialImpactLevel[] = ["hoch", "sehr_hoch"];
 const STRONG_ENFORCEABILITY_LEVELS: ChangePotentialEnforceability[] = ["gut", "sehr_gut"];
 const WEAK_ENFORCEABILITY_LEVELS: ChangePotentialEnforceability[] = ["schwach", "mittel"];
 
+function isOfferStrategyDebugEnabled(): boolean {
+  return process.env.DEBUG_OFFER_STRATEGY === "true";
+}
+
 type SerializableItemSnapshot = {
   id: string;
   title: string;
@@ -422,7 +426,7 @@ function parsePayload(raw: unknown, summary: ChangePotentialSummary, actions: Co
     finalRecommendation: effectiveFinalRecommendation,
   };
 
-  if (process.env.NEXT_PUBLIC_DEBUG_OFFER_STRATEGY === "true") {
+  if (isOfferStrategyDebugEnabled()) {
     // Debug: nachvollziehbar machen, ob recommendedApproach vom LLM kam oder aus der Fallback-Regel.
     console.log("[buildOfferStrategySummary][debug] recommendedApproach", {
       fromModel: approachFromModel,
@@ -453,8 +457,12 @@ export async function buildOfferStrategySummary(
     process.env.OPENAI_MODEL ||
     "gpt-4o-mini";
 
-  if (process.env.NEXT_PUBLIC_DEBUG_OFFER_STRATEGY === "true") {
-    console.log("[buildOfferStrategySummary][debug] llm_context", context);
+  if (isOfferStrategyDebugEnabled()) {
+    console.log("[buildOfferStrategySummary][debug] llm_context_meta", {
+      contextLength: context.length,
+      itemCount: summary.items?.length ?? 0,
+      hasCommercialActions: commercialActions != null,
+    });
   }
 
   const userContent = `Du bist Experte für Angebotsstrategie im Baubereich. Erstelle eine knappe, entscheidungsrelevante Management-Zusammenfassung und drei Strategievarianten NUR auf Basis der folgenden strukturierten Analyse. Erfinde keine neuen Themen und nenne keine allgemeinen TGA-Standardaussagen, die nicht direkt durch die Daten gestützt sind.

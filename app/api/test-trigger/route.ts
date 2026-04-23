@@ -1,7 +1,17 @@
 import { NextResponse } from "next/server";
 import { analyzeLvText, DbTrigger } from "../../../lib/analyzeLvText";
+import { getUser } from "@/lib/auth/get-user";
+import { isAdmin } from "@/lib/auth/is-admin";
 
 export async function POST(req: Request) {
+  const user = await getUser().catch(() => null);
+  if (!user) {
+    return NextResponse.json({ error: "Nicht angemeldet" }, { status: 401 });
+  }
+  if (!isAdmin(user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const body = await req.json().catch(() => ({}));
 
   const lvText = String((body as any)?.lvText ?? "");

@@ -45,7 +45,39 @@ export async function POST(req: NextRequest) {
 
   const userId = user.id;
 
-  // 1. Alle analyse_runs des Nutzers löschen
+  // 1. Alle Analyse-IDs des Nutzers ermitteln
+  const { data: runRows, error: errRunIds } = await supabase
+    .from("analyse_runs")
+    .select("id")
+    .eq("user_id", userId);
+
+  if (errRunIds) {
+    return NextResponse.json(
+      { error: "Kontolöschung fehlgeschlagen. Bitte später erneut versuchen oder den Support kontaktieren." },
+      { status: 500 }
+    );
+  }
+
+  const runIds = (runRows ?? [])
+    .map((r) => (typeof r.id === "string" ? r.id : ""))
+    .filter((id) => id.length > 0);
+
+  // 2. Zugehörige trigger_fires löschen, damit keine Orphans bleiben
+  if (runIds.length > 0) {
+    const { error: errFires } = await supabase
+      .from("trigger_fires")
+      .delete()
+      .in("analysis_id", runIds);
+
+    if (errFires) {
+      return NextResponse.json(
+        { error: "Kontolöschung fehlgeschlagen. Bitte später erneut versuchen oder den Support kontaktieren." },
+        { status: 500 }
+      );
+    }
+  }
+
+  // 3. Alle analyse_runs des Nutzers löschen
   const { error: errRuns } = await supabase
     .from("analyse_runs")
     .delete()
@@ -58,7 +90,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 2. Profil des Nutzers löschen
+  // 4. Profil des Nutzers löschen
   const { error: errProfile } = await supabase
     .from("profiles")
     .delete()
@@ -71,7 +103,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 3. Auth-User löschen (nur mit Service-Role möglich)
+  // 5. Auth-User löschen (nur mit Service-Role möglich)
   const { error: errAuth } = await supabase.auth.admin.deleteUser(userId);
 
   if (errAuth) {

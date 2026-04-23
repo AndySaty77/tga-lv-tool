@@ -17,6 +17,13 @@ type Payload = {
   resultJson?: unknown;
 };
 
+function sanitizeResultJsonForPersistence(value: unknown): unknown {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return value;
+  const obj = value as Record<string, unknown>;
+  const { gaebPreview: _dropGaebPreview, split: _dropSplit, ...rest } = obj;
+  return rest;
+}
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -45,6 +52,7 @@ export async function POST(req: Request) {
   if (body.resultJson === undefined) {
     return NextResponse.json({ error: "resultJson ist erforderlich" }, { status: 400 });
   }
+  const sanitizedResultJson = sanitizeResultJsonForPersistence(body.resultJson);
 
   let plan: PlanId = "free";
   if (user) {
@@ -111,7 +119,7 @@ export async function POST(req: Request) {
       status,
       management_summary: managementSummary,
       user_id: user?.id ?? null,
-      result_json: body.resultJson,
+      result_json: sanitizedResultJson,
     })
     .select("id, created_at, project_name, file_name, score, status, management_summary")
     .single();
@@ -120,12 +128,15 @@ export async function POST(req: Request) {
     const isRls = error.message?.includes("row-level security");
     const msg = isRls
       ? "Speichern durch RLS blockiert. SUPABASE_SERVICE_ROLE_KEY setzen oder RLS-Policy für analyse_runs anlegen."
-      : error.message;
+      : "Analyse konnte nicht gespeichert werden.";
+    if (!isRls && process.env.NODE_ENV !== "test") {
+      console.error("[analyse/save] db_insert_failed", error.message);
+    }
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
   void logTriggerFiresAfterAnalyseSave({
-    resultJson: body.resultJson,
+    resultJson: sanitizedResultJson,
     analyseRunId: data.id,
     supabase,
   });
@@ -134,7 +145,6 @@ export async function POST(req: Request) {
   // Temporäres Logging (Debug: warum wird analysis_used_total nicht erhöht?)
   const logCtx = {
     "save-route": true,
-    userId: user?.id ?? null,
     plan,
     analyseGespeichert,
   };

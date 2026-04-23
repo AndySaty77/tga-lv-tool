@@ -140,7 +140,12 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
         ? (existing.result_json as Record<string, unknown>)
         : {};
     const incoming = body.resultJsonMerge! as Record<string, unknown>;
-    const { manualProjectData: manualPatch, ...restIncoming } = incoming;
+    const {
+      manualProjectData: manualPatch,
+      gaebPreview: _dropGaebPreview,
+      split: _dropSplit,
+      ...restIncoming
+    } = incoming;
     const merged: Record<string, unknown> = { ...prev, ...restIncoming };
     if (manualPatch != null && typeof manualPatch === "object" && !Array.isArray(manualPatch)) {
       merged.manualProjectData = mergeManualProjectDataPatch(prev.manualProjectData, manualPatch);
@@ -214,6 +219,36 @@ export async function DELETE(_req: NextRequest, context: { params: Promise<{ id:
   const { id } = await context.params;
   if (!id) {
     return NextResponse.json({ error: "id erforderlich" }, { status: 400 });
+  }
+
+  // Erst sicherstellen, dass die Analyse dem Nutzer gehört.
+  const { data: existing, error: existsErr } = await supabase
+    .from("analyse_runs")
+    .select("id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (existsErr) {
+    const isRls = existsErr.message?.includes("row-level security");
+    const msg = isRls
+      ? "Lesen durch RLS blockiert. SUPABASE_SERVICE_ROLE_KEY setzen oder RLS-Policy für analyse_runs anlegen."
+      : existsErr.message;
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
+  if (!existing) {
+    return NextResponse.json({ error: "Analyse nicht gefunden oder kein Zugriff" }, { status: 404 });
+  }
+
+  // Mitlöschung zugehöriger Trigger-Fires, damit keine Orphans bleiben.
+  const { error: firesErr } = await supabase
+    .from("trigger_fires")
+    .delete()
+    .eq("analysis_id", id);
+
+  if (firesErr) {
+    return NextResponse.json({ error: firesErr.message }, { status: 500 });
   }
 
   const { data: deleted, error } = await supabase

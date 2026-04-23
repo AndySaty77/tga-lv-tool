@@ -10,9 +10,12 @@ import OpenAI from "openai";
 import { getUser } from "@/lib/auth/get-user";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { hasFeature } from "@/lib/billing/plans";
+import { checkRateLimit } from "@/lib/rateLimit";
 import { generateOfferAssumptions, type OfferAssumption } from "../../../lib/offerAssumptions";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const OFFER_ASSUMPTIONS_RATE_LIMIT_PER_10_MIN = 15;
+const OFFER_ASSUMPTIONS_RATE_WINDOW_MS = 10 * 60 * 1000;
 
 async function llmRefineAssumptions(assumptions: OfferAssumption[]): Promise<OfferAssumption[]> {
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -93,6 +96,17 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { error: "Angebotsklarstellungen sind nur im Pro-Plan verfügbar." },
       { status: 403 }
+    );
+  }
+  const rl = checkRateLimit(
+    `offer-assumptions:${user.id}`,
+    OFFER_ASSUMPTIONS_RATE_LIMIT_PER_10_MIN,
+    OFFER_ASSUMPTIONS_RATE_WINDOW_MS
+  );
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Zu viele Anfragen. Bitte kurz warten." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
     );
   }
 

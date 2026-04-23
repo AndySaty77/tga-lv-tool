@@ -2,10 +2,38 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { stripEmbeddedBinaryAndBase64Artifacts } from "@/lib/sanitizeAnalysisText";
+import { getUser } from "@/lib/auth/get-user";
+import { isAdmin } from "@/lib/auth/is-admin";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
 const HARD_MAX_CHARS = 200_000; // Schutz vor riesigen Uploads
+const MAX_UPLOAD_BYTES = 10_000_000;
+const GAEB_SPLIT_RATE_LIMIT_PER_10_MIN = 10;
+const GAEB_SPLIT_RATE_WINDOW_MS = 10 * 60 * 1000;
+const ALLOWED_EXTENSIONS = new Set([".x83", ".x84", ".x86", ".xml", ".gaeb", ".txt"]);
+const ALLOWED_MIME_TYPES = new Set([
+  "text/plain",
+  "text/xml",
+  "application/xml",
+  "application/octet-stream",
+]);
+
+function getLowercaseExtension(filename: string): string {
+  const clean = (filename ?? "").trim().toLowerCase();
+  const dotIdx = clean.lastIndexOf(".");
+  if (dotIdx <= 0 || dotIdx === clean.length - 1) return "";
+  return clean.slice(dotIdx);
+}
+
+function isAllowedUploadFile(file: File): boolean {
+  const ext = getLowercaseExtension(file.name);
+  if (!ALLOWED_EXTENSIONS.has(ext)) return false;
+  const mime = (file.type ?? "").trim().toLowerCase();
+  // Einige Browser liefern für diese Dateien keinen verlässlichen MIME-Type.
+  return mime.length === 0 || ALLOWED_MIME_TYPES.has(mime);
+}
 
 function normalizeNewlines(s: string) {
   return (s ?? "").toString().replace(/\r\n/g, "\n").replace(/\r/g, "\n");
@@ -64,6 +92,23 @@ function findCutByMarker(text: string, marker: string) {
 
 export async function POST(req: Request) {
   try {
+    const ip = getClientIp(req);
+    const rl = checkRateLimit(
+      `gaeb-split-llm:${ip}`,
+      GAEB_SPLIT_RATE_LIMIT_PER_10_MIN,
+      GAEB_SPLIT_RATE_WINDOW_MS
+    );
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "Zu viele Anfragen. Bitte später erneut versuchen." },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+      );
+    }
+
+    const reqUrl = new URL(req.url);
+    const user = await getUser().catch(() => null);
+    const includeDebugPayload = reqUrl.searchParams.get("debug") === "1" && !!user && isAdmin(user);
+
     const form = await req.formData();
     const file = form.get("file");
 
@@ -72,6 +117,22 @@ export async function POST(req: Request) {
     }
 
     const f = file as File;
+    if (!isAllowedUploadFile(f)) {
+      return NextResponse.json(
+        {
+          error: "Ungültiger Dateityp. Erlaubt: .x83, .x84, .x86, .xml, .gaeb, .txt",
+        },
+        { status: 400 }
+      );
+    }
+    if (!Number.isFinite(f.size) || f.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json(
+        {
+          error: `Datei zu groß. Maximal erlaubt: ${MAX_UPLOAD_BYTES} Bytes`,
+        },
+        { status: 413 }
+      );
+    }
     const raw = normalizeNewlines(await f.text());
     const rawPreview = hardCut(raw, HARD_MAX_CHARS);
 
@@ -122,58 +183,71 @@ Wichtig:
     try {
       parsed = JSON.parse(content);
     } catch {
-      return NextResponse.json(
-        { error: "LLM returned non-JSON", raw: content.slice(0, 2000) },
-        { status: 500 }
-      );
+      if (process.env.NODE_ENV !== "test") {
+        console.error("[gaeb-split-llm] non_json_response");
+      }
+      return NextResponse.json({ error: "gaeb-split-llm failed" }, { status: 500 });
     }
 
     const marker: string = (parsed.marker ?? "").toString();
     const found = findCutByMarker(clean, marker);
 
     if (found.idx === -1) {
-      return NextResponse.json({
+      const markerNotFoundResponse: Record<string, unknown> = {
         filename: f.name,
         size: f.size,
         error: "marker-not-found-in-text",
-        llm: parsed,
-        debug: {
+      };
+      if (includeDebugPayload) {
+        markerNotFoundResponse.llm = parsed;
+        markerNotFoundResponse.debug = {
           previewChars: rawPreview.length,
           cleanChars: clean.length,
           markerPreview: marker.slice(0, 400),
-        },
-      }, { status: 422 });
+        };
+      }
+      return NextResponse.json(markerNotFoundResponse, { status: 422 });
     }
 
     const cutIdx = found.idx;
     const vortext = clean.slice(0, cutIdx).trim();
     const positions = clean.slice(cutIdx).trim();
 
-    return NextResponse.json({
+    const responsePayload: Record<string, unknown> = {
       filename: f.name,
       size: f.size,
-
       vortext,
       positions,
+      meta: {
+        cutFoundBy: found.used,
+        vortextChars: vortext.length,
+        positionsChars: positions.length,
+      },
+    };
 
-      llm: {
+    if (includeDebugPayload) {
+      responsePayload.llm = {
         marker,
         marker_line_count: parsed.marker_line_count,
         confidence: parsed.confidence,
         reason: parsed.reason,
-      },
-
-      debug: {
+      };
+      responsePayload.debug = {
         cutIdx,
         cutFoundBy: found.used,
         vortextChars: vortext.length,
         positionsChars: positions.length,
         positionsStartsWith: positions.slice(0, 300),
-      },
-    });
-  } catch (e: any) {
+      };
+    }
+
+    return NextResponse.json(responsePayload);
+  } catch (e: unknown) {
+    if (process.env.NODE_ENV !== "test") {
+      console.error("[gaeb-split-llm] failed", e instanceof Error ? e.message : String(e));
+    }
     return NextResponse.json(
-      { error: "gaeb-split-llm failed", message: e?.message || String(e) },
+      { error: "gaeb-split-llm failed" },
       { status: 500 }
     );
   }

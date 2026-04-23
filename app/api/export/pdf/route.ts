@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getUser } from "@/lib/auth/get-user";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { hasFeature } from "@/lib/billing/plans";
+import { checkRateLimit } from "@/lib/rateLimit";
 import { buildPdfReport, type BuildPdfReportOptions } from "@/lib/pdf/buildPdfReport";
 import { renderPdfHtml } from "@/lib/pdf/renderPdfHtml";
 import { htmlToPdfBuffer } from "@/lib/pdf/pdfEngine";
@@ -10,6 +11,8 @@ import { sanitizeFilename } from "@/lib/pdf/sanitizeFilename";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
+const PDF_EXPORT_RATE_LIMIT_PER_10_MIN = 10;
+const PDF_EXPORT_RATE_WINDOW_MS = 10 * 60 * 1000;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -47,6 +50,32 @@ export async function POST(request: NextRequest) {
   console.error("[PDF export] PDF export started");
 
   try {
+    const user = await getUser().catch(() => null);
+    if (!user) {
+      return NextResponse.json(
+        { error: true, stage: "auth", message: "Nicht angemeldet" },
+        { status: 401 }
+      );
+    }
+    const plan = await getUserPlan();
+    if (!hasFeature(plan, "pdfExport")) {
+      return NextResponse.json(
+        { error: true, stage: "plan", message: "PDF-Export ist nur im Pro-Plan verfügbar." },
+        { status: 403 }
+      );
+    }
+    const rl = checkRateLimit(
+      `pdf-export:${user.id}`,
+      PDF_EXPORT_RATE_LIMIT_PER_10_MIN,
+      PDF_EXPORT_RATE_WINDOW_MS
+    );
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: true, stage: "rate_limit", message: "Zu viele Anfragen. Bitte kurz warten." },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+      );
+    }
+
     let body: unknown = null;
     try {
       body = await request.json();
@@ -66,10 +95,6 @@ export async function POST(request: NextRequest) {
         : "";
 
     if (analysisId) {
-      const user = await getUser().catch(() => null);
-      if (!user) {
-        return NextResponse.json({ error: true, stage: "auth", message: "Nicht angemeldet" }, { status: 401 });
-      }
       const supabase = getSupabase();
       if (!supabase) {
         return errJson("load-analysis", "Supabase nicht konfiguriert", 503);
@@ -92,13 +117,6 @@ export async function POST(request: NextRequest) {
       if (!data) {
         console.error("[PDF export] load-analysis: no row found for analysisId");
         return NextResponse.json({ error: true, stage: "load-analysis", message: "Analyse nicht gefunden oder kein Zugriff." }, { status: 404 });
-      }
-      const plan = await getUserPlan();
-      if (!hasFeature(plan, "pdfExport")) {
-        return NextResponse.json(
-          { error: true, stage: "plan", message: "PDF-Export ist nur im Pro-Plan verfügbar." },
-          { status: 403 }
-        );
       }
       payload = data;
     } else {

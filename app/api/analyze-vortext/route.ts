@@ -1428,6 +1428,7 @@ export async function POST(req: Request) {
   try {
     const reqUrl = new URL(req.url);
     const debugVortextRisiko = reqUrl.searchParams.get("debug") === "1" && isAdmin(user);
+    const includeSensitiveDebug = debugVortextRisiko;
     let vortextRiskDebug: Record<string, unknown> | null = null;
 
     const body = await req.json().catch(() => ({}));
@@ -1796,6 +1797,17 @@ export async function POST(req: Request) {
       }
       return out;
     });
+    const keyFactsWithSourceForClient = includeSensitiveDebug
+      ? keyFactsWithSource
+      : keyFactsWithSource.map((entry) => ({
+          field: entry.field,
+          value: entry.value,
+          sourceTextType: entry.sourceTextType,
+          sourcePath: entry.sourcePath,
+          confidence: entry.confidence,
+          validationReason: entry.validationReason,
+          extractionMode: entry.extractionMode,
+        }));
 
     // Optionale Debug-Ausgabe: erkannte KeyFacts (Quelle + Confidence) – nur Struktur, keine LV-Inhalte
     if (process.env.NODE_ENV === "development") {
@@ -1828,29 +1840,39 @@ export async function POST(req: Request) {
           mode: llmResult?.mode,
           llmOk: llmResult?.ok,
           regexFound: Object.keys(regexFactsLegacy),
-          llmRawPreview: llmResult?.raw ? String(llmResult.raw).slice(0, 260) : "",
+          ...(includeSensitiveDebug && {
+            llmRawPreview: llmResult?.raw ? String(llmResult.raw).slice(0, 260) : "",
+          }),
           filteredLowConfidence: true,
           repairApplied: true,
           keyFactsSourceMode,
-          keyFactsWithSource,
+          keyFactsWithSource: keyFactsWithSourceForClient,
           keyFactsValidated,
           llmFallbackUsed,
           llmFieldsRequested,
           llmFieldsAccepted,
           llmFieldsRejected,
-          llmRawResponse,
-          llmParsedResponse,
-          llmFallbackDebugPerField,
-          mergeWinnerPerField,
-          overwrittenByLegacy,
-          previousValueBeforeLegacyMerge,
+          ...(includeSensitiveDebug && {
+            llmRawResponse,
+            llmParsedResponse,
+            llmFallbackDebugPerField,
+            mergeWinnerPerField,
+            overwrittenByLegacy,
+            previousValueBeforeLegacyMerge,
+          }),
         },
       },
       { status: 200 }
     );
-  } catch (e: any) {
+  } catch (e: unknown) {
+    if (process.env.NODE_ENV !== "test") {
+      console.error(
+        "[analyze-vortext] unexpected_error",
+        e instanceof Error ? e.message : String(e)
+      );
+    }
     return NextResponse.json(
-      { error: "Vortext Analyse fehlgeschlagen", message: e?.message || String(e) },
+      { error: "Vortext Analyse fehlgeschlagen" },
       { status: 500 }
     );
   }

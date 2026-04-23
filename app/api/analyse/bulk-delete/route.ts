@@ -44,11 +44,44 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Keine gültigen IDs" }, { status: 400 });
   }
 
+  // Nur tatsächlich dem Nutzer gehörende IDs berücksichtigen.
+  const { data: ownedRows, error: ownedErr } = await supabase
+    .from("analyse_runs")
+    .select("id")
+    .eq("user_id", user.id)
+    .in("id", ids);
+
+  if (ownedErr) {
+    const isRls = ownedErr.message?.includes("row-level security");
+    const msg = isRls
+      ? "Lesen durch RLS blockiert."
+      : ownedErr.message;
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
+  const ownedIds = (ownedRows ?? [])
+    .map((r) => (typeof r.id === "string" ? r.id : ""))
+    .filter((id) => id.length > 0);
+
+  if (ownedIds.length === 0) {
+    return NextResponse.json({ ok: true, deleted: 0 });
+  }
+
+  // Reihenfolge: zuerst trigger_fires der betroffenen Analysen entfernen.
+  const { error: firesErr } = await supabase
+    .from("trigger_fires")
+    .delete()
+    .in("analysis_id", ownedIds);
+
+  if (firesErr) {
+    return NextResponse.json({ error: firesErr.message }, { status: 500 });
+  }
+
   const { data: deleted, error } = await supabase
     .from("analyse_runs")
     .delete()
     .eq("user_id", user.id)
-    .in("id", ids)
+    .in("id", ownedIds)
     .select("id");
 
   if (error) {

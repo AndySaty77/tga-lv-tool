@@ -4,13 +4,58 @@ import { parse } from "../../../lib/gaebParse";
 import { hardCut } from "../../../lib/gaebParse/utils";
 import { parseGaebXmlNormalized, debugRawStructures } from "../../../lib/gaebParse/parseGaebXmlNormalized";
 import { formatRemarkOrLabelText } from "../../../lib/gaebParse/textFormatting";
+import { getUser } from "@/lib/auth/get-user";
+import { isAdmin } from "@/lib/auth/is-admin";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
 const VORTEXT_PREVIEW_MAX_CHARS = 120_000;
+const MAX_UPLOAD_BYTES = 10_000_000;
+const GAEB_PREVIEW_RATE_LIMIT_PER_10_MIN = 20;
+const GAEB_PREVIEW_RATE_WINDOW_MS = 10 * 60 * 1000;
+const ALLOWED_EXTENSIONS = new Set([".x83", ".x84", ".x86", ".xml", ".gaeb", ".txt"]);
+const ALLOWED_MIME_TYPES = new Set([
+  "text/plain",
+  "text/xml",
+  "application/xml",
+  "application/octet-stream",
+]);
+
+function getLowercaseExtension(filename: string): string {
+  const clean = (filename ?? "").trim().toLowerCase();
+  const dotIdx = clean.lastIndexOf(".");
+  if (dotIdx <= 0 || dotIdx === clean.length - 1) return "";
+  return clean.slice(dotIdx);
+}
+
+function isAllowedUploadFile(file: File): boolean {
+  const ext = getLowercaseExtension(file.name);
+  if (!ALLOWED_EXTENSIONS.has(ext)) return false;
+  const mime = (file.type ?? "").trim().toLowerCase();
+  // Einige Browser liefern für diese Dateien keinen verlässlichen MIME-Type.
+  return mime.length === 0 || ALLOWED_MIME_TYPES.has(mime);
+}
 
 export async function POST(req: Request) {
   try {
+    const ip = getClientIp(req);
+    const rl = checkRateLimit(
+      `gaeb-preview:${ip}`,
+      GAEB_PREVIEW_RATE_LIMIT_PER_10_MIN,
+      GAEB_PREVIEW_RATE_WINDOW_MS
+    );
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "Zu viele Anfragen. Bitte später erneut versuchen." },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+      );
+    }
+
+    const reqUrl = new URL(req.url);
+    const user = await getUser().catch(() => null);
+    const includeDebugPayload = reqUrl.searchParams.get("debug") === "1" && !!user && isAdmin(user);
+
     const form = await req.formData();
     const file = form.get("file");
 
@@ -19,6 +64,22 @@ export async function POST(req: Request) {
     }
 
     const f = file as File;
+    if (!isAllowedUploadFile(f)) {
+      return NextResponse.json(
+        {
+          error: "Ungültiger Dateityp. Erlaubt: .x83, .x84, .x86, .xml, .gaeb, .txt",
+        },
+        { status: 400 }
+      );
+    }
+    if (!Number.isFinite(f.size) || f.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json(
+        {
+          error: `Datei zu groß. Maximal erlaubt: ${MAX_UPLOAD_BYTES} Bytes`,
+        },
+        { status: 413 }
+      );
+    }
     const raw = await f.text();
 
     const parsed = parse(raw, { filename: f.name });
@@ -168,18 +229,14 @@ export async function POST(req: Request) {
           })()
         : undefined;
 
-    return NextResponse.json({
+    const responsePayload: Record<string, unknown> = {
       filename: f.name,
       size: f.size,
-
-      rawPreview: parsed.rawText,
-      cleanPreview: parsed.cleanedText,
 
       vortextGuessRaw,
       vortextGuessClean: vortextGuessRaw,
       vortextWasTruncated,
 
-      vortextFullRaw: vortextForPreview,
       vortextFullClean: vortextForPreview,
 
       positionsGuessRaw: positionsForPreview,
@@ -191,22 +248,32 @@ export async function POST(req: Request) {
         vortext: parsed.vortextText ?? "",
         abschnitte: parsed.sectionTexts,
         positionen: { raw: positionsForPreview, items: structurePositionenItems },
-        raw: {
-          full: parsed.rawText,
-          cutMethod: parsed.meta.cutMethod ?? parsed.meta.parserUsed ?? "unknown",
-          vortextStart: 0,
-          vortextEnd: parsed.prefaceText.length,
-        },
       },
 
       /** Normalisierte LV-Struktur für die Preview-Anzeige (nur bei GAEB-XML) */
       normalized,
-
-      parseResult: parsed,
-
       debug: {
         parserUsed: parsed.parserUsed,
         formatDetected: parsed.formatDetected,
+        previewChars: parsed.rawText.length,
+        vortextFullChars: vortextForPreview.length,
+        positionsFullChars: positionsForPreview.length,
+      },
+    };
+
+    if (includeDebugPayload) {
+      responsePayload.rawPreview = parsed.rawText;
+      responsePayload.cleanPreview = parsed.cleanedText;
+      responsePayload.vortextFullRaw = vortextForPreview;
+      (responsePayload.structure as Record<string, unknown>).raw = {
+        full: parsed.rawText,
+        cutMethod: parsed.meta.cutMethod ?? parsed.meta.parserUsed ?? "unknown",
+        vortextStart: 0,
+        vortextEnd: parsed.prefaceText.length,
+      };
+      responsePayload.parseResult = parsed;
+      (responsePayload.debug as Record<string, unknown>) = {
+        ...((responsePayload.debug as Record<string, unknown>) ?? {}),
         structureConfidence: parsed.structureConfidence,
         itemCount: parsed.itemCount,
         prefaceText: parsed.prefaceText.slice(0, 500),
@@ -214,12 +281,10 @@ export async function POST(req: Request) {
         itemTextsLength: parsed.itemTexts.length,
         warnings: parsed.warnings,
         sectionCount: parsed.sectionTexts.length,
-        // Normalisierte Struktur (Debug)
         normalizedGroupCount: normalized?.groups.length ?? 0,
         normalizedRemarkCount: normalized?.remarks.length ?? 0,
         normalizedItemCount: normalized?.items.length ?? 0,
         firstNormalizedItemExample: firstNormalizedItem ?? null,
-        /** Rohstrukturen (erste BoQCtgy, Remark, Item 1+2) + extrahierte Felder – für Feldpfad-Mapping */
         rawStructures: rawStructures ?? null,
         prefaceSource,
         positionsSource,
@@ -250,7 +315,6 @@ export async function POST(req: Request) {
             ? (normalized.remarks as { text?: string }[]).reduce((sum, r) => sum + (r.text ?? "").length, 0)
             : 0,
         remarkCollectionMode: normalized ? "recursive-xml-order" : undefined,
-        // End-to-End-Debug: exakt die Datenbasis für den Tab „Positionen“
         positionsSourceUsed:
           normalized?.displayNodes != null && (normalized.displayNodes as unknown[]).length > 0
             ? "displayNodes"
@@ -323,20 +387,20 @@ export async function POST(req: Request) {
           (normalized?.displayNodes as { type?: string }[])?.filter((n) => n.type === "group").length ?? 0,
         visibleRemarkCount:
           (normalized?.displayNodes as { type?: string }[])?.filter((n) => n.type === "remark").length ?? 0,
-        // Rückwärtskompatibilität
-        previewChars: parsed.rawText.length,
         cutIdx: vortextForPreview.length,
         method: parsed.meta.cutMethod ?? parsed.meta.parserUsed ?? "unknown",
-        vortextFullChars: vortextForPreview.length,
-        positionsFullChars: positionsForPreview.length,
         positionsStartsWith: positionsForPreview.slice(0, 260),
-      },
-    });
+      };
+    }
+
+    return NextResponse.json(responsePayload);
   } catch (e: unknown) {
+    if (process.env.NODE_ENV !== "test") {
+      console.error("[gaeb-preview] failed", e instanceof Error ? e.message : String(e));
+    }
     return NextResponse.json(
       {
         error: "gaeb-preview failed",
-        message: e instanceof Error ? e.message : String(e),
       },
       { status: 500 }
     );

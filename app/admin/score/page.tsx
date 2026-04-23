@@ -866,7 +866,13 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
     setChangeOrderAnalysis(null);
     try {
       const structureVortext = gaebPreview?.structure
-        ? gaebPreview.structure.raw.full.slice(0, gaebPreview.structure.raw.vortextEnd)
+        ? (
+            gaebPreview?.structure?.raw?.full?.slice(0, gaebPreview?.structure?.raw?.vortextEnd) ??
+            gaebPreview?.structure?.vortext ??
+            gaebPreview?.vortextFullClean ??
+            gaebPreview?.vortextGuessClean ??
+            ""
+          )
         : "";
       const structurePositions = gaebPreview?.structure?.positionen?.raw ?? "";
       const vortextForCo = (split?.vortext ?? structureVortext ?? extractVortextUI(lvText)).trim();
@@ -933,7 +939,11 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const r = await fetch("/api/gaeb-preview", { method: "POST", body: fd });
+      const gaebDebugParam =
+        isAdminUser && typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1"
+          ? "?debug=1"
+          : "";
+      const r = await fetch(`/api/gaeb-preview${gaebDebugParam}`, { method: "POST", body: fd });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.message || j?.error || "gaeb-preview failed");
       setGaebPreview(j);
@@ -954,7 +964,11 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const r = await fetch("/api/gaeb-split-llm", { method: "POST", body: fd });
+      const gaebDebugParam =
+        isAdminUser && typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1"
+          ? "?debug=1"
+          : "";
+      const r = await fetch(`/api/gaeb-split-llm${gaebDebugParam}`, { method: "POST", body: fd });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.message || j?.error || "gaeb-split-llm failed");
       const s: SplitResult = {
@@ -1114,7 +1128,13 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
 
       // Score-Payload: Split-LLM bevorzugt, sonst GaebStructure (Preview) als Fallback
       const structureVortext = preview?.structure
-        ? preview.structure.raw.full.slice(0, preview.structure.raw.vortextEnd)
+        ? (
+            preview?.structure?.raw?.full?.slice(0, preview?.structure?.raw?.vortextEnd) ??
+            preview?.structure?.vortext ??
+            preview?.vortextFullClean ??
+            preview?.vortextGuessClean ??
+            ""
+          )
         : "";
       const structurePositions = preview?.structure ? preview.structure.positionen.raw : "";
 
@@ -1285,8 +1305,6 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               keyFacts: vortextResult?.keyFacts ?? {},
               riskClauses: vortextResult?.riskClauses ?? [],
               keyFactsDebug: vortextResult?.keyFactsDebug ?? null,
-              gaebPreview,
-              split,
               ...(Array.isArray(data.legalSignals) && data.legalSignals.length > 0 ? { legalSignals: data.legalSignals } : {}),
             },
           };
@@ -1635,8 +1653,14 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
 
   const structureVortext = useMemo(() => {
     const s = gaebPreview?.structure;
-    if (!s?.raw) return "";
-    return s.raw.full.slice(0, s.raw.vortextEnd);
+    if (!s) return "";
+    return (
+      s?.raw?.full?.slice(0, s?.raw?.vortextEnd) ??
+      s?.vortext ??
+      (gaebPreview as any)?.vortextFullClean ??
+      (gaebPreview as any)?.vortextGuessClean ??
+      ""
+    );
   }, [gaebPreview?.structure]);
 
   const structurePositions = useMemo(() => {
@@ -2671,7 +2695,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
                 </>
               ) : gaebPreview?.structure ? (
                 <>
-                  Struktur: {gaebPreview.structure.raw.cutMethod} • Einleitung {effectiveVortextLen} Zeichen • Positionen{" "}
+                  Struktur: {gaebPreview?.structure?.raw?.cutMethod ?? gaebPreview?.debug?.parserUsed ?? "unknown"} • Einleitung {effectiveVortextLen} Zeichen • Positionen{" "}
                   {effectivePositionsLen} Zeichen
                   {gaebPreview.structure.vorbemerkungen ? (
                     <> • Vorbemerkungen {gaebPreview.structure.vorbemerkungen.length} Zeichen</>

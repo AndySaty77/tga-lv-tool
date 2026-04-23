@@ -8,8 +8,12 @@ import { NextResponse } from "next/server";
 import { getUser } from "@/lib/auth/get-user";
 import { getUserPlan } from "@/lib/billing/userPlan";
 import { hasFeature } from "@/lib/billing/plans";
+import { checkRateLimit } from "@/lib/rateLimit";
 import { stripEmbeddedBinaryAndBase64Artifacts } from "@/lib/sanitizeAnalysisText";
 import { runChangeOrderAnalysis } from "../../../lib/changeOrderAnalysis";
+
+const CHANGE_ORDER_RATE_LIMIT_PER_10_MIN = 10;
+const CHANGE_ORDER_RATE_WINDOW_MS = 10 * 60 * 1000;
 
 export async function POST(req: Request) {
   const user = await getUser().catch(() => null);
@@ -21,6 +25,17 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { error: "Nachtragsanalyse ist nur im Pro-Plan verfügbar." },
       { status: 403 }
+    );
+  }
+  const rl = checkRateLimit(
+    `change-order-analysis:${user.id}`,
+    CHANGE_ORDER_RATE_LIMIT_PER_10_MIN,
+    CHANGE_ORDER_RATE_WINDOW_MS
+  );
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Zu viele Anfragen. Bitte kurz warten." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
     );
   }
 
