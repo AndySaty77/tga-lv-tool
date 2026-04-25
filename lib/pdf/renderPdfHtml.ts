@@ -31,6 +31,16 @@ function trafficLightText(t: "green" | "yellow" | "red"): string {
   return "";
 }
 
+function parseClaimLevelScore(claimLevel: string): string {
+  const s = (claimLevel ?? "").trim();
+  if (!s) return "";
+  const m = s.match(/(\d{1,3})\s*\/\s*100/);
+  if (!m?.[1]) return "";
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return "";
+  return `${Math.round(Math.max(0, Math.min(100, n)))}/100`;
+}
+
 /**
  * Erzeugt das vollständige HTML-Dokument für den Report.
  */
@@ -177,11 +187,8 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
         );
       }
       if (claimLevel) {
-        const claimScore =
-          claimPotential?.score != null && Number.isFinite(Number(claimPotential.score))
-            ? `${Math.round(Number(claimPotential.score))}/100`
-            : "";
-        const claimValue = claimScore ? `${claimLevel} · ${claimScore}` : claimLevel;
+        const claimScore = parseClaimLevelScore(claimLevel);
+        const claimValue = /\/\s*100/.test(claimLevel) ? claimLevel : (claimScore ? `${claimLevel} · ${claimScore}` : claimLevel);
         parts.push(
           '<div class="kpi-card"><div class="kpi-label">Nachtragspotenzial</div><div class="kpi-value">' +
             escapeHtml(claimValue) +
