@@ -34,255 +34,311 @@ export default function DatenschutzPage() {
       <MarketingSection
         eyebrow="Rechtliches"
         title="Datenschutzerklärung"
-        lead="LV Scope – lvscope.de | Stand: März 2026"
+        lead="LV Scope – lvscope.de | Stand: April 2026"
       >
         <Container>
           <div style={{ maxWidth: 720, marginBottom: 48 }}>
             <h2 style={sectionTitle}>1. Verantwortlicher</h2>
             <p style={paragraph}>
-              Verantwortlicher im Sinne der Datenschutz-Grundverordnung (DSGVO) und anderer nationaler
-              Datenschutzgesetze sowie sonstiger datenschutzrechtlicher Bestimmungen ist:
+              Verantwortlicher im Sinne der Datenschutz-Grundverordnung (DSGVO) und sonstiger datenschutzrechtlicher
+              Vorschriften ist:
             </p>
             <p style={{ ...paragraph, marginLeft: 16 }}>
               LV Scope<br />
-              Kontaktdaten (Anschrift, E-Mail) siehe Impressum.
-            </p>
-            <p style={paragraph}>
+              Kontaktdaten (Anschrift, E-Mail) siehe Impressum.<br />
               Für Datenschutzanfragen: datenschutz@lvscope.de<br />
-              Website: https://lvscope.de
+              Website: lvscope.de
             </p>
 
             <h2 style={sectionTitle}>2. Allgemeines zur Datenverarbeitung</h2>
             <p style={subSectionTitle}>2.1 Umfang der Verarbeitung personenbezogener Daten</p>
             <p style={paragraph}>
-              Wir verarbeiten personenbezogene Daten unserer Nutzer grundsätzlich nur, soweit dies zur Bereitstellung
-              einer funktionsfähigen Website sowie unserer Inhalte und Leistungen erforderlich ist. Die Verarbeitung
-              personenbezogener Daten erfolgt regelmäßig nur nach Einwilligung des Nutzers. Eine Ausnahme gilt in solchen
-              Fällen, in denen eine vorherige Einholung einer Einwilligung aus tatsächlichen Gründen nicht möglich ist
-              und die Verarbeitung der Daten durch gesetzliche Vorschriften gestattet ist.
+              Wir verarbeiten personenbezogene Daten unserer Nutzer grundsaetzlich nur, soweit dies fuer den Betrieb der
+              Website, die Bereitstellung unseres Nutzerkontos sowie die Durchfuehrung der angebotenen Analyseleistungen
+              erforderlich ist.
             </p>
-            <p style={subSectionTitle}>2.2 Rechtsgrundlage für die Verarbeitung</p>
+            <p style={subSectionTitle}>2.2 Rechtsgrundlagen</p>
             <p style={paragraph}>
-              Soweit wir für Verarbeitungsvorgänge personenbezogener Daten eine Einwilligung der betroffenen Person
-              einholen, dient Art. 6 Abs. 1 lit. a DSGVO als Rechtsgrundlage. Bei der Verarbeitung von personenbezogenen
-              Daten, die zur Erfüllung eines Vertrages erforderlich ist, dient Art. 6 Abs. 1 lit. b DSGVO als
-              Rechtsgrundlage. Soweit eine Verarbeitung zur Wahrung eines berechtigten Interesses unseres Unternehmens
-              oder eines Dritten erforderlich ist, dient Art. 6 Abs. 1 lit. f DSGVO als Rechtsgrundlage.
+              Soweit wir eine Einwilligung einholen, ist Rechtsgrundlage Art. 6 Abs. 1 lit. a DSGVO. Soweit die
+              Verarbeitung zur Durchfuehrung vorvertraglicher Massnahmen oder zur Erfuellung eines Vertrages erforderlich
+              ist, ist Rechtsgrundlage Art. 6 Abs. 1 lit. b DSGVO. Soweit die Verarbeitung zur Wahrung unserer
+              berechtigten Interessen erforderlich ist, ist Rechtsgrundlage Art. 6 Abs. 1 lit. f DSGVO.
             </p>
             <p style={subSectionTitle}>2.3 Datenlöschung und Speicherdauer</p>
             <p style={paragraph}>
-              Die personenbezogenen Daten der betroffenen Person werden gelöscht oder gesperrt, sobald der Zweck der
-              Speicherung entfällt. Eine Speicherung kann darüber hinaus erfolgen, wenn dies durch den europäischen oder
-              nationalen Gesetzgeber in unionsrechtlichen Verordnungen, Gesetzen oder sonstigen Vorschriften, denen der
-              Verantwortliche unterliegt, vorgesehen wurde. Eine Sperrung oder Löschung der Daten erfolgt auch dann, wenn
-              eine durch die genannten Normen vorgeschriebene Speicherfrist abläuft.
+              Personenbezogene Daten werden geloescht, sobald der Zweck der Speicherung entfaellt und keine gesetzlichen
+              Aufbewahrungspflichten entgegenstehen. Soweit im Folgenden keine genauere Frist genannt ist, erfolgt die
+              Loeschung nach Zweckfortfall oder im Rahmen der von uns vorgesehenen Loeschprozesse.
             </p>
 
-            <h2 style={sectionTitle}>3. Bereitstellung der Website und Logfiles</h2>
-            <p style={subSectionTitle}>3.1 Beschreibung und Umfang der Datenverarbeitung</p>
+            <h2 style={sectionTitle}>3. Bereitstellung der Website und technische Logfiles</h2>
+            <p style={subSectionTitle}>3.1 Beschreibung und Umfang der Verarbeitung</p>
             <p style={paragraph}>
-              Bei jedem Aufruf unserer Website erfasst unser System automatisiert Daten und Informationen vom
-              Computersystem des aufrufenden Rechners. Folgende Daten werden erhoben:
+              Bei jedem Aufruf unserer Website werden automatisiert technische Daten verarbeitet, die fuer die
+              Auslieferung und den sicheren Betrieb der Website erforderlich sind. Hierzu koennen insbesondere gehoeren:
             </p>
             <ul style={list}>
-              <li style={listItem}>IP-Adresse des Nutzers (anonymisiert)</li>
+              <li style={listItem}>IP-Adresse des aufrufenden Systems</li>
               <li style={listItem}>Datum und Uhrzeit des Zugriffs</li>
-              <li style={listItem}>Referrer-URL (zuvor besuchte Website)</li>
               <li style={listItem}>Browsertyp und Browserversion</li>
-              <li style={listItem}>Betriebssystem des Nutzers</li>
-              <li style={listItem}>Aufgerufene Seite / Ressource</li>
+              <li style={listItem}>Betriebssystem</li>
+              <li style={listItem}>Referrer-URL</li>
+              <li style={listItem}>aufgerufene Seiten und Ressourcen</li>
             </ul>
-            <p style={paragraph}>
-              Diese Daten werden in den Logfiles unseres Systems gespeichert. Eine Speicherung dieser Daten zusammen
-              mit anderen personenbezogenen Daten des Nutzers findet nicht statt.
-            </p>
             <p style={subSectionTitle}>3.2 Rechtsgrundlage</p>
             <p style={paragraph}>
-              Rechtsgrundlage für die vorübergehende Speicherung der Daten und der Logfiles ist Art. 6 Abs. 1 lit. f
-              DSGVO.
+              Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO.
             </p>
-            <p style={subSectionTitle}>3.3 Zweck und Speicherdauer</p>
+            <p style={subSectionTitle}>3.3 Zweck</p>
             <p style={paragraph}>
-              Die vorübergehende Speicherung der IP-Adresse durch das System ist notwendig, um eine Auslieferung der
-              Website an den Rechner des Nutzers zu ermöglichen. Technische Logs werden nur so lange und in dem Umfang
-              aufbewahrt, wie es für den Betrieb erforderlich ist; die Löschung erfolgt in der Regel innerhalb von 30
-              Tagen, soweit durch uns oder unseren Hosting-Anbieter so umgesetzt.
+              Die Verarbeitung erfolgt zur technischen Bereitstellung der Website, zur Fehleranalyse, zur Systemsicherheit
+              und zur Missbrauchsabwehr.
+            </p>
+            <p style={subSectionTitle}>3.4 Speicherdauer</p>
+            <p style={paragraph}>
+              Technische Logdaten werden nur so lange gespeichert, wie dies fuer den Betrieb, die Stabilitaet und die
+              Sicherheit der Website erforderlich ist. Soweit durch uns oder unseren Hosting-Anbieter umgesetzt, erfolgt
+              die Loeschung in der Regel innerhalb von 30 Tagen.
             </p>
 
             <h2 style={sectionTitle}>4. Registrierung und Nutzerkonto</h2>
-            <p style={subSectionTitle}>4.1 Beschreibung und Umfang der Datenverarbeitung</p>
+            <p style={subSectionTitle}>4.1 Beschreibung und Umfang der Verarbeitung</p>
             <p style={paragraph}>
-              Auf unserer Website können Sie sich registrieren und ein Nutzerkonto anlegen. Die Anmeldung (Login) erfolgt
-              über dasselbe Konto. Für Registrierung, Login und die Speicherung von Kontodaten setzen wir den Dienst
-              Supabase (Authentifizierung und Datenbank) ein. Bei der Registrierung werden folgende Daten erhoben:
+              Auf unserer Website koennen Sie ein Nutzerkonto anlegen. Fuer Registrierung, Login und die Speicherung
+              nutzerbezogener Anwendungsdaten nutzen wir Supabase fuer Authentifizierung und Datenbankfunktionen.
+            </p>
+            <p style={paragraph}>Im Rahmen der Registrierung und Nutzung des Kontos verarbeiten wir insbesondere:</p>
+            <ul style={list}>
+              <li style={listItem}>E-Mail-Adresse</li>
+              <li style={listItem}>Passwort in gehashter Form</li>
+              <li style={listItem}>Vor- und Nachname, soweit angegeben</li>
+              <li style={listItem}>Unternehmen, soweit angegeben</li>
+              <li style={listItem}>Zeitpunkte der Registrierung und Kontoaktivitaet</li>
+              <li style={listItem}>
+                plan- und nutzungsbezogene Kontoinformationen, soweit fuer die Bereitstellung des Dienstes erforderlich
+              </li>
+            </ul>
+            <p style={subSectionTitle}>4.2 Rechtsgrundlage</p>
+            <p style={paragraph}>Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO.</p>
+            <p style={subSectionTitle}>4.3 Speicherdauer</p>
+            <p style={paragraph}>
+              Kontodaten werden fuer die Dauer des bestehenden Nutzerkontos gespeichert. Nach Loeschung des Nutzerkontos
+              werden die zugehoerigen personenbezogenen Daten geloescht, soweit keine gesetzlichen Aufbewahrungspflichten
+              entgegenstehen.
+            </p>
+            <p style={subSectionTitle}>4.4 Kontoloeschung</p>
+            <p style={paragraph}>
+              Sie koennen Ihr Nutzerkonto ueber die Anwendung loeschen. Mit der Kontoloeschung werden Ihr Nutzerkonto,
+              zugehoerige Profildaten und die dem Konto zugeordneten Anwendungsdaten geloescht. In Backups oder Snapshots
+              koennen Daten technisch bedingt noch fuer eine begrenzte Zeit vorhanden sein und werden mit der ueblichen
+              Backup-Rotation ueberschrieben.
+            </p>
+
+            <h2 style={sectionTitle}>5. Verarbeitung hochgeladener Dokumente und Analyseergebnisse</h2>
+            <p style={subSectionTitle}>5.1 Beschreibung</p>
+            <p style={paragraph}>
+              LV Scope ist ein Analysewerkzeug fuer Leistungsverzeichnisse und GAEB-Dateien. Nutzer koennen Dokumente
+              hochladen, die durch unser System verarbeitet und analysiert werden. Diese Dokumente koennen projektbezogene
+              Inhalte und im Einzelfall auch personenbezogene Daten enthalten, etwa Namen von Ansprechpartnern oder
+              Projektverantwortlichen.
+            </p>
+            <p style={subSectionTitle}>5.2 Verarbeitungszweck</p>
+            <p style={paragraph}>
+              Die Verarbeitung erfolgt ausschliesslich zur Durchfuehrung der von Ihnen angeforderten Analyseleistung,
+              insbesondere zur strukturierten Auswertung von Dokumentinhalten, zur Ableitung von Risiko- und
+              Hinweisinformationen, zur Erstellung von Analyseergebnissen und zur Anzeige dieser Ergebnisse in Ihrem
+              Nutzerkonto.
+            </p>
+            <p style={subSectionTitle}>5.3 Rechtsgrundlage</p>
+            <p style={paragraph}>Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO.</p>
+            <p style={subSectionTitle}>5.4 Speicherung</p>
+            <p style={paragraph}>
+              Hochgeladene Dateien werden nicht dauerhaft als Dateien in einem separaten Dateispeicher vorgehalten. Die
+              im Rahmen der Analyse erzeugten Analyseergebnisse werden jedoch Ihrem Nutzerkonto zugeordnet und in unserer
+              Datenbank gespeichert. Dazu koennen insbesondere gehoeren:
+            </p>
+            <ul style={list}>
+              <li style={listItem}>strukturierte Analyseergebnisse</li>
+              <li style={listItem}>Key Facts</li>
+              <li style={listItem}>Risikobewertungen</li>
+              <li style={listItem}>Rueckfragen</li>
+              <li style={listItem}>Angebotsannahmen bzw. Klarstellungen</li>
+              <li style={listItem}>Management-Zusammenfassungen</li>
+              <li style={listItem}>
+                ggf. technische Diagnose- oder Auditinformationen, soweit diese fuer Betrieb und Nachvollziehbarkeit
+                erforderlich sind
+              </li>
+            </ul>
+            <p style={subSectionTitle}>5.5 Speicherdauer</p>
+            <p style={paragraph}>
+              Analyseergebnisse bleiben grundsaetzlich gespeichert, bis Sie einzelne Analysen oder Ihr Nutzerkonto
+              loeschen, sofern keine gesetzlichen Aufbewahrungspflichten entgegenstehen. Eine automatische Loeschung nach
+              einer festen Frist ist derzeit nicht allgemein fuer alle Analyseergebnisse technisch umgesetzt.
+            </p>
+
+            <h2 style={sectionTitle}>6. Einsatz von KI-Diensten</h2>
+            <p style={subSectionTitle}>6.1 Beschreibung</p>
+            <p style={paragraph}>
+              Zur Durchfuehrung bestimmter Analysefunktionen nutzen wir externe KI-Dienste, derzeit insbesondere OpenAI.
+              Dabei koennen Inhalte aus hochgeladenen Dokumenten oder daraus abgeleitete Textsegmente an diesen Dienst
+              uebermittelt werden, soweit dies fuer die angeforderte Analysefunktion erforderlich ist.
+            </p>
+            <p style={subSectionTitle}>6.2 Verarbeitete Datenarten</p>
+            <p style={paragraph}>
+              Je nach Funktion koennen insbesondere folgende Datenkategorien an den eingesetzten KI-Dienst uebermittelt
+              werden:
+            </p>
+            <ul style={list}>
+              <li style={listItem}>Dokumentinhalte aus LV-/GAEB-Dateien</li>
+              <li style={listItem}>Textauszuege</li>
+              <li style={listItem}>strukturierte Analysekontexte</li>
+              <li style={listItem}>daraus erzeugte oder weiterverarbeitete Eingaben fuer Analysezwecke</li>
+            </ul>
+            <p style={subSectionTitle}>6.3 Rechtsgrundlage</p>
+            <p style={paragraph}>Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO.</p>
+            <p style={subSectionTitle}>6.4 Hinweise</p>
+            <p style={paragraph}>
+              Die Uebermittlung erfolgt ausschliesslich zur Erbringung der angeforderten Analyseleistung. Eine Nutzung
+              Ihrer Inhalte fuer andere Zwecke durch uns erfolgt nicht. Informationen zu eingesetzten
+              Auftragsverarbeitern oder Unterauftragsverarbeitern stellen wir auf Anfrage zur Verfuegung.
+            </p>
+
+            <h2 style={sectionTitle}>7. Kontaktformular und E-Mail-Kontakt</h2>
+            <p style={subSectionTitle}>7.1 Kontaktformular</p>
+            <p style={paragraph}>
+              Wenn Sie unser Kontaktformular verwenden, verarbeiten wir die von Ihnen eingegebenen Daten zur Bearbeitung
+              Ihrer Anfrage. Hierzu koennen insbesondere gehoeren:
+            </p>
+            <ul style={list}>
+              <li style={listItem}>Name</li>
+              <li style={listItem}>E-Mail-Adresse</li>
+              <li style={listItem}>Unternehmen</li>
+              <li style={listItem}>Nachricht</li>
+              <li style={listItem}>weitere freiwillige Angaben</li>
+            </ul>
+            <p style={paragraph}>Fuer den Versand der Kontaktanfragen per E-Mail nutzen wir Resend.</p>
+            <p style={subSectionTitle}>7.2 Rechtsgrundlage</p>
+            <p style={paragraph}>
+              Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO, soweit es um vorvertragliche Anfragen geht, andernfalls
+              Art. 6 Abs. 1 lit. f DSGVO.
+            </p>
+            <p style={subSectionTitle}>7.3 Speicherdauer</p>
+            <p style={paragraph}>
+              Kontaktanfragen werden nur so lange gespeichert oder in der E-Mail-Korrespondenz vorgehalten, wie dies zur
+              Bearbeitung und Nachverfolgung erforderlich ist. Soweit keine gesetzlichen Aufbewahrungspflichten bestehen,
+              erfolgt die Loeschung in der Regel innerhalb von 6 Monaten nach Abschluss der Anfrage. Eine starre
+              automatische Loeschung nach exakt 6 Monaten ist derzeit nicht in allen Faellen technisch umgesetzt.
+            </p>
+            <p style={subSectionTitle}>7.4 Direkter E-Mail-Kontakt</p>
+            <p style={paragraph}>
+              Wenn Sie uns direkt per E-Mail kontaktieren, verarbeiten wir die von Ihnen mitgeteilten Daten ausschliesslich
+              zur Bearbeitung Ihrer Anfrage.
+            </p>
+
+            <h2 style={sectionTitle}>8. Zahlungsabwicklung</h2>
+            <p style={paragraph}>
+              Soweit wir kostenpflichtige Leistungen anbieten und hierfuer externe Zahlungsdienstleister einsetzen, erfolgt
+              die Zahlungsabwicklung ueber den jeweiligen Anbieter, derzeit insbesondere Stripe, sofern dieses
+              Zahlungsmodell im konkreten Fall genutzt wird.
+            </p>
+            <p style={paragraph}>
+              Wir speichern keine vollstaendigen Zahlungsdaten wie Kreditkartennummern. Es koennen jedoch
+              abrechnungsbezogene Referenzdaten verarbeitet werden, z. B.:
             </p>
             <ul style={list}>
               <li style={listItem}>E-Mail-Adresse</li>
-              <li style={listItem}>Gewähltes Passwort (gespeichert als sicherer Hash)</li>
-              <li style={listItem}>Vor- und Nachname (optional)</li>
-              <li style={listItem}>Unternehmen (optional)</li>
-              <li style={listItem}>Datum und Uhrzeit der Registrierung</li>
+              <li style={listItem}>Kunden- oder Abo-ID</li>
+              <li style={listItem}>Zahlungs- oder Rechnungsstatus</li>
+              <li style={listItem}>tarifbezogene Informationen</li>
             </ul>
-            <p style={subSectionTitle}>4.2 Rechtsgrundlage</p>
+            <p style={paragraph}>Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO.</p>
+
+            <h2 style={sectionTitle}>9. Cookies und technisch notwendige Sitzungsdaten</h2>
             <p style={paragraph}>
-              Rechtsgrundlage für die Verarbeitung der Daten ist bei Vorliegen einer Einwilligung des Nutzers Art. 6
-              Abs. 1 lit. a DSGVO. Dient die Registrierung der Erfüllung eines Vertrages, dessen Vertragspartei der
-              Nutzer ist, so ist Art. 6 Abs. 1 lit. b DSGVO zusätzliche Rechtsgrundlage.
+              Wir verwenden technisch notwendige Cookies bzw. vergleichbare technische Mechanismen, soweit diese fuer den
+              sicheren Betrieb der Website, die Authentifizierung und die Bereitstellung der Anwendung erforderlich sind.
             </p>
-            <p style={subSectionTitle}>4.3 Speicherdauer</p>
+            <p style={paragraph}>Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO.</p>
             <p style={paragraph}>
-              Registrierungs- und Kontodaten werden für die Dauer des Nutzerkontos gespeichert. Nach Kündigung bzw.
-              Löschung des Nutzerkontos werden die mit dem Konto verbundenen personenbezogenen Daten gelöscht, sofern
-              keine gesetzlichen Aufbewahrungspflichten entgegenstehen. Die Löschung können Sie selbst über die
-              Einstellungen der Anwendung vornehmen (siehe Ziff. 4.4); eine automatische Löschung nach Ablauf einer
-              Frist ist derzeit nicht technisch umgesetzt.
-            </p>
-            <p style={subSectionTitle}>4.4 Kontolöschung durch den Nutzer</p>
-            <p style={paragraph}>
-              Sie können Ihr Nutzerkonto jederzeit selbstständig löschen. Die Funktion steht in den Einstellungen der
-              Anwendung unter „Konto löschen“ zur Verfügung (nach Anmeldung). Bei der Kontolöschung werden Ihre
-              nutzerbezogenen Anwendungsdaten – einschließlich gespeicherter Analyseergebnisse und Profildaten – sowie
-              Ihr Authentifizierungszugang (Login) dauerhaft aus unseren Systemen entfernt. Es erfolgt eine echte
-              Löschung; ein erneuter Zugriff auf das Konto ist nicht mehr möglich. In Backups oder Snapshots können
-              Ihre Daten technisch bedingt noch für eine begrenzte Zeit vorhanden sein und werden mit der üblichen
-              Backup-Rotation überschrieben. Gesetzliche Aufbewahrungspflichten bleiben unberührt.
+              Eine Nutzung externer Tracking- oder Analyse-Dienste zu Marketing- oder Reichweitenzwecken erfolgt derzeit
+              nicht.
             </p>
 
-            <h2 style={sectionTitle}>5. Verarbeitung hochgeladener Dokumente (LV-/GAEB-Dateien)</h2>
-            <p style={subSectionTitle}>5.1 Beschreibung</p>
+            <h2 style={sectionTitle}>10. Analyse- und Trackingdienste</h2>
             <p style={paragraph}>
-              LV Scope ist ein KI-gestütztes Analysetool für Leistungsverzeichnisse (LV) und GAEB-Dateien aus dem
-              TGA-Bereich. Nutzer laden Dokumente hoch, die durch das System analysiert werden. Diese Dokumente können
-              Informationen zu Bauprojekten, Leistungsbeschreibungen und ggf. personenbezogene Daten (z. B. Namen von
-              Projektverantwortlichen) enthalten.
-            </p>
-            <p style={subSectionTitle}>5.2 Verarbeitungszweck und Rechtsgrundlage</p>
-            <p style={paragraph}>
-              Die hochgeladenen Dokumente werden ausschließlich zur Erbringung der vertraglich vereinbarten
-              Analyseleistung verarbeitet (Art. 6 Abs. 1 lit. b DSGVO). Eine Nutzung für andere Zwecke findet nicht
-              statt. Die Dokumente werden nicht dauerhaft gespeichert und nicht für das Training von KI-Modellen
-              verwendet.
-            </p>
-            <p style={subSectionTitle}>5.3 Einsatz von KI-Diensten (Sub-Prozessoren)</p>
-            <p style={paragraph}>
-              Für die KI-gestützte Analyse setzen wir Dienste von Drittanbietern ein (derzeit: OpenAI). Dabei werden
-              Dokumentinhalte zur Analyse an diesen Anbieter übermittelt. Die Verarbeitung erfolgt auf Grundlage von
-              Auftragsverarbeitungsverträgen gemäß Art. 28 DSGVO; wir setzen ausschließlich Anbieter mit angemessenen
-              Datenschutzgarantien (z. B. EU-Standardvertragsklauseln) ein. Eine aktuelle Liste der Sub-Prozessoren
-              erhalten Sie auf Anfrage.
-            </p>
-            <p style={subSectionTitle}>5.4 Speicherdauer</p>
-            <p style={paragraph}>
-              Hochgeladene Dateien werden nicht dauerhaft als Dateien gespeichert; sie werden ausschließlich für die
-              Dauer der Verarbeitung zur Analyse genutzt. Die daraus erzeugten Analyseergebnisse werden in Ihrem
-              Nutzerkonto (Datenbank) gespeichert. Eine Löschung erfolgt durch Sie (Löschen einzelner Analysen bzw. des
-              Kontos) oder im Rahmen einer künftig implementierten Systemlöschlogik. Derzeit ist keine automatische
-              Löschung nach einer festen Frist technisch umgesetzt.
+              Wir setzen derzeit keine externen Tracking- oder Webanalyse-Dienste wie etwa Google Analytics ein. Sollten
+              solche Dienste kuenftig eingesetzt werden, werden wir diese Datenschutzerklaerung entsprechend aktualisieren
+              und - soweit erforderlich - eine Einwilligung einholen.
             </p>
 
-            <h2 style={sectionTitle}>6. Kontaktformular und E-Mail-Kontakt</h2>
-            <p style={subSectionTitle}>6.1 Kontaktformular</p>
+            <h2 style={sectionTitle}>11. Löschung und Aufbewahrung</h2>
+            <p style={subSectionTitle}>11.1 Durch Nutzer ausloesbare Loeschung</p>
+            <p style={paragraph}>Sie koennen:</p>
+            <ul style={list}>
+              <li style={listItem}>einzelne Analysen loeschen</li>
+              <li style={listItem}>Ihr gesamtes Nutzerkonto loeschen</li>
+            </ul>
+            <p style={subSectionTitle}>11.2 Umfang der Loeschung</p>
             <p style={paragraph}>
-              Über das Kontaktformular auf der Website können Sie uns (Name, Unternehmen, E-Mail, Nachricht etc.)
-              anfragen. Die Angaben werden zur Bearbeitung Ihrer Anfrage per E-Mail an uns übermittelt. Hierfür setzen
-              wir den Dienst Resend ein; die Daten werden nicht in einer Datenbank unserer Anwendung gespeichert. Die
-              E-Mail-Kommunikation und ggf. bei uns gespeicherte Korrespondenz werden nach Erledigung der Anfrage
-              gelöscht oder in der Regel innerhalb von 6 Monaten, soweit keine gesetzlichen Aufbewahrungspflichten
-              entgegenstehen. Eine automatische Löschung nach genau 6 Monaten ist derzeit nicht technisch umgesetzt.
+              Bei Loeschung einer Analyse werden die zugehoerigen gespeicherten Analyseinformationen aus unseren aktiven
+              Systemen entfernt. Bei Loeschung des Nutzerkontos werden das Nutzerkonto und die dem Konto zugeordneten
+              Anwendungsdaten geloescht.
             </p>
-            <p style={subSectionTitle}>6.2 E-Mail-Kontakt</p>
+            <p style={subSectionTitle}>11.3 Backups und externe Systeme</p>
             <p style={paragraph}>
-              Wenn Sie uns direkt per E-Mail kontaktieren, werden die von Ihnen mitgeteilten Daten zur Bearbeitung
-              Ihrer Anfrage verarbeitet. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse). Die
-              Daten werden gelöscht, sobald sie für den Zweck nicht mehr erforderlich sind, oder die Verarbeitung wird
-              eingeschränkt, falls Aufbewahrungspflichten bestehen.
-            </p>
-
-            <h2 style={sectionTitle}>7. Cookies</h2>
-            <p style={paragraph}>
-              Unsere Website verwendet Cookies. Dabei handelt es sich um Textdateien, die im Internetbrowser bzw. vom
-              Internetbrowser auf dem Computersystem des Nutzers gespeichert werden. Wir setzen ausschließlich technisch
-              notwendige Cookies ein, die für den Betrieb der Website und die Authentifizierung (Session-Management)
-              erforderlich sind. Diese Cookies werden auf Basis von Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am
-              sicheren Betrieb der Plattform) gesetzt und erfordern keine gesonderte Einwilligung. Sie können die
-              Speicherung von Cookies durch eine entsprechende Einstellung Ihres Browsers verhindern; wir weisen jedoch
-              darauf hin, dass Sie in diesem Fall möglicherweise nicht alle Funktionen unserer Website in vollem Umfang
-              nutzen können.
+              Daten koennen technisch bedingt noch fuer eine begrenzte Zeit in Backups oder Snapshots vorhanden sein.
+              Soweit Daten an externe Dienstleister uebermittelt wurden, gelten zusaetzlich deren technische und
+              vertragliche Rahmenbedingungen. Gesetzliche Aufbewahrungspflichten bleiben unberuehrt.
             </p>
 
-            <h2 style={sectionTitle}>8. Analyse- und Trackingdienste</h2>
+            <h2 style={sectionTitle}>12. Empfänger und Kategorien von Empfängern</h2>
             <p style={paragraph}>
-              Wir setzen derzeit keine externen Analyse- oder Trackingdienste (z. B. Google Analytics oder vergleichbare
-              Dienste) ein. Sollten wir künftig solche Dienste einsetzen, werden wir diese Datenschutzerklärung
-              aktualisieren und gegebenenfalls Ihre Einwilligung einholen.
-            </p>
-
-            <h2 style={sectionTitle}>9. Zahlungsabwicklung</h2>
-            <p style={paragraph}>
-              Soweit wir für kostenpflichtige Leistungen externe Zahlungsdienstleister (z. B. Stripe) einsetzen, erfolgt
-              die Abwicklung über diese. Die Übermittlung von Zahlungsdaten erfolgt direkt an den jeweiligen Anbieter;
-              wir erhalten und speichern keine vollständigen Zahlungsdaten (z. B. Kreditkartennummern). Rechtsgrundlage
-              ist Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung). Die Datenschutzhinweise des eingesetzten Anbieters
-              finden Sie auf dessen Website.
-            </p>
-
-            <h2 style={sectionTitle}>10. Rechte der betroffenen Person</h2>
-            <p style={paragraph}>
-              Sie haben im Rahmen der geltenden gesetzlichen Bestimmungen jederzeit folgende Rechte:
+              Zur Bereitstellung unseres Angebots arbeiten wir mit technischen Dienstleistern zusammen. Dazu gehoeren
+              insbesondere:
             </p>
             <ul style={list}>
-              <li style={listItem}>
-                <strong>Recht auf Auskunft (Art. 15 DSGVO):</strong> Sie können Auskunft über Ihre bei uns gespeicherten
-                personenbezogenen Daten verlangen.
-              </li>
-              <li style={listItem}>
-                <strong>Recht auf Berichtigung (Art. 16 DSGVO):</strong> Sie können die Berichtigung unrichtiger oder
-                unvollständiger Daten verlangen.
-              </li>
-              <li style={listItem}>
-                <strong>Recht auf Löschung (Art. 17 DSGVO):</strong> Sie können die Löschung Ihrer Daten verlangen,
-                sofern keine gesetzlichen Aufbewahrungspflichten entgegenstehen.
-              </li>
-              <li style={listItem}>Recht auf Einschränkung der Verarbeitung (Art. 18 DSGVO).</li>
-              <li style={listItem}>Recht auf Datenübertragbarkeit (Art. 20 DSGVO).</li>
-              <li style={listItem}>
-                Widerspruchsrecht (Art. 21 DSGVO): Sie können der Verarbeitung Ihrer Daten auf Grundlage berechtigter
-                Interessen widersprechen.
-              </li>
-              <li style={listItem}>
-                Recht auf Widerruf einer erteilten Einwilligung (Art. 7 Abs. 3 DSGVO).
-              </li>
+              <li style={listItem}>Supabase fuer Authentifizierung und Datenbank</li>
+              <li style={listItem}>Vercel fuer Hosting und Auslieferung der Anwendung</li>
+              <li style={listItem}>OpenAI fuer bestimmte KI-Analysefunktionen</li>
+              <li style={listItem}>Resend fuer den Versand von Kontakt-E-Mails</li>
+              <li style={listItem}>Stripe, soweit Zahlungsabwicklung im konkreten Fall erfolgt</li>
             </ul>
+            <p style={paragraph}>Eine Uebermittlung erfolgt nur, soweit sie fuer die jeweilige Leistung erforderlich ist.</p>
+
+            <h2 style={sectionTitle}>13. Rechte der betroffenen Person</h2>
             <p style={paragraph}>
-              Zur Ausübung Ihrer Rechte wenden Sie sich bitte an: datenschutz@lvscope.de (oder die im Impressum
-              genannte Kontaktstelle).
+              Sie haben nach Massgabe der gesetzlichen Vorschriften insbesondere folgende Rechte:
             </p>
+            <ul style={list}>
+              <li style={listItem}>Recht auf Auskunft gemaess Art. 15 DSGVO</li>
+              <li style={listItem}>Recht auf Berichtigung gemaess Art. 16 DSGVO</li>
+              <li style={listItem}>Recht auf Loeschung gemaess Art. 17 DSGVO</li>
+              <li style={listItem}>Recht auf Einschraenkung der Verarbeitung gemaess Art. 18 DSGVO</li>
+              <li style={listItem}>Recht auf Datenuebertragbarkeit gemaess Art. 20 DSGVO</li>
+              <li style={listItem}>Widerspruchsrecht gemaess Art. 21 DSGVO</li>
+              <li style={listItem}>Recht auf Widerruf erteilter Einwilligungen gemaess Art. 7 Abs. 3 DSGVO</li>
+            </ul>
+            <p style={paragraph}>Zur Ausuebung Ihrer Rechte wenden Sie sich bitte an: datenschutz@lvscope.de</p>
             <p style={paragraph}>
-              Unbeschadet eines anderweitigen verwaltungsrechtlichen oder gerichtlichen Rechtsbehelfs steht Ihnen das
-              Recht auf Beschwerde bei einer Aufsichtsbehörde zu, wenn Sie der Ansicht sind, dass die Verarbeitung der
-              Sie betreffenden personenbezogenen Daten gegen die DSGVO verstößt. Die zuständige Aufsichtsbehörde richtet
-              sich nach Ihrem Bundesland des gewöhnlichen Aufenthalts.
+              Ausserdem haben Sie das Recht, sich bei einer Datenschutzaufsichtsbehoerde zu beschweren.
             </p>
 
-            <h2 style={sectionTitle}>11. Datensicherheit</h2>
+            <h2 style={sectionTitle}>14. Datensicherheit</h2>
             <p style={paragraph}>
-              Wir setzen technische und organisatorische Sicherheitsmaßnahmen ein, um Ihre Daten gegen zufällige oder
-              vorsätzliche Manipulationen, Verlust, Zerstörung oder gegen den Zugriff unberechtigter Personen zu
-              schützen. Unsere Sicherheitsmaßnahmen werden entsprechend der technologischen Entwicklung fortlaufend
-              verbessert. Die Datenübertragung zwischen Ihrem Browser und unseren Servern erfolgt verschlüsselt über
-              HTTPS/TLS.
+              Wir setzen angemessene technische und organisatorische Massnahmen ein, um personenbezogene Daten vor Verlust,
+              Manipulation und unberechtigtem Zugriff zu schuetzen. Die Uebertragung zwischen Browser und unseren Systemen
+              erfolgt verschluesselt ueber HTTPS/TLS.
             </p>
 
-            <h2 style={sectionTitle}>12. Aktualität und Änderung dieser Datenschutzerklärung</h2>
+            <h2 style={sectionTitle}>15. Aktualität und Änderung dieser Datenschutzerklärung</h2>
             <p style={paragraph}>
-              Diese Datenschutzerklärung ist aktuell gültig und hat den Stand März 2026. Durch die Weiterentwicklung
-              unserer Website und Angebote oder aufgrund geänderter gesetzlicher beziehungsweise behördlicher Vorgaben
-              kann es notwendig werden, diese Datenschutzerklärung zu ändern. Die jeweils aktuelle Datenschutzerklärung
-              kann jederzeit auf der Website unter https://lvscope.de/datenschutz abgerufen und ausgedruckt werden.
+              Wir behalten uns vor, diese Datenschutzerklaerung anzupassen, wenn sich technische, rechtliche oder
+              organisatorische Rahmenbedingungen aendern. Es gilt jeweils die auf unserer Website veroeffentlichte aktuelle
+              Fassung.
             </p>
 
             <p style={{ marginTop: 32, fontSize: 13, color: T.faint, textAlign: "center" }}>
-              LV Scope | lvscope.de | Stand: März 2026
+              LV Scope | lvscope.de | Stand: April 2026
             </p>
             <p style={{ marginTop: 16, fontSize: 12, color: T.faint, textAlign: "center" }}>
               <Link href="/agb" style={{ color: T.muted, textDecoration: "underline" }}>
