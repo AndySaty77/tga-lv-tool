@@ -29,12 +29,37 @@ export function parseXml(raw: string, opts?: ParseXmlOpts): GaebParseResult {
   let structureConfidence = 0.5;
 
   try {
-    // Einfache Regex-basierte Extraktion (ohne DOM-Parser für Edge/Node-Kompatibilität)
+    const extractTagValue = (xml: string, tagName: string): string => {
+      const re = new RegExp(`<(?:[a-zA-Z_][\\w.-]*:)?${tagName}[^>]*>([\\s\\S]*?)<\\/(?:[a-zA-Z_][\\w.-]*:)?${tagName}>`, "i");
+      const m = xml.match(re);
+      if (!m?.[1]) return "";
+      return stripHtml(m[1]).replace(/\s+/g, " ").trim();
+    };
+
+    const lblPrj = extractTagValue(rawNorm, "LblPrj");
+    const namePrj = extractTagValue(rawNorm, "NamePrj");
+    const prjName = extractTagValue(rawNorm, "PrjName");
+    const projectNameTag = extractTagValue(rawNorm, "ProjectName");
     const projectMatch = rawNorm.match(/<Project[^>]*>[\s\S]*?<Name>([^<]*)<\/Name>/i)
       || rawNorm.match(/<ProjectName>([^<]*)<\/ProjectName>/i)
       || rawNorm.match(/<Bezeichnung>([^<]*)<\/Bezeichnung>/i);
+
+    // LblPrj ist für Anzeigenamen i.d.R. die bessere Quelle als NamePrj (oft nur numerische Projektnummer).
+    const metaProjectName =
+      (lblPrj && lblPrj.trim()) ||
+      (prjName && prjName.trim()) ||
+      (projectNameTag && projectNameTag.trim()) ||
+      (namePrj && !/^\d{1,12}$/.test(namePrj.trim()) ? namePrj.trim() : "") ||
+      (projectMatch?.[1]?.trim() ?? "");
+
+    if (metaProjectName) meta.projectName = metaProjectName;
+    if (namePrj) (meta as GaebParseMeta & { namePrj?: string }).namePrj = namePrj;
+    if (lblPrj) (meta as GaebParseMeta & { lblPrj?: string }).lblPrj = lblPrj;
+    if (prjName) (meta as GaebParseMeta & { prjName?: string }).prjName = prjName;
+    if (projectNameTag) (meta as GaebParseMeta & { projectNameTag?: string }).projectNameTag = projectNameTag;
+
+    // Einfache Regex-basierte Extraktion (ohne DOM-Parser für Edge/Node-Kompatibilität)
     if (projectMatch) {
-      meta.projectName = projectMatch[1].trim();
       meta.projectId = rawNorm.match(/<ProjectId>([^<]*)<\/ProjectId>/i)?.[1]?.trim();
     }
 

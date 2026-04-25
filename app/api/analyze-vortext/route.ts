@@ -758,7 +758,7 @@ async function llmRepairKeyFacts(vortext: string, keyFacts: KeyFacts): Promise<K
 STRUKTUR: Oft Metadaten am Anfang (Projektname, "4200 Heizungsarbeiten", Datum), dann Anlagenbeschreibung, dann VERTRAGSBEDINGUNGEN.
 
 KORREKTUR-REGELN:
-- bauvorhaben: KURZER Projektname (z. B. "Neubau Rettungszentrum Sulzburg"), NICHT lange Beschreibung
+- bauvorhaben: KURZER Projektname (z. B. "Neubau Rettungszentrum"), NICHT lange Beschreibung
 - gewerk: Aus Gewerk-Code/Überschrift (z. B. "4200 Heizungsarbeiten" → "Heizung")
 - vertragsgrundlagen / vob_bgb: "VOB, Teile A, B und C" aus Vertragsbedingungen
 - baubeginn, fertigstellung, bauzeit, ausfuehrungsfrist: Datum, Frist oder kurzer Verweis (z. B. "Siehe Terminplan"). NICHT prozeduraler Text ("entnommen werden", "vorzulegen", "zu bestätigen", "der die zeitliche Abfolge koordiniert")
@@ -1262,6 +1262,250 @@ type ExtractionDebugEntry = {
   llmRawValue?: string;
 };
 
+type ProjectNameDebugEntry = {
+  value: string;
+  source: "manual" | "gaeb-prjinfo" | "vortext-label" | "structured-head" | "llm" | "filename" | "none";
+  allCandidates: Array<{
+    value: string;
+    source: string;
+    rawEvidence: string;
+    cleanedValue: string;
+    accepted: boolean;
+    rejectionReason?: string;
+    evidenceFoundInCurrentText: boolean;
+  }>;
+  rawEvidence: string[];
+  cleanedValue: string;
+  accepted: boolean;
+  rejectionReason?: string;
+  evidenceFoundInCurrentText: boolean;
+  rejectedCandidates: Array<{ value: string; source: string; reason: string; rawEvidence?: string }>;
+  finalReason: string;
+  normalizedVortextFirstLines?: string[];
+  extractedGaebPrjInfo?: Record<string, string>;
+  foundLblPrj?: string;
+  labelLineMatches?: string[];
+  nextLineCandidates?: string[];
+  finalSelectedCandidate?: string;
+};
+
+function normalizeForEvidence(input: string): string {
+  return (input ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[–—−]/g, "-")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function evidenceTokens(input: string): string[] {
+  const STOP = new Set([
+    "und",
+    "der",
+    "die",
+    "das",
+    "ein",
+    "eine",
+    "dem",
+    "den",
+    "des",
+    "im",
+    "in",
+    "am",
+    "an",
+    "zu",
+    "vom",
+    "von",
+    "mit",
+    "fuer",
+    "fur",
+    "bei",
+    "oder",
+  ]);
+  return normalizeForEvidence(input)
+    .split(" ")
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 4 && !STOP.has(t));
+}
+
+function findProjectNameEvidence(
+  candidate: string,
+  sources: Array<{ text: string; label: string }>
+): { found: boolean; evidence: string[] } {
+  const c = (candidate ?? "").trim();
+  if (!c) return { found: false, evidence: [] };
+  const cNorm = normalizeForEvidence(c);
+  if (!cNorm) return { found: false, evidence: [] };
+
+  const evidence: string[] = [];
+  const tokens = evidenceTokens(c);
+
+  for (const src of sources) {
+    const sNorm = normalizeForEvidence(src.text ?? "");
+    if (!sNorm) continue;
+
+    if (sNorm.includes(cNorm)) {
+      evidence.push(`exact:${src.label}`);
+      continue;
+    }
+
+    if (tokens.length >= 2) {
+      const hitCount = tokens.filter((t) => sNorm.includes(t)).length;
+      const ratio = hitCount / tokens.length;
+      if (hitCount >= 2 && ratio >= 0.7) {
+        evidence.push(`token-match:${src.label}`);
+      }
+    }
+  }
+
+  return { found: evidence.length > 0, evidence };
+}
+
+const PROJECT_LABEL_RE =
+  /^\s*(?:[-*•]\s*)?(bauvorhaben|baumassnahme|baumaßnahme|bauprojekt|projektname|projekt|objektbezeichnung|objekt|maßnahme|massnahme|vergabe|ausschreibung)\s*[:\-]?\s*(.*)\s*$/i;
+const STRONG_NEXT_LABEL_RE =
+  /^\s*(?:[-*•]\s*)?(bauherr|auftraggeber|ag|ort|standort|gewerk|frist|bindefrist|submission|einreichung|ausfuhrungsbeginn|ausführungsbeginn|baubeginn|fertigstellung|vob|vertragsgrundlagen?|lv[-\s]*nr|leistungsverzeichnis)\b/i;
+const GENERIC_PROJECTNAME_TERMS = new Set([
+  "projekt",
+  "bauvorhaben",
+  "baumassnahme",
+  "baumaßnahme",
+  "bauprojekt",
+  "neubau",
+  "sanierung",
+  "lv",
+  "leistungsverzeichnis",
+]);
+
+function normalizeProjectNameCandidate(raw: string): string {
+  return (raw ?? "")
+    .replace(/^[\s"'`„“‚‘:;,.!?\-–—]+/, "")
+    .replace(/[\s"'`„“‚‘:;,.!?\-–—]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isGenericProjectNameCandidate(v: string): boolean {
+  const n = normalizeForEvidence(v);
+  if (!n) return true;
+  if (n.length < 8) return true;
+  if (GENERIC_PROJECTNAME_TERMS.has(n)) return true;
+  return false;
+}
+
+function extractProjectNameCandidatesFromText(
+  text: string
+): Array<{ value: string; source: "vortext-label"; rawEvidence: string }> {
+  const lines = (text ?? "").split(/\r?\n/);
+  const out: Array<{ value: string; source: "vortext-label"; rawEvidence: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = (lines[i] ?? "").trim();
+    if (!line) continue;
+    const m = line.match(PROJECT_LABEL_RE);
+    if (!m) continue;
+    const inline = normalizeProjectNameCandidate(m[2] ?? "");
+    if (inline && !isGenericProjectNameCandidate(inline)) {
+      out.push({ value: inline, source: "vortext-label", rawEvidence: line });
+      continue;
+    }
+    // Label auf eigener Zeile -> nächste sinnvolle Zeile als Wert.
+    for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
+      const next = (lines[j] ?? "").trim();
+      if (!next) continue;
+      if (STRONG_NEXT_LABEL_RE.test(next)) break;
+      const c = normalizeProjectNameCandidate(next);
+      if (c && !isGenericProjectNameCandidate(c)) {
+        out.push({ value: c, source: "vortext-label", rawEvidence: `${line} | ${next}` });
+      }
+      break;
+    }
+  }
+  return out;
+}
+
+function normalizeHtmlXmlToLineText(input: string): string {
+  const raw = (input ?? "").toString();
+  if (!raw.trim()) return "";
+  let s = raw;
+  s = s
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<\/tr>/gi, "\n")
+    .replace(/<\/(?:Paragraph|P|Li|Dd|Dt|Heading|H[1-6])>/gi, "\n");
+  s = s
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)));
+  s = s.replace(/<[^>]+>/g, " ");
+  const lines = s
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  return lines.join("\n");
+}
+
+function collectGaebProjectNameCandidates(
+  input: unknown
+): Array<{ value: string; source: "gaeb-prjinfo"; rawEvidence: string }> {
+  const wanted = [
+    "lblprj",
+    "nameprj",
+    "prjname",
+    "projectname",
+    "projektbezeichnung",
+    "vergabebezeichnung",
+    "objektbezeichnung",
+    "baumassnahme",
+    "baumaßnahme",
+    "bauvorhaben",
+  ];
+  const out: Array<{ value: string; source: "gaeb-prjinfo"; rawEvidence: string }> = [];
+  const seen = new Set<string>();
+
+  const walk = (node: unknown, path: string, depth: number) => {
+    if (depth > 4 || node == null) return;
+    if (typeof node === "string") return;
+    if (Array.isArray(node)) {
+      node.forEach((v, i) => walk(v, `${path}[${i}]`, depth + 1));
+      return;
+    }
+    if (typeof node !== "object") return;
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      const keyNorm = normalizeForEvidence(k).replace(/\s+/g, "");
+      const nextPath = path ? `${path}.${k}` : k;
+      const matches = wanted.some((w) => keyNorm.includes(normalizeForEvidence(w).replace(/\s+/g, "")));
+      if (matches && typeof v === "string") {
+        const c = normalizeProjectNameCandidate(v);
+        const isProjectNumberOnly =
+          keyNorm.includes("nameprj") && /^\d{1,12}$/.test(c);
+        if (c && !isGenericProjectNameCandidate(c) && !isProjectNumberOnly) {
+          const dedupe = normalizeForEvidence(c);
+          if (!seen.has(dedupe)) {
+            seen.add(dedupe);
+            out.push({ value: c, source: "gaeb-prjinfo", rawEvidence: `${nextPath}=${v}` });
+          }
+        }
+      }
+      walk(v, nextPath, depth + 1);
+    }
+  };
+
+  walk(input, "", 0);
+  return out;
+}
+
 /** KeyFacts aus normalisierter Struktur extrahieren. Stufe A: label-basiert (5 Felder); Stufe B: Heuristik. */
 function extractKeyFactsFromNormalized(normalized: NormalizedPayload): {
   keyFacts: KeyFacts;
@@ -1433,6 +1677,10 @@ export async function POST(req: Request) {
 
     const body = await req.json().catch(() => ({}));
     const vortext = sanitizeVortext((body?.text ?? "").toString());
+    const gaebProjectContextRaw =
+      body?.projectNameContext && typeof body.projectNameContext === "object"
+        ? (body.projectNameContext as Record<string, unknown>)
+        : null;
 
     const rawSrc = body?.vortextSource && typeof body.vortextSource === "object" ? body.vortextSource : null;
     const srcTypeOk = rawSrc && ["normalized-global-remarks", "normalized-top-label", "normalized-groups", "normalized-group-remarks", "normalized-items", "displayNodes", "legacy-preface-text", "legacy-cleaned-text", "raw-text"].includes(rawSrc.sourceTextType);
@@ -1465,6 +1713,7 @@ export async function POST(req: Request) {
     const mergeWinnerPerField: Record<string, string> = {};
     const overwrittenByLegacy: Record<string, boolean> = {};
     const previousValueBeforeLegacyMerge: Record<string, string> = {};
+    const projectNameRejectedCandidates: Array<{ value: string; source: string; reason: string; rawEvidence?: string }> = [];
 
     if (useNormalizedStructure) {
       const normalized = body.normalized as NormalizedPayload;
@@ -1741,6 +1990,208 @@ export async function POST(req: Request) {
       mergeWinnerPerField[field] = keyFactsSourceByField[field]?.sourcePath ?? "unknown";
     }
 
+    // Projektname/Bauvorhaben: generische Kandidatenermittlung + Evidence-Gate.
+    const evidenceSources: Array<{ text: string; label: string }> = [
+      { text: legacyVortext, label: "legacy-vortext" },
+      { text: String(body?.text ?? ""), label: "request-vortext" },
+      { text: String(body?.scoreContext?.positionsHead ?? ""), label: "score-positions-head" },
+      { text: String(body?.projectNameContext?.currentLvText ?? ""), label: "current-lv-text" },
+      ...(useNormalizedStructure && body?.normalized && typeof body.normalized === "object"
+        ? [
+            {
+              text: Array.isArray((body.normalized as NormalizedPayload).globalRemarks)
+                ? ((body.normalized as NormalizedPayload).globalRemarks ?? []).join("\n")
+                : "",
+              label: "normalized-global-remarks",
+            },
+            {
+              text: ((body.normalized as NormalizedPayload).topLabelForPreface ?? "").toString(),
+              label: "normalized-top-label",
+            },
+            {
+              text: Array.isArray((body.normalized as NormalizedPayload).groups)
+                ? (((body.normalized as NormalizedPayload).groups ?? [])
+                    .map((g) => (g?.label ?? "").toString())
+                    .join("\n"))
+                : "",
+              label: "normalized-groups",
+            },
+          ]
+        : []),
+    ];
+    const gaebCandidates = collectGaebProjectNameCandidates(gaebProjectContextRaw);
+    const normalizedVortextForLabels = normalizeHtmlXmlToLineText(
+      String(body?.projectNameContext?.currentLvText ?? legacyVortext ?? "")
+    );
+    const labelCandidates = extractProjectNameCandidatesFromText(normalizedVortextForLabels);
+    const labelLineMatches = normalizedVortextForLabels
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => PROJECT_LABEL_RE.test(l))
+      .slice(0, 30);
+    const nextLineCandidates = labelCandidates.map((c) => c.value).slice(0, 30);
+    const extractedGaebPrjInfo = gaebCandidates.reduce<Record<string, string>>((acc, c) => {
+      const m = c.rawEvidence.match(/([^.=]+)=/);
+      const key = m?.[1]?.split(".").pop()?.trim() ?? "unknown";
+      if (!acc[key]) acc[key] = c.value;
+      return acc;
+    }, {});
+    const foundLblPrj =
+      extractedGaebPrjInfo.LblPrj ??
+      extractedGaebPrjInfo.lblPrj ??
+      extractedGaebPrjInfo.LBLPRJ ??
+      "";
+    const existingCandidate = String(keyFacts.bauvorhaben ?? "").trim();
+    const existingSourcePath = keyFactsSourceByField.bauvorhaben?.sourcePath ?? "unknown";
+    const fallbackCandidate =
+      existingCandidate.length > 0
+        ? [{
+            value: existingCandidate,
+            source:
+              existingSourcePath === "llm-fallback" || keyFactsExtractionDebug.bauvorhaben?.extractionMode === "llm"
+                ? "llm"
+                : (existingSourcePath.startsWith("normalized") ? "structured-head" : "vortext-label"),
+            rawEvidence: keyFactsExtractionDebug.bauvorhaben?.rawMatchedText ?? existingSourcePath,
+          }]
+        : [];
+
+    const rankedCandidates = [...gaebCandidates, ...labelCandidates, ...fallbackCandidate];
+    let projectNameDebug: ProjectNameDebugEntry = {
+      value: "",
+      source: "none",
+      allCandidates: [],
+      rawEvidence: [],
+      cleanedValue: "",
+      accepted: false,
+      evidenceFoundInCurrentText: false,
+      rejectedCandidates: projectNameRejectedCandidates,
+      finalReason: "no_project_name_detected",
+      normalizedVortextFirstLines: normalizedVortextForLabels.split(/\r?\n/).slice(0, 30),
+      extractedGaebPrjInfo,
+      foundLblPrj: foundLblPrj || undefined,
+      labelLineMatches,
+      nextLineCandidates,
+    };
+    delete keyFacts.bauvorhaben;
+    delete keyFactsSourceByField.bauvorhaben;
+    delete keyFactsExtractionDebug.bauvorhaben;
+
+    const debugCandidates: ProjectNameDebugEntry["allCandidates"] = [];
+    for (const cand of rankedCandidates) {
+      const cleaned = normalizeProjectNameCandidate(cand.value);
+      if (!cleaned) continue;
+      if (isGenericProjectNameCandidate(cleaned)) {
+        projectNameRejectedCandidates.push({
+          value: cleaned,
+          source: cand.source,
+          reason: "generic_or_too_short",
+          rawEvidence: cand.rawEvidence,
+        });
+        debugCandidates.push({
+          value: cleaned,
+          source: cand.source,
+          rawEvidence: cand.rawEvidence,
+          cleanedValue: normalizeForEvidence(cleaned),
+          accepted: false,
+          rejectionReason: "generic_or_too_short",
+          evidenceFoundInCurrentText: false,
+        });
+        continue;
+      }
+      const ev = findProjectNameEvidence(cleaned, [
+        ...evidenceSources,
+        { text: cand.rawEvidence ?? "", label: `raw:${cand.source}` },
+      ]);
+      if (!ev.found) {
+        projectNameRejectedCandidates.push({
+          value: cleaned,
+          source: cand.source,
+          reason: "missing_evidence_in_current_input",
+          rawEvidence: cand.rawEvidence,
+        });
+        debugCandidates.push({
+          value: cleaned,
+          source: cand.source,
+          rawEvidence: cand.rawEvidence,
+          cleanedValue: normalizeForEvidence(cleaned),
+          accepted: false,
+          rejectionReason: "missing_evidence_in_current_input",
+          evidenceFoundInCurrentText: false,
+        });
+        continue;
+      }
+
+      keyFacts.bauvorhaben = cleaned;
+      keyFactsSourceByField.bauvorhaben = {
+        sourceTextType: "normalized-top-label",
+        sourcePath: cand.source === "gaeb-prjinfo" ? "gaeb-prjinfo" : cand.source === "structured-head" ? "normalized-head" : "vortext-label",
+      };
+      keyFactsExtractionDebug.bauvorhaben = {
+        extractionMode: cand.source === "llm" ? "llm" : "label",
+        rawMatchedText: cand.rawEvidence,
+        cleanedCandidateValue: cleaned,
+      };
+      debugCandidates.push({
+        value: cleaned,
+        source: cand.source,
+        rawEvidence: cand.rawEvidence,
+        cleanedValue: normalizeForEvidence(cleaned),
+        accepted: true,
+        evidenceFoundInCurrentText: true,
+      });
+      projectNameDebug = {
+        value: cleaned,
+        source: (cand.source === "gaeb-prjinfo" || cand.source === "vortext-label" || cand.source === "structured-head" || cand.source === "llm")
+          ? cand.source
+          : "none",
+        allCandidates: debugCandidates,
+        rawEvidence: [cand.rawEvidence, ...ev.evidence],
+        cleanedValue: normalizeForEvidence(cleaned),
+        accepted: true,
+        evidenceFoundInCurrentText: true,
+        rejectedCandidates: projectNameRejectedCandidates,
+        normalizedVortextFirstLines: normalizedVortextForLabels.split(/\r?\n/).slice(0, 30),
+        extractedGaebPrjInfo,
+        foundLblPrj: foundLblPrj || undefined,
+        labelLineMatches,
+        nextLineCandidates,
+        finalSelectedCandidate: cleaned,
+        finalReason:
+          cand.source === "gaeb-prjinfo"
+            ? "accepted_from_gaeb_project_metadata"
+            : cand.source === "vortext-label"
+              ? "accepted_from_vortext_label"
+              : cand.source === "structured-head"
+                ? "accepted_from_structured_head"
+                : "accepted_llm_with_evidence",
+      };
+      break;
+    }
+
+    if (!keyFacts.bauvorhaben) {
+      projectNameDebug = {
+        value: "",
+        source: "none",
+        allCandidates: debugCandidates,
+        rawEvidence: [],
+        cleanedValue: "",
+        accepted: false,
+        rejectionReason: projectNameRejectedCandidates.length > 0 ? "all_candidates_rejected" : "no_candidate_found",
+        evidenceFoundInCurrentText: false,
+        rejectedCandidates: projectNameRejectedCandidates,
+        normalizedVortextFirstLines: normalizedVortextForLabels.split(/\r?\n/).slice(0, 30),
+        extractedGaebPrjInfo,
+        foundLblPrj: foundLblPrj || undefined,
+        labelLineMatches,
+        nextLineCandidates,
+        finalReason: projectNameRejectedCandidates.length > 0 ? "all_candidates_rejected_by_evidence_gate" : "no_project_name_detected",
+      };
+    } else {
+      // Falls vorher schon akzeptiert, Debug-Kandidaten vervollständigen.
+      projectNameDebug.allCandidates = debugCandidates;
+    }
+
+
     // Kern V1: lv_strukturgroesse und vorbemerkungsumfang serverseitig setzen (nicht aus Text extrahiert)
     if (useNormalizedStructure && body?.normalized && Array.isArray((body.normalized as NormalizedPayload).groups)) {
       const groupCount = (body.normalized as NormalizedPayload).groups.length;
@@ -1847,6 +2298,7 @@ export async function POST(req: Request) {
           repairApplied: true,
           keyFactsSourceMode,
           keyFactsWithSource: keyFactsWithSourceForClient,
+          projectName: projectNameDebug,
           keyFactsValidated,
           llmFallbackUsed,
           llmFieldsRequested,

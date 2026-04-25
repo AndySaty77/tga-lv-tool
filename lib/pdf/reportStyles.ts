@@ -109,36 +109,65 @@ export const reportStyles = `
   .kpi-panel {
     display: flex;
     flex-wrap: wrap;
+    align-items: stretch;
     gap: 8pt;
-    margin-bottom: 12pt;
+    margin-bottom: 8pt;
     page-break-inside: avoid;
   }
+  .kpi-panel-bottom {
+    margin-bottom: 12pt;
+  }
   .kpi-card {
-    flex: 1 1 110pt;
+    flex: 1 1 calc(33.333% - 6pt);
     min-width: 0;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    min-height: 64pt;
+    justify-content: flex-start;
     padding: 8pt 10pt;
     background: #f7f7f7;
     border-radius: 4pt;
     border: 1pt solid #e5e5e5;
+    overflow: visible;
     page-break-inside: avoid;
   }
+  .kpi-panel-bottom .kpi-card {
+    flex-basis: calc(50% - 4pt);
+  }
   .kpi-card .kpi-label {
-    font-size: 8pt;
+    font-size: 7.2pt;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: #666;
-    margin-bottom: 2pt;
+    margin-bottom: 3pt;
+    line-height: 1.25;
+    max-width: 100%;
+    word-break: normal;
+    overflow-wrap: break-word;
+    hyphens: manual;
   }
   .kpi-card .kpi-value {
-    font-size: 11pt;
+    font-size: 11.4pt;
     font-weight: 700;
     color: #1a1a1a;
+    line-height: 1.3;
+    max-width: 100%;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    hyphens: manual;
   }
   .kpi-card .kpi-sub {
-    font-size: 8pt;
-    color: #555;
+    font-size: 7.6pt;
+    color: #6f6f6f;
     margin-top: 4pt;
-    line-height: 1.35;
+    line-height: 1.3;
+    max-width: 100%;
+    max-height: 2.6em;
+    word-break: normal;
+    overflow-wrap: break-word;
+    hyphens: manual;
   }
 
   .section {

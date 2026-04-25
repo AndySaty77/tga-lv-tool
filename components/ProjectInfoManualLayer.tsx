@@ -21,9 +21,9 @@ function compactSourceLabel(source: ManualValueSource): string {
     case "lv":
       return "Aus LV";
     case "manual_fill":
-      return "Manuell ergänzt";
+      return "Manuell";
     case "manual_override":
-      return "Überschrieben";
+      return "Manuell";
     case "none":
       return "Nicht erkannt";
     default:

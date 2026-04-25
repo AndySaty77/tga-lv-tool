@@ -157,6 +157,13 @@ function trafficLightLabel(t: "green" | "yellow" | "red"): string {
   return "Kritisch";
 }
 
+function riskColorForScoreInDetail(score: number): string {
+  const v = Math.max(0, Math.min(100, Number.isFinite(score) ? score : 0));
+  if (v >= 70) return T.danger;
+  if (v >= 40) return T.warning;
+  return "#22c55e";
+}
+
 /** Einheitliche Fläche für Arbeitsblöcke (heller als reine Engine-Karten). */
 function workSurfaceStyle(): React.CSSProperties {
   return {
@@ -861,6 +868,60 @@ export function DetailContent({ id, canPdfExport = true }: { id: string; canPdfE
             ) : null}
             {scoreMeta ? (
               <p style={{ margin: "10px 0 0", fontSize: 13, color: T.muted, lineHeight: 1.55 }}>{scoreMeta.description}</p>
+            ) : null}
+            {categoryScores.length > 0 ? (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: T.faint,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: 8,
+                  }}
+                >
+                  Risikoprofil
+                </div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {([
+                    ["vertrags_lv_risiken", "Vertrag"],
+                    ["mengen_massenermittlung", "Mengen"],
+                    ["technische_vollstaendigkeit", "Technik"],
+                    ["schnittstellen_nebenleistungen", "Schnittstellen"],
+                    ["kalkulationsunsicherheit", "Kalkulation"],
+                  ] as const).map(([key, shortLabel]) => {
+                    const row = categoryScores.find((c) => c.key === key);
+                    const val = Math.max(0, Math.min(100, Number(row?.score ?? 0)));
+                    const color = riskColorForScoreInDetail(val);
+                    return (
+                      <div
+                        key={key}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "minmax(96px, 120px) 1fr auto",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{shortLabel}</div>
+                        <div
+                          aria-hidden
+                          style={{
+                            height: 6,
+                            borderRadius: 999,
+                            background: "rgba(148, 163, 184, 0.2)",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div style={{ width: `${val}%`, height: "100%", background: color }} />
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color }}>{Math.round(val)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             ) : null}
           </div>
         </div>

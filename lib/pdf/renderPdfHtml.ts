@@ -177,20 +177,32 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
         );
       }
       if (claimLevel) {
+        const claimScore =
+          claimPotential?.score != null && Number.isFinite(Number(claimPotential.score))
+            ? `${Math.round(Number(claimPotential.score))}/100`
+            : "";
+        const claimValue = claimScore ? `${claimLevel} · ${claimScore}` : claimLevel;
         parts.push(
-          '<div class="kpi-card"><div class="kpi-label">Claim-/Nachtragspotenzial</div><div class="kpi-value">' +
-            escapeHtml(claimLevel) +
+          '<div class="kpi-card"><div class="kpi-label">Nachtragspotenzial</div><div class="kpi-value">' +
+            escapeHtml(claimValue) +
+            '</div><div class="kpi-sub">Claim- und Nachtragsbewertung</div>' +
             "</div></div>"
         );
       }
+      parts.push("</div>");
+      parts.push('<div class="kpi-panel kpi-panel-bottom">');
       if (qTotal != null && qTotal > 0 && qDedup != null) {
         parts.push(
-          '<div class="kpi-card"><div class="kpi-label">Rückfragen (erkannt / verdichtet)</div><div class="kpi-value">' +
+          '<div class="kpi-card"><div class="kpi-label">Rückfragen</div><div class="kpi-value">' +
             escapeHtml(`${qTotal} / ${qDedup}`) +
             "</div>" +
-            (qPri != null && qPri > 0
-              ? '<div class="kpi-sub">' + escapeHtml(`Handlungsfokus bis zu ${qPri} priorisiert`) + "</div>"
-              : "") +
+            '<div class="kpi-sub">' +
+            escapeHtml(
+              qPri != null && qPri > 0
+                ? `erkannt / verdichtet · Handlungsfokus bis ${qPri}`
+                : "erkannt / verdichtet"
+            ) +
+            "</div>" +
             "</div>"
         );
       } else if (questionCount > 0) {
@@ -202,12 +214,16 @@ export function renderPdfHtml(report: AnalysisPdfReport): string {
       }
       if (cTotal != null && cTotal > 0 && cDedup != null) {
         parts.push(
-          '<div class="kpi-card"><div class="kpi-label">Klarstellungen (erkannt / verdichtet)</div><div class="kpi-value">' +
+          '<div class="kpi-card"><div class="kpi-label">Klarstellungen</div><div class="kpi-value">' +
             escapeHtml(`${cTotal} / ${cDedup}`) +
             "</div>" +
-            (cPri != null && cPri > 0
-              ? '<div class="kpi-sub">' + escapeHtml(`Fokus bis zu ${cPri} priorisiert`) + "</div>"
-              : "") +
+            '<div class="kpi-sub">' +
+            escapeHtml(
+              cPri != null && cPri > 0
+                ? `erkannt / verdichtet · Fokus bis ${cPri}`
+                : "erkannt / verdichtet"
+            ) +
+            "</div>" +
             "</div>"
         );
       } else if (clarificationCount > 0) {

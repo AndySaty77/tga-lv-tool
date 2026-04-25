@@ -707,6 +707,14 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
     mergeWinnerPerField?: Record<string, string>;
     overwrittenByLegacy?: Record<string, boolean>;
     previousValueBeforeLegacyMerge?: Record<string, string>;
+    projectName?: {
+      value?: string;
+      source?: string;
+      evidence?: string[];
+      evidenceFoundInCurrentText?: boolean;
+      rejectedCandidates?: Array<{ value?: string; source?: string; reason?: string }>;
+      finalReason?: string;
+    };
   } | null>(null);
 
   // Nur Admin/Debug: expliziter Toggle für V2-Anzeige im Nachtrag-Tab.
@@ -1006,7 +1014,13 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
     vortext: string,
     vortextSource?: VortextSource,
     options?: { normalized?: NormalizedPayload; formatDetected?: string },
-    scoreSync?: { disciplineKeys?: string[]; projectName?: string; fileName?: string; positionsHead?: string }
+    scoreSync?: { disciplineKeys?: string[]; projectName?: string; fileName?: string; positionsHead?: string },
+    projectNameContext?: {
+      gaebProjectName?: string;
+      fileName?: string;
+      gaebMeta?: Record<string, unknown>;
+      currentLvText?: string;
+    }
   ): Promise<VortextResult | null> => {
     setVortextLoading(true);
     setVortextError(null);
@@ -1030,6 +1044,22 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
           ...(scoreSync.projectName ? { projectName: scoreSync.projectName } : {}),
           ...(scoreSync.fileName ? { fileName: scoreSync.fileName } : {}),
           ...(scoreSync.positionsHead ? { positionsHead: scoreSync.positionsHead } : {}),
+        };
+      }
+      if (
+        projectNameContext &&
+        (
+          projectNameContext.gaebProjectName ||
+          projectNameContext.fileName ||
+          projectNameContext.gaebMeta ||
+          projectNameContext.currentLvText
+        )
+      ) {
+        body.projectNameContext = {
+          ...(projectNameContext.gaebProjectName ? { gaebProjectName: projectNameContext.gaebProjectName } : {}),
+          ...(projectNameContext.fileName ? { fileName: projectNameContext.fileName } : {}),
+          ...(projectNameContext.gaebMeta ? { gaebMeta: projectNameContext.gaebMeta } : {}),
+          ...(projectNameContext.currentLvText ? { currentLvText: projectNameContext.currentLvText } : {}),
         };
       }
       const vortextApiDebug =
@@ -1078,6 +1108,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
               mergeWinnerPerField: vData.keyFactsDebug.mergeWinnerPerField,
               overwrittenByLegacy: vData.keyFactsDebug.overwrittenByLegacy,
               previousValueBeforeLegacyMerge: vData.keyFactsDebug.previousValueBeforeLegacyMerge,
+              projectName: vData.keyFactsDebug.projectName,
               keyFactsWithSource: Array.isArray(vData.keyFactsDebug.keyFactsWithSource)
                 ? vData.keyFactsDebug.keyFactsWithSource
                 : undefined,
@@ -1247,7 +1278,19 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             projectName: projectNameForScore || undefined,
             fileName: effectiveSourceFileNameForScore || undefined,
             positionsHead: positionsForDiscipline ? positionsForDiscipline.slice(0, 12_000) : undefined,
-          }
+          },
+          {
+            gaebProjectName:
+              typeof preview?.structure?.meta?.projectName === "string"
+                ? String(preview.structure.meta.projectName).trim()
+                : undefined,
+            fileName: effectiveSourceFileNameForScore || undefined,
+            gaebMeta:
+              preview?.structure?.meta && typeof preview.structure.meta === "object"
+                ? (preview.structure.meta as Record<string, unknown>)
+                : undefined,
+            currentLvText: textToUse || undefined,
+          },
         );
       } else {
         setVortextError("Vortext ist leer (Split/Extraktion hat nichts geliefert).");
@@ -1257,27 +1300,11 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
       if (props.customerRoute && data) {
         try {
           const kf = vortextResult?.keyFacts ?? {};
-          const nameKeysInOrder = [
-            "objektbezeichnung",
-            "projektbezeichnung",
-            "bauvorhaben",
-            "projekt",
-            "objekt",
-            "titel",
-            "lvTitel",
-            "bezeichnung",
-          ];
-          let nameFromKeyFacts: string | null = null;
-          for (const key of nameKeysInOrder) {
-            const raw = (kf as Record<string, unknown>)[key];
-            if (typeof raw === "string") {
-              const trimmed = raw.trim();
-              if (trimmed) {
-                nameFromKeyFacts = trimmed;
-                break;
-              }
-            }
-          }
+          const manualProjectName = manualProjectData?.projektname?.manualValue?.trim() || null;
+          const nameFromCurrentKeyFacts =
+            typeof (kf as Record<string, unknown>).bauvorhaben === "string"
+              ? String((kf as Record<string, unknown>).bauvorhaben).trim() || null
+              : null;
 
           // Wichtig: fileMeta/lastFile sind im selben Takt wie setFileMeta noch stale (Closure vor Re-Render).
           // Dateiname daher immer aus options.sourceFileName (loadFile) oder Fallback nach State.
@@ -1286,9 +1313,7 @@ export function ScorePage(props: { customerRoute?: boolean; plan?: PlanId; isAdm
             (typeof fileMeta?.name === "string" && fileMeta.name.trim() ? fileMeta.name.trim() : null) ??
             (typeof lastFile?.name === "string" && lastFile.name.trim() ? lastFile.name.trim() : null);
 
-          const projectName =
-            nameFromKeyFacts ??
-            (effectiveSourceFileName ?? "Unbenannte Analyse");
+          const projectName = manualProjectName ?? nameFromCurrentKeyFacts ?? (effectiveSourceFileName ?? "Unbenannte Analyse");
 
           const execSummary = (changeOrderAnalysis as ChangeOrderResult | null)?.offerStrategySummary?.executiveSummary;
           const payload = {

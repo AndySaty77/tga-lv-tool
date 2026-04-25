@@ -17,6 +17,17 @@ type Payload = {
   resultJson?: unknown;
 };
 
+function extractProjectNameFromResultJson(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const rj = value as Record<string, unknown>;
+  const keyFacts = rj.keyFacts;
+  if (!keyFacts || typeof keyFacts !== "object" || Array.isArray(keyFacts)) return null;
+  const raw = (keyFacts as Record<string, unknown>).bauvorhaben;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function sanitizeResultJsonForPersistence(value: unknown): unknown {
   if (value == null || typeof value !== "object" || Array.isArray(value)) return value;
   const obj = value as Record<string, unknown>;
@@ -75,7 +86,14 @@ export async function POST(req: Request) {
     }
   }
 
-  const projectName = resolveAnalysisTitleForInsert(body.projectName, body.fileName);
+  const nameFromCurrentResult = extractProjectNameFromResultJson(sanitizedResultJson);
+  const incomingProjectName = typeof body.projectName === "string" ? body.projectName.trim() : "";
+  const incomingFileName = typeof body.fileName === "string" ? body.fileName.trim() : "";
+  const projectNameForInsert =
+    incomingProjectName && incomingProjectName !== incomingFileName
+      ? incomingProjectName
+      : (nameFromCurrentResult ?? incomingProjectName);
+  const projectName = resolveAnalysisTitleForInsert(projectNameForInsert, body.fileName);
 
   const fileName = typeof body.fileName === "string" && body.fileName.trim().length > 0 ? body.fileName.trim() : null;
   const score = body.score != null && Number.isFinite(Number(body.score)) ? Number(body.score) : null;

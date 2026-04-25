@@ -264,7 +264,12 @@ export async function POST(req: Request) {
     .replace(/wc-?container/gi, " ")
     .replace(/baustellenversorgung/gi, " ");
 
-  const det = detectDisciplines(disciplineText);
+  const det = detectDisciplines(disciplineText, {
+    fileName: fileNameForDisciplines,
+    projectName: projectNameForDisciplines,
+    positions,
+    vortext,
+  });
   const allowDisciplines = det.all; // nur primary + secondary
 
   // 2) Trigger filtern: NUR primary+secondary + global
@@ -496,9 +501,17 @@ export async function POST(req: Request) {
               textForAnalysis: textForAnalysis.length,
             },
             disciplineScores: det.scores,
+            matchedSignals: det.debug?.matchedSignals,
+            filenameSignals: det.debug?.filenameSignals,
+            normSignals: det.debug?.normSignals,
+            titleSignals: det.debug?.titleSignals,
+            positionSignals: det.debug?.positionSignals,
+            dampenedSignals: det.debug?.dampenedSignals,
             detectedDisciplines: det.all,
             primaryDiscipline: det.primary,
+            secondaryDiscipline: det.secondary,
             secondaryDisciplines: det.secondary,
+            finalReason: det.debug?.finalReason,
             triggersUsed: useLlmRelevance ? 0 : dbTriggers.length,
             llmMode: useLlmRelevance,
             findingsBeforeLlm,
